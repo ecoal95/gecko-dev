@@ -52,6 +52,8 @@ public:
   void BeginUpdate();
   nsresult EndUpdate();
 
+  void ForceRestyle(nsPresContext* aPresContext);
+
   // resolve a style context
   already_AddRefed<nsStyleContext>
   ResolveStyleFor(dom::Element* aElement,

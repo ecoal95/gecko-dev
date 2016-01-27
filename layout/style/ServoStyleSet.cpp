@@ -64,6 +64,12 @@ ServoStyleSet::EndUpdate()
   return NS_OK;
 }
 
+void
+ServoStyleSet::ForceRestyle(nsPresContext* aPresContext)
+{
+  Servo_RestyleDocument(aPresContext->Document(), mRawSet.get());
+}
+
 // resolve a style context
 already_AddRefed<nsStyleContext>
 ServoStyleSet::ResolveStyleFor(Element* aElement,
