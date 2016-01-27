@@ -908,8 +908,6 @@ HTMLContentSink::OpenBody()
     mUpdatesInNotification = oldUpdates;
   }
 
-  StartLayout(false);
-
   return NS_OK;
 }
 

@@ -221,13 +221,7 @@ nsContentSink::StyleSheetLoaded(StyleSheetHandle aSheet,
       if (mDeferredFlushTags) {
         FlushTags();
       }
-      if (mDeferredLayoutStart) {
-        // We might not have really started layout, since this sheet was still
-        // loading.  Do it now.  Probably doesn't matter whether we do this
-        // before or after we unblock scripts, but before feels saner.  Note
-        // that if mDeferredLayoutStart is true, that means any subclass
-        // StartLayout() stuff that needs to happen has already happened, so we
-        // don't need to worry about it.
+      if (mModelBuilt) {
         StartLayout(false);
       }
 
@@ -1465,6 +1459,8 @@ nsContentSink::EndUpdate(nsIDocument *aDocument, nsUpdateType aUpdateType)
 void
 nsContentSink::DidBuildModelImpl(bool aTerminated)
 {
+  mModelBuilt = true;
+
   if (mDocument) {
     MOZ_ASSERT(aTerminated ||
                mDocument->GetReadyStateEnum() ==
@@ -1489,6 +1485,16 @@ nsContentSink::DidBuildModelImpl(bool aTerminated)
     mNotificationTimer->Cancel();
     mNotificationTimer = 0;
   }	
+
+  if (mPendingSheetCount == 0) {
+    // We might not have really started layout, since this sheet was still
+    // loading.  Do it now.  Probably doesn't matter whether we do this
+    // before or after we unblock scripts, but before feels saner.  Note
+    // that if mDeferredLayoutStart is true, that means any subclass
+    // StartLayout() stuff that needs to happen has already happened, so we
+    // don't need to worry about it.
+    StartLayout(false);
+  }
 }
 
 void
