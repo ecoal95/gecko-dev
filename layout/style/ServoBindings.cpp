@@ -148,6 +148,36 @@ Gecko_SetNodeData(RawGeckoNode* aNode, ServoNodeData* aData)
   aNode->SetServoNodeData(aData);
 }
 
+const char*
+Gecko_GetAttrAsUTF8(RawGeckoElement* aElement, const uint8_t* aNS, const uint8_t* aName, uint32_t* aLength)
+{
+  MOZ_ASSERT(aNS[0] == '\0', "Can't handle namespaces yet");
+  const nsAttrValue* val = aElement->GetParsedAttr(NS_ConvertUTF8toUTF16(nsDependentCString(reinterpret_cast<const char*>(aName))));
+  if (!val) {
+    return nullptr;
+  }
+  *aLength = val->UTF8String().Length();
+  return val->UTF8String().get();
+}
+
+const uint16_t*
+Gecko_LocalName(RawGeckoElement* aElement, uint32_t* aLength)
+{
+  static_assert(sizeof(char16_t) == sizeof(uint16_t), "Servo doesn't know what a char16_t is");
+  *aLength = aElement->LocalName().Length();
+  return reinterpret_cast<const uint16_t*>(aElement->LocalName().get());
+}
+
+const uint16_t*
+Gecko_Namespace(RawGeckoElement* aElement, uint32_t* aLength)
+{
+  static_assert(sizeof(char16_t) == sizeof(uint16_t), "Servo doesn't know what a char16_t is");
+  nsNameSpaceManager* manager = nsContentUtils::NameSpaceManager();
+  const nsString& str = manager->NameSpaceURIRef(aElement->NodeInfo()->NamespaceID());
+  *aLength = str.Length();
+  return reinterpret_cast<const uint16_t*>(str.get());
+}
+
 #ifndef MOZ_STYLO
 void
 Servo_DropNodeData(ServoNodeData* data)

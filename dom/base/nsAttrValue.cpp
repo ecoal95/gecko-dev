@@ -237,6 +237,7 @@ nsAttrValue::Reset()
   }
 
   mBits = 0;
+  mUTF8String.reset();
 }
 
 void
@@ -255,6 +256,7 @@ nsAttrValue::SetTo(const nsAttrValue& aOther)
         str->AddRef();
         SetPtrValueAndType(str, eStringBase);
       }
+      BuildUTF8String();
       return;
     }
     case eOtherBase:
@@ -267,6 +269,7 @@ nsAttrValue::SetTo(const nsAttrValue& aOther)
       nsIAtom* atom = aOther.GetAtomValue();
       NS_ADDREF(atom);
       SetPtrValueAndType(atom, eAtomBase);
+      BuildUTF8String();
       return;
     }
     case eIntegerBase:
@@ -378,6 +381,8 @@ nsAttrValue::SetTo(const nsAString& aValue)
   if (buf) {
     SetPtrValueAndType(buf, eStringBase);
   }
+
+  BuildUTF8String();
 }
 
 void
@@ -388,6 +393,8 @@ nsAttrValue::SetTo(nsIAtom* aValue)
     NS_ADDREF(aValue);
     SetPtrValueAndType(aValue, eAtomBase);
   }
+
+  BuildUTF8String();
 }
 
 void
@@ -568,8 +575,11 @@ void
 nsAttrValue::SwapValueWith(nsAttrValue& aOther)
 {
   uintptr_t tmp = aOther.mBits;
+  mozilla::Maybe<nsCString> tmp2 = aOther.mUTF8String;
   aOther.mBits = mBits;
+  aOther.mUTF8String = mUTF8String;
   mBits = tmp;
+  mUTF8String = tmp2;
 }
 
 void
