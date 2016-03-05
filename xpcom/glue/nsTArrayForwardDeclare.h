@@ -18,7 +18,6 @@
 // yourself, since this header gives us flexibility to e.g. change the default
 // template parameters.
 //
-
 #include <stddef.h>
 
 template<class E>

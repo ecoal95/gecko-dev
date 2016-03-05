@@ -182,10 +182,12 @@ typedef nsAutoString nsVoidableString;
 #include "nsLiteralString.h"
 #include "nsPromiseFlatString.h"
 
+#ifndef MOZ_STYLO_BINDINGS
 // need to include these for backwards compatibility
 #include "nsMemory.h"
 #include <string.h>
 #include <stdio.h>
 #include "plhash.h"
+#endif
 
 #endif // !defined(nsString_h___)

@@ -330,7 +330,7 @@ __declspec(noreturn) __inline void MOZ_NoReturn() {}
  * accidentally passing something unintended in lieu of an assertion condition.
  */
 
-#ifdef __cplusplus
+#if defined(__cplusplus) && !defined(MOZ_STYLO_BINDINGS)
 #  include "mozilla/TypeTraits.h"
 namespace mozilla {
 namespace detail {

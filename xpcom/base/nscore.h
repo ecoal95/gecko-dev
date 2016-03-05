@@ -16,8 +16,10 @@
 #endif
 
 /* Definitions of functions and operators that allocate memory. */
-#if !defined(XPCOM_GLUE) && !defined(NS_NO_XPCOM) && !defined(MOZ_NO_MOZALLOC)
-#  include "mozilla/mozalloc.h"
+#ifndef MOZ_STYLO_BINDINGS
+#  if !defined(XPCOM_GLUE) && !defined(NS_NO_XPCOM) && !defined(MOZ_NO_MOZALLOC)
+#    include "mozilla/mozalloc.h"
+#  endif
 #endif
 
 /**
@@ -27,6 +29,7 @@
 #include <stdint.h>
 
 #include "mozilla/RefCountType.h"
+#include "mozilla/fallible.h"
 
 /* Core XPCOM declarations. */
 

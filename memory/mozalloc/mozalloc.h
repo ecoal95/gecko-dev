@@ -20,7 +20,9 @@
 
 #if defined(__cplusplus)
 #include "mozilla/fallible.h"
+#ifndef MOZ_STYLO_BINDINGS
 #include "mozilla/TemplateLib.h"
+#endif
 #endif
 #include "mozilla/Attributes.h"
 #include "mozilla/Types.h"
