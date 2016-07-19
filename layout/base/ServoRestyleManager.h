@@ -9,10 +9,12 @@
 
 #include "mozilla/EventStates.h"
 #include "mozilla/RestyleManagerBase.h"
+#include "mozilla/ServoElementSnapshot.h"
 #include "nsChangeHint.h"
 #include "nsISupportsImpl.h"
 #include "nsPresContext.h"
 #include "nsINode.h"
+#include "nsHashKeys.h"
 
 namespace mozilla {
 namespace dom {
@@ -68,16 +70,20 @@ public:
   nsresult ReparentStyleContext(nsIFrame* aFrame);
 
   bool HasPendingRestyles() {
-    if (MOZ_UNLIKELY(IsDisconnected())) {
-      return false;
-    }
-    return PresContext()->PresShell()->GetDocument()->HasDirtyDescendantsForServo();
+    // XXX IsEmpty isn't public here, consider implementing it in
+    // nsClassHashTable?
+    return mModifiedElements.Count() != 0;
   }
 
 protected:
   ~ServoRestyleManager() {}
 
 private:
+  /**
+   * The element-to-element snapshot table to compute restyle hints.
+   */
+  nsClassHashtable<nsRefPtrHashKey<Element>,
+                   ServoElementSnapshot> mModifiedElements;
 
   /**
    * Traverses a tree of content that Servo has just restyled, recreating style
@@ -95,7 +101,9 @@ private:
    * Propagates the IS_DIRTY flag down to the tree, setting
    * HAS_DIRTY_DESCENDANTS appropriately.
    */
-  static void DirtyTree(nsIContent* aContent);
+  static void DirtyTree(nsIContent* aContent, bool aIncludingRoot = true);
+
+  static void NoteRestyleHint(Element* aElement, nsRestyleHint aRestyleHint);
 
   inline ServoStyleSet* StyleSet() const {
     MOZ_ASSERT(PresContext()->StyleSet()->IsServo(),
@@ -103,6 +111,14 @@ private:
                "style backend");
     return PresContext()->StyleSet()->AsServo();
   }
+
+  void AddElementSnapshot(Element* aElement,
+                          ServoElementSnapshot::Flags aWhatToCapture);
+
+  void AddElementSnapshot(Element* aElement,
+                          ServoElementSnapshot::Flags aWhatToCapture,
+                          nsRestyleHint aRestyleHint,
+                          nsChangeHint aMinChangeHint);
 };
 
 } // namespace mozilla

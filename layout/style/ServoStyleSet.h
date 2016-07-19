@@ -11,6 +11,7 @@
 #include "mozilla/EventStates.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/ServoBindingHelpers.h"
+#include "mozilla/ServoElementSnapshot.h"
 #include "mozilla/ServoStyleSheet.h"
 #include "mozilla/SheetType.h"
 #include "mozilla/UniquePtr.h"
@@ -119,6 +120,15 @@ public:
                                        mozilla::CSSPseudoElementType aPseudoType,
                                        dom::Element* aPseudoElement,
                                        EventStates aStateMask);
+
+  /**
+   * Computes a restyle hint given a element and a previous element snapshot.
+   */
+  nsRestyleHint ComputeRestyleHint(dom::Element* aElement,
+                                   ServoElementSnapshot* aSnapshot) {
+    // Not yet.
+    return eRestyle_Self;
+  }
 
   /**
    * Restyles a whole subtree of nodes.

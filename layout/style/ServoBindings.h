@@ -12,6 +12,7 @@
 #include "nsStyleStruct.h"
 #include "mozilla/css/SheetParsingMode.h"
 #include "nsProxyRelease.h"
+#include "nsChangeHint.h"
 
 /*
  * API for Servo to access Gecko data structures. This file must compile as valid
@@ -50,6 +51,7 @@ class nsStyleGradient;
 class nsStyleCoord;
 struct nsStyleDisplay;
 struct ServoDeclarationBlock;
+class ServoElementSnapshot;
 
 #define NS_DECL_THREADSAFE_FFI_REFCOUNTING(class_, name_)                     \
   void Gecko_AddRef##name_##ArbitraryThread(class_* aPtr);                    \
@@ -245,6 +247,10 @@ void Servo_Initialize();
 // Restyle the given document or subtree.
 void Servo_RestyleDocument(RawGeckoDocument* doc, RawServoStyleSet* set);
 void Servo_RestyleSubtree(RawGeckoNode* node, RawServoStyleSet* set);
+
+// Restyle hints.
+nsRestyleHint Servo_ComputeRestyleHint(RawGeckoElement* element,
+                                       ServoElementSnapshot* snapshot);
 
 uint32_t Servo_StyleWorkerThreadCount();
 
