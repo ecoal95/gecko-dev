@@ -24,6 +24,7 @@
 
 #include "mozilla/EventStates.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/ServoElementSnapshot.h"
 
 uint32_t
 Gecko_ChildrenCount(RawGeckoNode* aNode)
@@ -183,9 +184,11 @@ Gecko_UnsetNodeFlags(RawGeckoNode* aNode, uint32_t aFlags)
   aNode->UnsetFlags(aFlags);
 }
 
-template<class MatchFn>
+namespace attribute_matching {
+
+template<typename Implementor, typename MatchFn>
 bool
-DoMatch(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName, MatchFn aMatch)
+DoMatch(Implementor* aElement, nsIAtom* aNS, nsIAtom* aName, MatchFn aMatch)
 {
   if (aNS) {
     int32_t ns = nsContentUtils::NameSpaceManager()->GetNameSpaceID(aNS);
@@ -217,16 +220,18 @@ struct FakeRef {
   T* mPtr;
 };
 
+template<typename Implementor>
 bool
-Gecko_HasAttr(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName)
+HasAttr(Implementor* aElement, nsIAtom* aNS, nsIAtom* aName)
 {
   auto match = [](const nsAttrValue* aValue) { return true; };
   return DoMatch(aElement, aNS, aName, match);
 }
 
+template<typename Implementor>
 bool
-Gecko_AttrEquals(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName,
-                 nsIAtom* aStr_, bool aIgnoreCase)
+AttrEquals(Implementor* aElement, nsIAtom* aNS, nsIAtom* aName,
+           nsIAtom* aStr_, bool aIgnoreCase)
 {
   FakeRef<nsIAtom> aStr(aStr_);
   auto match = [aStr, aIgnoreCase](const nsAttrValue* aValue) {
@@ -235,9 +240,10 @@ Gecko_AttrEquals(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName,
   return DoMatch(aElement, aNS, aName, match);
 }
 
+template<typename Implementor>
 bool
-Gecko_AttrDashEquals(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName,
-                     nsIAtom* aStr_)
+AttrDashEquals(Implementor* aElement, nsIAtom* aNS, nsIAtom* aName,
+               nsIAtom* aStr_)
 {
   FakeRef<nsIAtom> aStr(aStr_);
   auto match = [aStr](const nsAttrValue* aValue) {
@@ -249,8 +255,9 @@ Gecko_AttrDashEquals(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName,
   return DoMatch(aElement, aNS, aName, match);
 }
 
+template<typename Implementor>
 bool
-Gecko_AttrIncludes(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName,
+Gecko_AttrIncludes(Implementor* aElement, nsIAtom* aNS, nsIAtom* aName,
                    nsIAtom* aStr_)
 {
   FakeRef<nsIAtom> aStr(aStr_);
@@ -263,9 +270,10 @@ Gecko_AttrIncludes(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName,
   return DoMatch(aElement, aNS, aName, match);
 }
 
+template<typename Implementor>
 bool
-Gecko_AttrHasSubstring(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName,
-                       nsIAtom* aStr_)
+AttrHasSubstring(Implementor* aElement, nsIAtom* aNS, nsIAtom* aName,
+                 nsIAtom* aStr_)
 {
   FakeRef<nsIAtom> aStr(aStr_);
   auto match = [aStr](const nsAttrValue* aValue) {
@@ -276,9 +284,10 @@ Gecko_AttrHasSubstring(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName,
   return DoMatch(aElement, aNS, aName, match);
 }
 
+template<typename Implementor>
 bool
-Gecko_AttrHasPrefix(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName,
-                    nsIAtom* aStr_)
+AttrHasPrefix(Implementor* aElement, nsIAtom* aNS, nsIAtom* aName,
+              nsIAtom* aStr_)
 {
   FakeRef<nsIAtom> aStr(aStr_);
   auto match = [aStr](const nsAttrValue* aValue) {
@@ -289,9 +298,10 @@ Gecko_AttrHasPrefix(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName,
   return DoMatch(aElement, aNS, aName, match);
 }
 
+template<typename Implementor>
 bool
-Gecko_AttrHasSuffix(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName,
-                    nsIAtom* aStr_)
+AttrHasSuffix(Implementor* aElement, nsIAtom* aNS, nsIAtom* aName,
+              nsIAtom* aStr_)
 {
   FakeRef<nsIAtom> aStr(aStr_);
   auto match = [aStr](const nsAttrValue* aValue) {
@@ -301,6 +311,34 @@ Gecko_AttrHasSuffix(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName,
   };
   return DoMatch(aElement, aNS, aName, match);
 }
+
+} // namespace attribute_matching
+
+#define SERVO_IMPL_ELEMENT_ATTR_MATCHING_FUNCTION(prefix_, implementor_)    \
+bool prefix_ ## HasAttr(implementor_* element, nsIAtom* ns, nsIAtom* name) {   \
+  return attribute_matching::HasAttr(element, ns, name);                       \
+}                                                                              \
+bool prefix_ ## AttrEquals(implementor_* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str, bool ignoreCase) { \
+  return attribute_matching::AttrEquals(element, ns, name, str, ignoreCase);   \
+}                                                                              \
+bool prefix_ ## AttrDashEquals(implementor_* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str) { \
+  return attribute_matching::AttrDashEquals(element, ns, name, str);           \
+}                                                                              \
+bool prefix_ ## AttrIncludes(implementor_* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str) { \
+  return attribute_matching::AttrIncludes(element, ns, name, str);             \
+}                                                                              \
+bool prefix_ ## AttrHasSubstring(implementor_* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str) { \
+  return attribute_matching::AttrHasSubstring(element, ns, name, str);         \
+}                                                                              \
+bool prefix_ ## AttrHasPrefix(implementor_* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str) { \
+  return attribute_matching::AttrHasPrefix(element, ns, name, str);            \
+}                                                                              \
+bool prefix_ ## AttrHasSuffix(implementor_* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str) { \
+  return attribute_matching::AttrHasSuffix(element, ns, name, str);            \
+}
+
+SERVO_IMPL_ELEMENT_ATTR_MATCHING_FUNCTION(Gecko_, RawGeckoElement)
+SERVO_IMPL_ELEMENT_ATTR_MATCHING_FUNCTION(Gecko_Snapshot, ServoElementSnapshot)
 
 uint32_t
 Gecko_ClassOrClassList(RawGeckoElement* aElement,

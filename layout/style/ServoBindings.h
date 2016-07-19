@@ -75,6 +75,15 @@ class ServoElementSnapshot;
   void Gecko_Release##name_##ArbitraryThread(ThreadSafe##name_##Holder* aPtr) \
   { NS_RELEASE(aPtr); }                                                       \
 
+#define SERVO_FFI_ATTR_MATCHING_FUNCTIONS(macro_)                             \
+  macro_(HasAttr)                                                             \
+  macro_(AttrEquals)                                                          \
+  macro_(AttrDashEquals)                                                      \
+  macro_(AttrIncludes)                                                        \
+  macro_(AttrHasSubstring)                                                    \
+  macro_(AttrHasPrefix)                                                       \
+  macro_(AttrHasSuffix)                                                       \
+
 extern "C" {
 
 // DOM Traversal.
@@ -105,14 +114,17 @@ nsIAtom* Gecko_Namespace(RawGeckoElement* element);
 nsIAtom* Gecko_GetElementId(RawGeckoElement* element);
 
 // Attributes.
-bool Gecko_HasAttr(RawGeckoElement* element, nsIAtom* ns, nsIAtom* name);
-bool Gecko_AttrEquals(RawGeckoElement* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str, bool ignoreCase);
-bool Gecko_AttrDashEquals(RawGeckoElement* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str);
-bool Gecko_AttrIncludes(RawGeckoElement* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str);
-bool Gecko_AttrHasSubstring(RawGeckoElement* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str);
-bool Gecko_AttrHasPrefix(RawGeckoElement* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str);
-bool Gecko_AttrHasSuffix(RawGeckoElement* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str);
+#define SERVO_DECLARE_ELEMENT_ATTR_MATCHING_FUNCTION(prefix_, implementor_)    \
+bool prefix_ ## HasAttr(implementor_* element, nsIAtom* ns, nsIAtom* name);    \
+bool prefix_ ## AttrEquals(implementor_* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str, bool ignoreCase); \
+bool prefix_ ## AttrDashEquals(implementor_* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str); \
+bool prefix_ ## AttrIncludes(implementor_* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str); \
+bool prefix_ ## AttrHasSubstring(implementor_* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str); \
+bool prefix_ ## AttrHasPrefix(implementor_* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str); \
+bool prefix_ ## AttrHasSuffix(implementor_* element, nsIAtom* ns, nsIAtom* name, nsIAtom* str); \
 
+SERVO_DECLARE_ELEMENT_ATTR_MATCHING_FUNCTION(Gecko_, RawGeckoElement)
+SERVO_DECLARE_ELEMENT_ATTR_MATCHING_FUNCTION(Gecko_Snapshot, ServoElementSnapshot)
 
 // Gets the class or class list (if any) of the Element.
 //
