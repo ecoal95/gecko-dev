@@ -12,6 +12,7 @@
 #include "nsIDocumentInlines.h"
 #include "nsStyleContext.h"
 #include "nsStyleSet.h"
+#include "nsPrintfCString.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -190,7 +191,13 @@ ServoStyleSet::ResolveAnonymousBoxStyle(nsIAtom* aPseudoTag,
   RefPtr<ServoComputedValues> computedValues =
     dont_AddRef(Servo_GetComputedValuesForAnonymousBox(parentStyle, aPseudoTag,
                                                        mRawSet.get()));
-  MOZ_ASSERT(computedValues);
+#ifdef DEBUG
+  if (!computedValues) {
+    nsString pseudo;
+    aPseudoTag->ToString(pseudo);
+    MOZ_ASSERT(false, nsPrintfCString("stylo: could not get anon-box: %s", pseudo).get());
+  }
+#endif
 
   return NS_NewStyleContext(aParentContext, mPresContext, aPseudoTag,
                             CSSPseudoElementType::AnonBox,
