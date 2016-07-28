@@ -323,4 +323,18 @@ ServoRestyleManager::SnapshotForElement(Element* aElement)
   return snapshot;
 }
 
+nsresult
+ServoRestyleManager::ProcessRestyledFrames(nsStyleChangeList& aChangeList)
+{
+  MOZ_CRASH("stylo: ServoRestyleManager::ProcessRestyledFrames not implemented "
+            "for Servo-backed style system");
+}
+
+void
+ServoRestyleManager::FlushOverflowChangedTracker()
+{
+  MOZ_CRASH("stylo: ServoRestyleManager::FlushOverflowChangedTracker "
+            "not implemented for Servo-backed style system");
+}
+
 } // namespace mozilla

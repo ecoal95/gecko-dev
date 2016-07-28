@@ -13,6 +13,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/RestyleManagerHandle.h"
+#include "mozilla/RestyleManagerUtils.h"
 
 #include "nsCOMPtr.h"
 #include "nsILayoutHistoryState.h"
@@ -53,6 +54,7 @@ public:
   typedef mozilla::dom::Element Element;
 
   friend class mozilla::RestyleManager;
+  friend class mozilla::RestyleManagerUtils;
 
   nsCSSFrameConstructor(nsIDocument* aDocument, nsIPresShell* aPresShell);
   ~nsCSSFrameConstructor(void) {

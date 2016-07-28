@@ -13,6 +13,7 @@
 
 #include "mozilla/RestyleLogging.h"
 #include "mozilla/RestyleManagerBase.h"
+#include "mozilla/RestyleManagerUtils.h"
 #include "nsISupportsImpl.h"
 #include "nsChangeHint.h"
 #include "RestyleTracker.h"
@@ -149,7 +150,11 @@ public:
   // This function does not call ProcessAttachedQueue() on the binding manager.
   // If the caller wants that to happen synchronously, it needs to handle that
   // itself.
-  nsresult ProcessRestyledFrames(nsStyleChangeList& aRestyleArray);
+  nsresult ProcessRestyledFrames(nsStyleChangeList& aChangeList) {
+    return RestyleManagerUtils::ProcessRestyledFrames(aChangeList,
+                                                      *PresContext(),
+                                                      mOverflowChangedTracker);
+  }
 
   /**
    * In order to start CSS transitions on elements that are being
@@ -492,11 +497,6 @@ private:
 
   // Recursively add all the given frame and all children to the tracker.
   void AddSubtreeToOverflowTracker(nsIFrame* aFrame);
-
-  // Returns true if this function managed to successfully move a frame, and
-  // false if it could not process the position change, and a reflow should
-  // be performed instead.
-  bool RecomputePosition(nsIFrame* aFrame);
 
   bool ShouldStartRebuildAllFor(RestyleTracker& aRestyleTracker) {
     // When we process our primary restyle tracker and we have a pending
