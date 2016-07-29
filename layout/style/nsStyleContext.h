@@ -399,24 +399,18 @@ public:
                                    uint32_t* aSamePointerStructs);
 
 #ifdef MOZ_STYLO
-  /*
-   * Like the above, but does not require the new style context to exist yet.
-   * Servo uses this to compute change hints during parallel traversal.
+  /**
+   * Like the above, but allows comparing ServoComputedValues instead of needing
+   * a full-fledged style context.
    */
-  nsChangeHint CalcStyleDifference(ServoComputedValues* aNewComputedValues,
-                                   nsChangeHint aParentHintsNotHandledForDescendants,
-                                   uint32_t* aEqualStructs,
-                                   uint32_t* aSamePointerStructs);
+  static nsChangeHint CalcStyleDifference(ServoComputedValues* aOldComputedValues,
+                                          ServoComputedValues* aNewComputedValues,
+                                          nsChangeHint aParentHintsNotHandledForDescendants,
+                                          uint32_t* aEqualStructs,
+                                          uint32_t* aSamePointerStructs);
 #endif
 
-private:
-  template<class StyleContextLike>
-  nsChangeHint CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
-                                           nsChangeHint aParentHintsNotHandledForDescendants,
-                                           uint32_t* aEqualStructs,
-                                           uint32_t* aSamePointerStructs);
 public:
-
   /**
    * Get a color that depends on link-visitedness using this and
    * this->GetStyleIfVisited().
@@ -530,22 +524,14 @@ public:
 #ifdef MOZ_STYLO
   void StoreChangeHint(nsChangeHint aHint)
   {
-    MOZ_ASSERT(!mHasStoredChangeHint);
     MOZ_ASSERT(!IsShared());
     mStoredChangeHint = aHint;
-#ifdef DEBUG
-    mHasStoredChangeHint = true;
-#endif
   }
 
   nsChangeHint ConsumeStoredChangeHint()
   {
-    MOZ_ASSERT(mHasStoredChangeHint);
     nsChangeHint result = mStoredChangeHint;
     mStoredChangeHint = nsChangeHint(0);
-#ifdef DEBUG
-    mHasStoredChangeHint = false;
-#endif
     return result;
   }
 #endif

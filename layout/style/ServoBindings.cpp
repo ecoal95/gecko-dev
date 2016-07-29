@@ -185,11 +185,11 @@ Gecko_UnsetNodeFlags(RawGeckoNode* aNode, uint32_t aFlags)
 }
 
 nsChangeHint
-Gecko_CalcAndStoreStyleDifference(RawGeckoElement* aElement,
-                                  ServoComputedValues* aComputedValues)
+Gecko_CalcStyleDifference(ServoComputedValues* aOldComputedValues,
+                          ServoComputedValues* aComputedValues)
 {
-#ifdef MOZ_STYLO
-  nsStyleContext* oldContext = aElement->GetPrimaryFrame()->StyleContext();
+  MOZ_ASSERT(aOldComputedValues);
+  MOZ_ASSERT(aComputedValues);
 
   // Pass the safe thing, which causes us to miss a potential optimization. See
   // bug 1289863.
@@ -200,11 +200,39 @@ Gecko_CalcAndStoreStyleDifference(RawGeckoElement* aElement,
   // potentially halt traversal. See bug 1289868.
   uint32_t equalStructs, samePointerStructs;
   nsChangeHint result =
-    oldContext->CalcStyleDifference(aComputedValues, forDescendants,
-                                    &equalStructs, &samePointerStructs);
+    nsStyleContext::CalcStyleDifference(aOldComputedValues, aComputedValues,
+                                        forDescendants, &equalStructs,
+                                        &samePointerStructs);
   return result;
+}
+
+void
+Gecko_StoreStyleDifference(RawGeckoNode* aNode, nsChangeHint aChangeHintToStore)
+{
+#ifdef MOZ_STYLO
+  // XXXEmilio probably storing it in the nearest content parent is a sane thing
+  // to do if this case can ever happen?
+  MOZ_ASSERT(aNode->IsContent());
+
+  nsIContent* aContent = aNode->AsContent();
+  nsIFrame* primaryFrame = aContent->GetPrimaryFrame();
+  if (!primaryFrame) {
+    NS_WARNING("stylo: Don't know where to store the style difference, but "
+               "it shouldn't matter since we're reconstructing the frame");
+    return;
+  }
+
+  nsStyleContext* oldContext = primaryFrame->StyleContext();
+  if (!oldContext) {
+    NS_WARNING("stylo: No context here, yet found the frame and received "
+               "computed values? huh...");
+    return;
+  }
+
+  // XXX Can this becalled multiple times from Servo?
+  oldContext->StoreChangeHint(aChangeHintToStore);
 #else
-  MOZ_CRASH("stylo: Shouldn't call Gecko_CalcAndStoreStyleDifference in "
+  MOZ_CRASH("stylo: Shouldn't call Gecko_StoreStyleDifference in "
             "non-stylo build");
 #endif
 }

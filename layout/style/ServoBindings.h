@@ -187,8 +187,9 @@ void Gecko_SetNodeFlags(RawGeckoNode* node, uint32_t flags);
 void Gecko_UnsetNodeFlags(RawGeckoNode* node, uint32_t flags);
 
 // Incremental restyle.
-nsChangeHint Gecko_CalcAndStoreStyleDifference(RawGeckoElement* element,
-                                               ServoComputedValues* newstyle);
+nsChangeHint Gecko_CalcStyleDifference(ServoComputedValues* oldstyle,
+                                       ServoComputedValues* newstyle);
+void Gecko_StoreStyleDifference(RawGeckoNode* node, nsChangeHint change);
 
 // `array` must be an nsTArray
 // If changing this signature, please update the

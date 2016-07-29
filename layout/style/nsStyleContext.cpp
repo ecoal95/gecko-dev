@@ -903,10 +903,11 @@ nsStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
 
 template<class StyleContextLike>
 nsChangeHint
-nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
-                                            nsChangeHint aParentHintsNotHandledForDescendants,
-                                            uint32_t* aEqualStructs,
-                                            uint32_t* aSamePointerStructs)
+GenericCalcStyleDifference(StyleContextLike* aOldContext,
+                           StyleContextLike* aNewContext,
+                           nsChangeHint aParentHintsNotHandledForDescendants,
+                           uint32_t* aEqualStructs,
+                           uint32_t* aSamePointerStructs)
 {
   PROFILER_LABEL("nsStyleContext", "CalcStyleDifference",
     js::ProfileEntry::Category::CSS);
@@ -944,14 +945,14 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
   // (Things like 'em' units are handled by the change hint produced
   // by font-size changing, so we don't need to worry about them like
   // we worry about 'inherit' values.)
-  bool compare = StyleSource() != aNewContext->StyleSource();
+  bool compare = aOldContext->StyleSource() != aNewContext->StyleSource();
 
   DebugOnly<uint32_t> structsFound = 0;
 
   // If we had any change in variable values, then we'll need to examine
   // all of the other style structs too, even if the new style context has
   // the same source as the old one.
-  const nsStyleVariables* thisVariables = PeekStyleVariables();
+  const nsStyleVariables* thisVariables = aOldContext->PeekStyleVariables();
   if (thisVariables) {
     structsFound |= NS_STYLE_INHERIT_BIT(Variables);
     const nsStyleVariables* otherVariables = aNewContext->StyleVariables();
@@ -968,7 +969,7 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
 
 #define DO_STRUCT_DIFFERENCE(struct_)                                         \
   PR_BEGIN_MACRO                                                              \
-    const nsStyle##struct_* this##struct_ = PeekStyle##struct_();             \
+    const nsStyle##struct_* this##struct_ = aOldContext->PeekStyle##struct_();\
     if (this##struct_) {                                                      \
       structsFound |= NS_STYLE_INHERIT_BIT(struct_);                          \
       const nsStyle##struct_* other##struct_ = aNewContext->Style##struct_(); \
@@ -1030,7 +1031,7 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
   DO_STRUCT_DIFFERENCE(SVGReset);
   DO_STRUCT_DIFFERENCE(SVG);
 #undef EXTRA_DIFF_ARGS
-#define EXTRA_DIFF_ARGS , PeekStyleVisibility()
+#define EXTRA_DIFF_ARGS , aOldContext->PeekStyleVisibility()
   DO_STRUCT_DIFFERENCE(Position);
 #undef EXTRA_DIFF_ARGS
 #define EXTRA_DIFF_ARGS /* nothing */
@@ -1052,7 +1053,7 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
 #ifdef DEBUG
   #define STYLE_STRUCT(name_, callback_)                                      \
     MOZ_ASSERT(!!(structsFound & NS_STYLE_INHERIT_BIT(name_)) ==              \
-               !!PeekStyle##name_(),                                          \
+               !!aOldContext->PeekStyle##name_(),                              \
                "PeekStyleData results must not change in the middle of "      \
                "difference calculation.");
   #include "nsStyleStructList.h"
@@ -1071,7 +1072,7 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
 
 #define STYLE_STRUCT(name_, callback_)                                        \
   {                                                                           \
-    const nsStyle##name_* data = PeekStyle##name_();                          \
+    const nsStyle##name_* data = aOldContext->PeekStyle##name_();             \
     if (!data || data == aNewContext->Style##name_()) {                       \
       *aSamePointerStructs |= NS_STYLE_INHERIT_BIT(name_);                    \
     }                                                                         \
@@ -1095,8 +1096,8 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
   // here, we add nsChangeHint_RepaintFrame hints (the maximum for
   // things that can depend on :visited) for the properties on which we
   // call GetVisitedDependentColor.
-  nsStyleContext *thisVis = GetStyleIfVisited(),
-                *otherVis = aNewContext->GetStyleIfVisited();
+  nsStyleContext *thisVis = aOldContext->GetStyleIfVisited();
+  nsStyleContext *otherVis = aNewContext->GetStyleIfVisited();
   if (!thisVis != !otherVis) {
     // One style context has a style-if-visited and the other doesn't.
     // Presume a difference.
@@ -1110,7 +1111,7 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
     // |thisVis| (including this function if we skip one of these checks
     // due to change being true already or due to the old style context
     // not having a style-if-visited), but not the other way around.
-    if (PeekStyleColor()) {
+    if (aOldContext->PeekStyleColor()) {
       if (thisVis->StyleColor()->mColor !=
           otherVis->StyleColor()->mColor) {
         change = true;
@@ -1118,7 +1119,7 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
     }
 
     // NB: Calling Peek on |this|, not |thisVis| (see above).
-    if (!change && PeekStyleBackground()) {
+    if (!change && aOldContext->PeekStyleBackground()) {
       if (thisVis->StyleBackground()->mBackgroundColor !=
           otherVis->StyleBackground()->mBackgroundColor) {
         change = true;
@@ -1126,7 +1127,7 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
     }
 
     // NB: Calling Peek on |this|, not |thisVis| (see above).
-    if (!change && PeekStyleBorder()) {
+    if (!change && aOldContext->PeekStyleBorder()) {
       const nsStyleBorder *thisVisBorder = thisVis->StyleBorder();
       const nsStyleBorder *otherVisBorder = otherVis->StyleBorder();
       NS_FOR_CSS_SIDES(side) {
@@ -1145,7 +1146,7 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
     }
 
     // NB: Calling Peek on |this|, not |thisVis| (see above).
-    if (!change && PeekStyleOutline()) {
+    if (!change && aOldContext->PeekStyleOutline()) {
       const nsStyleOutline *thisVisOutline = thisVis->StyleOutline();
       const nsStyleOutline *otherVisOutline = otherVis->StyleOutline();
       bool haveColor;
@@ -1160,7 +1161,7 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
     }
 
     // NB: Calling Peek on |this|, not |thisVis| (see above).
-    if (!change && PeekStyleColumn()) {
+    if (!change && aOldContext->PeekStyleColumn()) {
       const nsStyleColumn *thisVisColumn = thisVis->StyleColumn();
       const nsStyleColumn *otherVisColumn = otherVis->StyleColumn();
       if (thisVisColumn->mColumnRuleColor != otherVisColumn->mColumnRuleColor ||
@@ -1171,7 +1172,7 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
     }
 
     // NB: Calling Peek on |this|, not |thisVis| (see above).
-    if (!change && PeekStyleText()) {
+    if (!change && aOldContext->PeekStyleText()) {
       const nsStyleText* thisVisText = thisVis->StyleText();
       const nsStyleText* otherVisText = otherVis->StyleText();
       if (thisVisText->mTextEmphasisColorForeground !=
@@ -1188,7 +1189,7 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
     }
 
     // NB: Calling Peek on |this|, not |thisVis| (see above).
-    if (!change && PeekStyleTextReset()) {
+    if (!change && aOldContext->PeekStyleTextReset()) {
       const nsStyleTextReset *thisVisTextReset = thisVis->StyleTextReset();
       const nsStyleTextReset *otherVisTextReset = otherVis->StyleTextReset();
       // Dummy initialisations to keep Valgrind/Memcheck happy.
@@ -1207,7 +1208,7 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
     }
 
     // NB: Calling Peek on |this|, not |thisVis| (see above).
-    if (!change && PeekStyleSVG()) {
+    if (!change && aOldContext->PeekStyleSVG()) {
       const nsStyleSVG *thisVisSVG = thisVis->StyleSVG();
       const nsStyleSVG *otherVisSVG = otherVis->StyleSVG();
       if (thisVisSVG->mFill != otherVisSVG->mFill ||
@@ -1230,8 +1231,9 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aNewContext,
                                     uint32_t* aEqualStructs,
                                     uint32_t* aSamePointerStructs)
 {
-  return CalcStyleDifferenceInternal(aNewContext, aParentHintsNotHandledForDescendants,
-                                     aEqualStructs, aSamePointerStructs);
+  return GenericCalcStyleDifference(this, aNewContext,
+                                    aParentHintsNotHandledForDescendants,
+                                    aEqualStructs, aSamePointerStructs);
 }
 
 #ifdef MOZ_STYLO
@@ -1255,6 +1257,9 @@ public:
   #define STYLE_STRUCT(name_, checkdata_cb_)                                  \
   const nsStyle##name_ * Style##name_() {                                     \
     return Servo_GetStyle##name_(mComputedValues);                            \
+  }                                                                           \
+  const nsStyle##name_ * PeekStyle##name_() {                                 \
+    return Servo_GetStyle##name_(mComputedValues);                            \
   }
   #include "nsStyleStructList.h"
   #undef STYLE_STRUCT
@@ -1263,15 +1268,18 @@ private:
   ServoComputedValues* MOZ_NON_OWNING_REF mComputedValues;
 };
 
-nsChangeHint
-nsStyleContext::CalcStyleDifference(ServoComputedValues* aNewComputedValues,
+/* static */ nsChangeHint
+nsStyleContext::CalcStyleDifference(ServoComputedValues* aOldComputedValues,
+                                    ServoComputedValues* aNewComputedValues,
                                     nsChangeHint aParentHintsNotHandledForDescendants,
                                     uint32_t* aEqualStructs,
                                     uint32_t* aSamePointerStructs)
 {
+  FakeStyleContext oldContext(aOldComputedValues);
   FakeStyleContext newContext(aNewComputedValues);
-  return CalcStyleDifferenceInternal(&newContext, aParentHintsNotHandledForDescendants,
-                                     aEqualStructs, aSamePointerStructs);
+  return GenericCalcStyleDifference(&oldContext, &newContext,
+                                    aParentHintsNotHandledForDescendants,
+                                    aEqualStructs, aSamePointerStructs);
 }
 #endif
 
