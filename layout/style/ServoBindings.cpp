@@ -184,11 +184,22 @@ Gecko_UnsetNodeFlags(RawGeckoNode* aNode, uint32_t aFlags)
   aNode->UnsetFlags(aFlags);
 }
 
+nsStyleContext*
+Gecko_GetStyleContext(RawGeckoNode* aNode) {
+  MOZ_ASSERT(aNode->IsContent());
+  nsIFrame* primaryFrame = aNode->AsContent()->GetPrimaryFrame();
+  if (!primaryFrame) {
+    return nullptr;
+  }
+
+  return primaryFrame->StyleContext();
+}
+
 nsChangeHint
-Gecko_CalcStyleDifference(ServoComputedValues* aOldComputedValues,
+Gecko_CalcStyleDifference(nsStyleContext* aOldStyleContext,
                           ServoComputedValues* aComputedValues)
 {
-  MOZ_ASSERT(aOldComputedValues);
+  MOZ_ASSERT(aOldStyleContext);
   MOZ_ASSERT(aComputedValues);
 
   // Pass the safe thing, which causes us to miss a potential optimization. See
@@ -200,9 +211,11 @@ Gecko_CalcStyleDifference(ServoComputedValues* aOldComputedValues,
   // potentially halt traversal. See bug 1289868.
   uint32_t equalStructs, samePointerStructs;
   nsChangeHint result =
-    nsStyleContext::CalcStyleDifference(aOldComputedValues, aComputedValues,
-                                        forDescendants, &equalStructs,
-                                        &samePointerStructs);
+    aOldStyleContext->CalcStyleDifference(aComputedValues,
+                                          forDescendants,
+                                          &equalStructs,
+                                          &samePointerStructs);
+
   return result;
 }
 

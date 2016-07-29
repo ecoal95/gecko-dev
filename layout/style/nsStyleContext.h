@@ -403,11 +403,10 @@ public:
    * Like the above, but allows comparing ServoComputedValues instead of needing
    * a full-fledged style context.
    */
-  static nsChangeHint CalcStyleDifference(ServoComputedValues* aOldComputedValues,
-                                          ServoComputedValues* aNewComputedValues,
-                                          nsChangeHint aParentHintsNotHandledForDescendants,
-                                          uint32_t* aEqualStructs,
-                                          uint32_t* aSamePointerStructs);
+  nsChangeHint CalcStyleDifference(ServoComputedValues* aNewComputedValues,
+                                   nsChangeHint aParentHintsNotHandledForDescendants,
+                                   uint32_t* aEqualStructs,
+                                   uint32_t* aSamePointerStructs);
 #endif
 
 public:

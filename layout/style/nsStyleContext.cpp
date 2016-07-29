@@ -901,10 +901,10 @@ nsStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
 #undef GET_UNIQUE_STYLE_DATA
 }
 
-template<class StyleContextLike>
+template<class OneStyleContextLike, class OtherStyleContextLike>
 nsChangeHint
-GenericCalcStyleDifference(StyleContextLike* aOldContext,
-                           StyleContextLike* aNewContext,
+GenericCalcStyleDifference(OneStyleContextLike* aOldContext,
+                           OtherStyleContextLike* aNewContext,
                            nsChangeHint aParentHintsNotHandledForDescendants,
                            uint32_t* aEqualStructs,
                            uint32_t* aSamePointerStructs)
@@ -1268,16 +1268,14 @@ private:
   ServoComputedValues* MOZ_NON_OWNING_REF mComputedValues;
 };
 
-/* static */ nsChangeHint
-nsStyleContext::CalcStyleDifference(ServoComputedValues* aOldComputedValues,
-                                    ServoComputedValues* aNewComputedValues,
+nsChangeHint
+nsStyleContext::CalcStyleDifference(ServoComputedValues* aNewComputedValues,
                                     nsChangeHint aParentHintsNotHandledForDescendants,
                                     uint32_t* aEqualStructs,
                                     uint32_t* aSamePointerStructs)
 {
-  FakeStyleContext oldContext(aOldComputedValues);
   FakeStyleContext newContext(aNewComputedValues);
-  return GenericCalcStyleDifference(&oldContext, &newContext,
+  return GenericCalcStyleDifference(this, &newContext,
                                     aParentHintsNotHandledForDescendants,
                                     aEqualStructs, aSamePointerStructs);
 }
