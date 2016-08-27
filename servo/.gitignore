@@ -1,0 +1,37 @@
+/.servo
+/.cargo
+/.servobuild
+/target
+/ports/android/bin
+/ports/android/libs
+/ports/android/local.properties
+/ports/android/obj
+/python/_virtualenv
+/python/tidy/servo_tidy.egg-info
+*~
+*#
+*.o
+*.so
+*.dylib
+*.dSYM
+*.dll
+*.dummy
+*.pkl
+*.pyc
+*.swp
+*.swo
+*.csv
+.DS_Store
+servo-test
+Servo.app
+.config.mk.last
+/glfw
+
+# Editors
+
+# IntelliJ
+.idea
+*.iws
+
+# VSCode
+.vscode
