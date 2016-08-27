@@ -37,5 +37,5 @@ pub mod resource_files;
 pub mod thread;
 
 pub fn servo_version() -> &'static str {
-    concat!("Servo ", env!("CARGO_PKG_VERSION"), env!("GIT_INFO"))
+    concat!("Servo ", env!("CARGO_PKG_VERSION"))
 }
