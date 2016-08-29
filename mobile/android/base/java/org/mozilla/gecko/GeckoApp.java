@@ -178,7 +178,6 @@ public abstract class GeckoApp
     /** Tells if we're aborting app launch, e.g. if this is an unsupported device configuration. */
     protected boolean mIsAbortingAppLaunch;
 
-    private ContactService mContactService;
     private PromptService mPromptService;
     protected TextSelection mTextSelection;
 
@@ -366,14 +365,6 @@ public abstract class GeckoApp
                 invalidateOptionsMenu();
                 if (mFormAssistPopup != null)
                     mFormAssistPopup.hide();
-                break;
-
-            case LOADED:
-                // Sync up the layer view and the tab if the tab is
-                // currently displayed.
-                LayerView layerView = mLayerView;
-                if (layerView != null && Tabs.getInstance().isSelectedTab(tab))
-                    layerView.setBackgroundColor(tab.getBackgroundColor());
                 break;
 
             case DESKTOP_MODE_CHANGE:
@@ -1158,6 +1149,9 @@ public abstract class GeckoApp
         GeckoAppShell.setContextGetter(this);
         GeckoAppShell.setApplicationContext(getApplicationContext());
         GeckoAppShell.setGeckoInterface(this);
+        // We need to set the notification client before launching Gecko, since Gecko could start
+        // sending notifications immediately after startup, which we don't want to lose/crash on.
+        GeckoAppShell.setNotificationClient(makeNotificationClient());
 
         Tabs.getInstance().attachToContext(this);
         try {
@@ -1431,7 +1425,6 @@ public abstract class GeckoApp
             }
         });
 
-        GeckoAppShell.setNotificationClient(makeNotificationClient());
         IntentHelper.init(this);
     }
 
@@ -1641,8 +1634,6 @@ public abstract class GeckoApp
         if (SmsManager.isEnabled()) {
             SmsManager.getInstance().start();
         }
-
-        mContactService = new ContactService(EventDispatcher.getInstance(), this);
 
         mPromptService = new PromptService(this);
 
@@ -2248,8 +2239,6 @@ public abstract class GeckoApp
             mDoorHangerPopup.destroy();
         if (mFormAssistPopup != null)
             mFormAssistPopup.destroy();
-        if (mContactService != null)
-            mContactService.destroy();
         if (mPromptService != null)
             mPromptService.destroy();
         if (mTextSelection != null)

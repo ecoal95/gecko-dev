@@ -20,7 +20,7 @@ loader.lazyRequireGetter(this, "ObjectClient", "devtools/shared/client/main", tr
 const { extend } = require("sdk/core/heritage");
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
-const STRINGS_URI = "chrome://devtools/locale/webconsole.properties";
+const STRINGS_URI = "devtools/locale/webconsole.properties";
 
 const WebConsoleUtils = require("devtools/client/webconsole/utils").Utils;
 const { getSourceNames } = require("devtools/client/shared/source-utils");
@@ -29,7 +29,7 @@ const l10n = new WebConsoleUtils.L10n(STRINGS_URI);
 const nodeConstants = require("devtools/shared/dom-node-constants");
 
 const MAX_STRING_GRIP_LENGTH = 36;
-const {ELLIPSIS} = require("devtools/client/shared/l10n");
+const {ELLIPSIS} = require("devtools/shared/l10n");
 
 const validProtocols = /^(http|https|ftp|data|javascript|resource|chrome):/i;
 

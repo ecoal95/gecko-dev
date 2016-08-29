@@ -47,7 +47,7 @@
 #include "mozilla/layers/ShadowLayers.h"
 #include "mozilla/layers/TextureClient.h"
 #include "mozilla/layers/TextureWrapperImage.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "GeckoProfiler.h"
 #include "LayersLogging.h"
 #include "gfxPrefs.h"
@@ -3847,7 +3847,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
     bool forceInactive;
     AnimatedGeometryRoot* animatedGeometryRoot;
     AnimatedGeometryRoot* animatedGeometryRootForClip = nullptr;
-    if (mFlattenToSingleLayer) {
+    if (mFlattenToSingleLayer && layerState != LAYER_ACTIVE_FORCE) {
       forceInactive = true;
       animatedGeometryRoot = lastAnimatedGeometryRoot;
     } else {
@@ -4848,12 +4848,7 @@ ContainerState::PostprocessRetainedLayers(nsIntRegion* aOpaqueRegionForContainer
       continue;
     }
 
-    // If mFlattenToSingleLayer is true, there isn't going to be any
-    // async scrolling so we can apply all our opaqueness to the same
-    // entry, the entry for mContainerAnimatedGeometryRoot.
-    AnimatedGeometryRoot* animatedGeometryRootForOpaqueness =
-        mFlattenToSingleLayer ? mContainerAnimatedGeometryRoot : e->mAnimatedGeometryRoot;
-    OpaqueRegionEntry* data = FindOpaqueRegionEntry(opaqueRegions, animatedGeometryRootForOpaqueness);
+    OpaqueRegionEntry* data = FindOpaqueRegionEntry(opaqueRegions, e->mAnimatedGeometryRoot);
 
     SetupScrollingMetadata(e);
 
@@ -4875,7 +4870,7 @@ ContainerState::PostprocessRetainedLayers(nsIntRegion* aOpaqueRegionForContainer
                                   e->mUntransformedVisibleRegion);
 
     if (!e->mOpaqueRegion.IsEmpty()) {
-      AnimatedGeometryRoot* animatedGeometryRootToCover = animatedGeometryRootForOpaqueness;
+      AnimatedGeometryRoot* animatedGeometryRootToCover = e->mAnimatedGeometryRoot;
       if (e->mOpaqueForAnimatedGeometryRootParent &&
           e->mAnimatedGeometryRoot->mParentAGR == mContainerAnimatedGeometryRoot) {
         animatedGeometryRootToCover = mContainerAnimatedGeometryRoot;
@@ -6064,7 +6059,7 @@ ContainerState::CreateMaskLayer(Layer *aLayer,
   NS_ASSERTION(maxSize > 0, "Invalid max texture size");
 #ifdef MOZ_GFX_OPTIMIZE_MOBILE
   // Make mask image width aligned to 4. See Bug 1245552.
-  gfx::Size surfaceSize(std::min<gfx::Float>(GetAlignedStride<4>(NSToIntCeil(boundingRect.Width())), maxSize),
+  gfx::Size surfaceSize(std::min<gfx::Float>(GetAlignedStride<4>(NSToIntCeil(boundingRect.Width()), 1), maxSize),
                         std::min<gfx::Float>(boundingRect.Height(), maxSize));
 #else
   gfx::Size surfaceSize(std::min<gfx::Float>(boundingRect.Width(), maxSize),

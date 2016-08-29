@@ -98,7 +98,7 @@
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsCCUncollectableMarker.h"
 #include "nsWrapperCacheInlines.h"
 #include "mozilla/dom/CanvasRenderingContext2DBinding.h"
@@ -178,11 +178,12 @@ public:
   NS_IMETHOD CollectReports(nsIHandleReportCallback* aHandleReport,
                             nsISupports* aData, bool aAnonymize) override
   {
-    return MOZ_COLLECT_REPORT(
-      "canvas-2d-pixels", KIND_OTHER, UNITS_BYTES,
-      gCanvasAzureMemoryUsed,
+    MOZ_COLLECT_REPORT(
+      "canvas-2d-pixels", KIND_OTHER, UNITS_BYTES, gCanvasAzureMemoryUsed,
       "Memory used by 2D canvases. Each canvas requires "
       "(width * height * 4) bytes.");
+
+    return NS_OK;
   }
 };
 
@@ -1504,6 +1505,33 @@ CanvasRenderingContext2D::OnStableState()
   mHasPendingStableStateCallback = false;
 }
 
+void
+CanvasRenderingContext2D::RestoreClipsAndTransformToTarget()
+{
+  // Restore clips and transform.
+  mTarget->SetTransform(Matrix());
+
+  if (mTarget->GetBackendType() == gfx::BackendType::CAIRO) {
+    // Cairo doesn't play well with huge clips. When given a very big clip it
+    // will try to allocate big mask surface without taking the target
+    // size into account which can cause OOM. See bug 1034593.
+    // This limits the clip extents to the size of the canvas.
+    // A fix in Cairo would probably be preferable, but requires somewhat
+    // invasive changes.
+    mTarget->PushClipRect(gfx::Rect(0, 0, mWidth, mHeight));
+  }
+
+  for (const auto& style : mStyleStack) {
+    for (const auto& clipOrTransform : style.clipsAndTransforms) {
+      if (clipOrTransform.IsClip()) {
+        mTarget->PushClip(clipOrTransform.clip);
+      } else {
+        mTarget->SetTransform(clipOrTransform.transform);
+      }
+    }
+  }
+}
+
 CanvasRenderingContext2D::RenderingMode
 CanvasRenderingContext2D::EnsureTarget(const gfx::Rect* aCoveredRect,
                                        RenderingMode aRenderingMode)
@@ -1555,7 +1583,13 @@ CanvasRenderingContext2D::EnsureTarget(const gfx::Rect* aCoveredRect,
                                            : IntRect(0, 0, mWidth, mHeight);
     mTarget = mBufferProvider->BorrowDrawTarget(persistedRect);
 
-    mode = mRenderingMode;
+    if (mTarget && !mBufferProvider->PreservesDrawingState()) {
+      RestoreClipsAndTransformToTarget();
+    }
+
+    if (mTarget) {
+      return mode;
+    }
   }
 
   mIsSkiaGL = false;
@@ -1648,28 +1682,7 @@ CanvasRenderingContext2D::EnsureTarget(const gfx::Rect* aCoveredRect,
 
     if (mBufferProvider != oldBufferProvider || !mBufferProvider ||
         !mBufferProvider->PreservesDrawingState()) {
-      // Restore clips and transform.
-      mTarget->SetTransform(Matrix());
-
-      if (mTarget->GetBackendType() == gfx::BackendType::CAIRO) {
-        // Cairo doesn't play well with huge clips. When given a very big clip it
-        // will try to allocate big mask surface without taking the target
-        // size into account which can cause OOM. See bug 1034593.
-        // This limits the clip extents to the size of the canvas.
-        // A fix in Cairo would probably be preferable, but requires somewhat
-        // invasive changes.
-        mTarget->PushClipRect(canvasRect);
-      }
-
-      for (const auto& style : mStyleStack) {
-        for (const auto& clipOrTransform : style.clipsAndTransforms) {
-          if (clipOrTransform.IsClip()) {
-            mTarget->PushClip(clipOrTransform.clip);
-          } else {
-            mTarget->SetTransform(clipOrTransform.transform);
-          }
-        }
-      }
+      RestoreClipsAndTransformToTarget();
     }
   } else {
     EnsureErrorTarget();
@@ -1791,7 +1804,7 @@ CanvasRenderingContext2D::ReturnTarget(bool aForceReset)
 
       if (mTarget->GetBackendType() == gfx::BackendType::CAIRO) {
         // With the cairo backend we pushed an extra clip rect which we have to
-        // balance out here. See the comment in EnsureDrawTarget.
+        // balance out here. See the comment in RestoreClipsAndTransformToTarget.
         mTarget->PopClip();
       }
     }
@@ -1802,7 +1815,7 @@ CanvasRenderingContext2D::ReturnTarget(bool aForceReset)
 
 NS_IMETHODIMP
 CanvasRenderingContext2D::InitializeWithDrawTarget(nsIDocShell* aShell,
-                                                   gfx::DrawTarget* aTarget)
+                                                   NotNull<gfx::DrawTarget*> aTarget)
 {
   RemovePostRefreshObserver();
   mDocShell = aShell;
@@ -1811,13 +1824,8 @@ CanvasRenderingContext2D::InitializeWithDrawTarget(nsIDocShell* aShell,
   IntSize size = aTarget->GetSize();
   SetDimensions(size.width, size.height);
 
-  if (aTarget) {
-    mTarget = aTarget;
-    mBufferProvider = new PersistentBufferProviderBasic(aTarget);
-  } else {
-    EnsureErrorTarget();
-    mTarget = sErrorTarget;
-  }
+  mTarget = aTarget;
+  mBufferProvider = new PersistentBufferProviderBasic(aTarget);
 
   if (mTarget->GetBackendType() == gfx::BackendType::CAIRO) {
     // Cf comment in EnsureTarget
@@ -5301,12 +5309,6 @@ CanvasRenderingContext2D::GetImageData(JSContext* aCx, double aSx,
     mDrawObserver->DidDrawCall(CanvasDrawObserver::DrawCallType::GetImageData);
   }
 
-  EnsureTarget();
-  if (!IsTargetValid()) {
-    aError.Throw(NS_ERROR_FAILURE);
-    return nullptr;
-  }
-
   if (!mCanvasElement && !mDocShell) {
     NS_ERROR("No canvas element and no docshell in GetImageData!!!");
     aError.Throw(NS_ERROR_DOM_SECURITY_ERR);
@@ -5415,10 +5417,24 @@ CanvasRenderingContext2D::GetImageDataArray(JSContext* aCx,
   RefPtr<DataSourceSurface> readback;
   DataSourceSurface::MappedSurface rawData;
   if (!srcReadRect.IsEmpty()) {
-    RefPtr<SourceSurface> snapshot = mTarget->Snapshot();
+    RefPtr<SourceSurface> snapshot;
+    if (mTarget) {
+      snapshot = mTarget->Snapshot();
+    } else if (mBufferProvider) {
+      snapshot = mBufferProvider->BorrowSnapshot();
+    } else {
+      EnsureTarget();
+      snapshot = mTarget->Snapshot();
+    }
+
     if (snapshot) {
       readback = snapshot->GetDataSurface();
     }
+
+    if (!mTarget && mBufferProvider) {
+      mBufferProvider->ReturnSnapshot(snapshot.forget());
+    }
+
     if (!readback || !readback->Map(DataSourceSurface::READ, &rawData)) {
       return NS_ERROR_OUT_OF_MEMORY;
     }

@@ -336,11 +336,14 @@ UpdateOldAnimationPropertiesWithNew(
   // Update the old from the new so we can keep the original object
   // identity (and any expando properties attached to it).
   if (aOld.GetEffect()) {
-    KeyframeEffectReadOnly* oldEffect = aOld.GetEffect();
-    animationChanged =
-      oldEffect->SpecifiedTiming() != aNewTiming;
+    AnimationEffectReadOnly* oldEffect = aOld.GetEffect();
+    animationChanged = oldEffect->SpecifiedTiming() != aNewTiming;
     oldEffect->SetSpecifiedTiming(aNewTiming);
-    oldEffect->SetKeyframes(Move(aNewKeyframes), aStyleContext);
+
+    KeyframeEffectReadOnly* oldKeyframeEffect = oldEffect->AsKeyframeEffect();
+    if (oldKeyframeEffect) {
+      oldKeyframeEffect->SetKeyframes(Move(aNewKeyframes), aStyleContext);
+    }
   }
 
   // Handle changes in play state. If the animation is idle, however,
@@ -439,12 +442,6 @@ nsAnimationManager::UpdateAnimations(nsStyleContext* aStyleContext,
   for (size_t newAnimIdx = newAnimations.Length(); newAnimIdx-- != 0; ) {
     newAnimations[newAnimIdx]->CancelFromStyle();
   }
-
-  mPresContext->EffectCompositor()->
-    MaybeUpdateAnimationRule(aElement,
-                             aStyleContext->GetPseudoType(),
-                             EffectCompositor::CascadeLevel::Animations,
-                             aStyleContext);
 
   // We don't actually dispatch the pending events now.  We'll either
   // dispatch them the next time we get a refresh driver notification
@@ -649,7 +646,7 @@ CSSAnimationBuilder::Build(nsPresContext* aPresContext,
     OwningElementRef(*mTarget, mStyleContext->GetPseudoType()));
 
   animation->SetTimelineNoUpdate(mTimeline);
-  animation->SetEffect(effect);
+  animation->SetEffectNoUpdate(effect);
 
   if (isStylePaused) {
     animation->PauseFromStyle();

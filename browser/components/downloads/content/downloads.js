@@ -1145,9 +1145,9 @@ DownloadsViewItem.prototype = {
     this.confirmUnblock(window, "chooseUnblock");
   },
 
-  downloadsCmd_chooseOpen() {
+  downloadsCmd_unblockAndOpen() {
     DownloadsPanel.hidePanel();
-    this.confirmUnblock(window, "chooseOpen");
+    this.unblockAndOpenDownload().catch(Cu.reportError);
   },
 
   downloadsCmd_open() {
@@ -1174,8 +1174,8 @@ DownloadsViewItem.prototype = {
   },
 
   downloadsCmd_showBlockedInfo() {
-    DownloadsBlockedSubview.show(this.element,
-                                 ...this.rawBlockedTitleAndDetails);
+    DownloadsBlockedSubview.toggle(this.element,
+                                   ...this.rawBlockedTitleAndDetails);
   },
 
   downloadsCmd_openReferrer() {
@@ -1235,7 +1235,7 @@ const DownloadsViewController = {
     // showing.  If it is, then take the following path.
     if (DownloadsBlockedSubview.view.showingSubView) {
       let blockedSubviewCmds = [
-        "downloadsCmd_chooseOpen",
+        "downloadsCmd_unblockAndOpen",
         "cmd_delete",
       ];
       return blockedSubviewCmds.indexOf(aCommand) >= 0;
@@ -1604,8 +1604,9 @@ const DownloadsBlockedSubview = {
    * @param details
    *        An array of strings with information about the block.
    */
-  show(element, title, details) {
+  toggle(element, title, details) {
     if (this.view.showingSubView) {
+      this.hide();
       return;
     }
 
