@@ -298,8 +298,12 @@ class CodeGenerator final : public CodeGeneratorSpecific
     void visitUnboxObjectOrNull(LUnboxObjectOrNull* lir);
     void visitStoreElementT(LStoreElementT* lir);
     void visitStoreElementV(LStoreElementV* lir);
+    template <typename T> void emitStoreElementHoleT(T* lir);
+    template <typename T> void emitStoreElementHoleV(T* lir);
     void visitStoreElementHoleT(LStoreElementHoleT* lir);
     void visitStoreElementHoleV(LStoreElementHoleV* lir);
+    void visitFallibleStoreElementV(LFallibleStoreElementV* lir);
+    void visitFallibleStoreElementT(LFallibleStoreElementT* lir);
     void visitStoreUnboxedPointer(LStoreUnboxedPointer* lir);
     void visitConvertUnboxedObjectToNative(LConvertUnboxedObjectToNative* lir);
     void emitArrayPopShift(LInstruction* lir, const MArrayPopShift* mir, Register obj,
@@ -415,7 +419,7 @@ class CodeGenerator final : public CodeGeneratorSpecific
     void visitInterruptCheck(LInterruptCheck* lir);
     void visitOutOfLineInterruptCheckImplicit(OutOfLineInterruptCheckImplicit* ins);
     void visitAsmJSInterruptCheck(LAsmJSInterruptCheck* lir);
-    void visitAsmThrowUnreachable(LAsmThrowUnreachable* lir);
+    void visitWasmTrap(LWasmTrap* lir);
     void visitRecompileCheck(LRecompileCheck* ins);
     void visitRotate(LRotate* ins);
 

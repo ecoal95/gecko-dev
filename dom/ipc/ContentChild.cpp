@@ -1060,7 +1060,9 @@ ContentChild::RecvPMemoryReportRequestConstructor(
     rv = actor->Run();
   }
 
-  return !NS_WARN_IF(NS_FAILED(rv));
+  // Bug 1295622: don't kill the process just because this failed.
+  NS_WARN_IF(NS_FAILED(rv));
+  return true;
 }
 
 NS_IMETHODIMP MemoryReportRequestChild::Run()
@@ -1080,10 +1082,12 @@ NS_IMETHODIMP MemoryReportRequestChild::Run()
   RefPtr<FinishReportingCallback> finishReporting =
     new FinishReportingCallback(this);
 
-  return mgr->GetReportsForThisProcessExtended(handleReport, nullptr,
-                                               mAnonymize,
-                                               FileDescriptorToFILE(mDMDFile, "wb"),
-                                               finishReporting, nullptr);
+  nsresult rv =
+    mgr->GetReportsForThisProcessExtended(handleReport, nullptr, mAnonymize,
+                                          FileDescriptorToFILE(mDMDFile, "wb"),
+                                          finishReporting, nullptr);
+  NS_WARN_IF(NS_FAILED(rv));
+  return rv;
 }
 
 bool
@@ -2473,7 +2477,18 @@ ContentChild::RecvActivateA11y()
 #ifdef ACCESSIBILITY
   // Start accessibility in content process if it's running in chrome
   // process.
-  GetOrCreateAccService();
+  GetOrCreateAccService(nsAccessibilityService::eMainProcess);
+#endif
+  return true;
+}
+
+bool
+ContentChild::RecvShutdownA11y()
+{
+#ifdef ACCESSIBILITY
+  // Try to shutdown accessibility in content process if it's shutting down in
+  // chrome process.
+  MaybeShutdownAccService(nsAccessibilityService::eMainProcess);
 #endif
   return true;
 }

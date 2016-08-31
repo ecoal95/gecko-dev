@@ -2941,6 +2941,15 @@ JS_FreezeObject(JSContext* cx, HandleObject obj)
     return FreezeObject(cx, obj);
 }
 
+static bool
+DeepFreezeSlot(JSContext* cx, const Value& v)
+{
+    if (v.isPrimitive())
+        return true;
+    RootedObject obj(cx, &v.toObject());
+    return JS_DeepFreezeObject(cx, obj);
+}
+
 JS_PUBLIC_API(bool)
 JS_DeepFreezeObject(JSContext* cx, HandleObject obj)
 {
@@ -2960,12 +2969,13 @@ JS_DeepFreezeObject(JSContext* cx, HandleObject obj)
 
     /* Walk slots in obj and if any value is a non-null object, seal it. */
     if (obj->isNative()) {
-        for (uint32_t i = 0, n = obj->as<NativeObject>().slotSpan(); i < n; ++i) {
-            const Value& v = obj->as<NativeObject>().getSlot(i);
-            if (v.isPrimitive())
-                continue;
-            RootedObject obj(cx, &v.toObject());
-            if (!JS_DeepFreezeObject(cx, obj))
+        RootedNativeObject nobj(cx, &obj->as<NativeObject>());
+        for (uint32_t i = 0, n = nobj->slotSpan(); i < n; ++i) {
+            if (!DeepFreezeSlot(cx, nobj->getSlot(i)))
+                return false;
+        }
+        for (uint32_t i = 0, n = nobj->getDenseInitializedLength(); i < n; ++i) {
+            if (!DeepFreezeSlot(cx, nobj->getDenseElement(i)))
                 return false;
         }
     }
@@ -6171,8 +6181,8 @@ JS_SetGlobalJitCompilerOption(JSContext* cx, JSJitCompilerOption opt, uint32_t v
       case JSJITCOMPILER_WASM_TEST_MODE:
         jit::JitOptions.wasmTestMode = !!value;
         break;
-      case JSJITCOMPILER_WASM_EXPLICIT_BOUNDS_CHECKS:
-        jit::JitOptions.wasmExplicitBoundsChecks = !!value;
+      case JSJITCOMPILER_ION_INTERRUPT_WITHOUT_SIGNAL:
+        jit::JitOptions.ionInterruptWithoutSignals = !!value;
         break;
       default:
         break;
@@ -6201,8 +6211,8 @@ JS_GetGlobalJitCompilerOption(JSContext* cx, JSJitCompilerOption opt)
         return rt->canUseOffthreadIonCompilation();
       case JSJITCOMPILER_WASM_TEST_MODE:
         return jit::JitOptions.wasmTestMode ? 1 : 0;
-      case JSJITCOMPILER_WASM_EXPLICIT_BOUNDS_CHECKS:
-        return jit::JitOptions.wasmExplicitBoundsChecks ? 1 : 0;
+      case JSJITCOMPILER_ION_INTERRUPT_WITHOUT_SIGNAL:
+        return jit::JitOptions.ionInterruptWithoutSignals ? 1 : 0;
       default:
         break;
     }

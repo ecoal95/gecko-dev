@@ -291,9 +291,9 @@ FinderHighlighter.prototype = {
     let dict = this.getForWindow(window);
     // Save a clean params set for use later in the `update()` method.
     dict.lastIteratorParams = params;
-    this.clear(window);
     if (!this._modal)
       this.hide(window, this.finder._fastFind.getFoundRange());
+    this.clear(window);
   },
 
   /**
@@ -316,6 +316,12 @@ FinderHighlighter.prototype = {
     } else {
       let findSelection = controller.getSelection(Ci.nsISelectionController.SELECTION_FIND);
       findSelection.addRange(range);
+      // Check if the range is inside an iframe.
+      if (window != window.top) {
+        let dict = this.getForWindow(window.top);
+        if (!dict.frames.has(window))
+          dict.frames.set(window, null);
+      }
     }
 
     if (editableNode) {
@@ -360,11 +366,16 @@ FinderHighlighter.prototype = {
     if (event && event.type == "click" && event.button !== 0)
       return;
 
-    window = (window || this.finder._getWindow()).top;
+    try {
+      window = (window || this.finder._getWindow()).top;
+    } catch (ex) {
+      Cu.reportError(ex);
+      return;
+    }
     let dict = this.getForWindow(window);
 
     this._clearSelection(this.finder._getSelectionController(window), skipRange);
-    for (let frame of dict.frames)
+    for (let frame of dict.frames.keys())
       this._clearSelection(this.finder._getSelectionController(frame), skipRange);
 
     // Next, check our editor cache, for editors belonging to this
@@ -477,6 +488,9 @@ FinderHighlighter.prototype = {
    */
   clear(window = null) {
     if (!window) {
+      // Since we're clearing _all the things_, make sure we hide 'em all as well.
+      for (let win of gWindows.keys())
+        this.hide(win);
       // Reset the Map, because no range references a node anymore.
       gWindows.clear();
       return;
@@ -537,7 +551,7 @@ FinderHighlighter.prototype = {
    */
   onHighlightAllChange(highlightAll) {
     this._highlightAll = highlightAll;
-    if (this._modal && !highlightAll) {
+    if (!highlightAll) {
       this.clear();
       this._scheduleRepaintOfMask(this.finder._getWindow());
     }
@@ -581,17 +595,21 @@ FinderHighlighter.prototype = {
    * offset is accounted for.
    * Geometry.jsm takes care of the DOMRect calculations.
    *
-   * @param  {nsIDOMWindow} window
+   * @param  {nsIDOMWindow} window          Window to read the boundary rect from
+   * @param  {Boolean}      [includeScroll] Whether to ignore the scroll offset,
+   *                                        which is useful for comparing DOMRects.
+   *                                        Optional, defaults to `true`
    * @return {Rect}
    */
-  _getRootBounds(window) {
+  _getRootBounds(window, includeScroll = true) {
     let dwu = this._getDWU(window);
     let cssPageRect = Rect.fromRect(dwu.getRootBounds());
-
     let scrollX = {};
     let scrollY = {};
-    dwu.getScrollXY(false, scrollX, scrollY);
-    cssPageRect.translate(scrollX.value, scrollY.value);
+    if (includeScroll) {
+      dwu.getScrollXY(false, scrollX, scrollY);
+      cssPageRect.translate(scrollX.value, scrollY.value);
+    }
 
     // If we're in a frame, update the position of the rect (top/ left).
     let currWin = window;
@@ -603,9 +621,10 @@ FinderHighlighter.prototype = {
       dwu = this._getDWU(currWin);
       let parentRect = Rect.fromRect(dwu.getBoundsWithoutFlushing(el));
 
-      // Always take the scroll position into account.
-      dwu.getScrollXY(false, scrollX, scrollY);
-      parentRect.translate(scrollX.value, scrollY.value);
+      if (includeScroll) {
+        dwu.getScrollXY(false, scrollX, scrollY);
+        parentRect.translate(scrollX.value, scrollY.value);
+      }
 
       cssPageRect.translate(parentRect.left, parentRect.top);
     }
@@ -630,13 +649,13 @@ FinderHighlighter.prototype = {
       // We need a flush after all :'(
       width = window.innerWidth + window.scrollMaxX - window.scrollMinX;
       height = window.innerHeight + window.scrollMaxY - window.scrollMinY;
-    }
 
-    let scrollbarHeight = {};
-    let scrollbarWidth = {};
-    dwu.getScrollbarSize(false, scrollbarWidth, scrollbarHeight);
-    width -= scrollbarWidth.value;
-    height -= scrollbarHeight.value;
+      let scrollbarHeight = {};
+      let scrollbarWidth = {};
+      dwu.getScrollbarSize(false, scrollbarWidth, scrollbarHeight);
+      width -= scrollbarWidth.value;
+      height -= scrollbarHeight.value;
+    }
 
     return { width, height };
   },
@@ -748,13 +767,14 @@ FinderHighlighter.prototype = {
    * Read and store the rectangles that encompass the entire region of a range
    * for use by the drawing function of the highlighter.
    *
-   * @param {nsIDOMRange} range            Range to fetch the rectangles from
-   * @param {Boolean}     [checkIfDynamic] Whether we should check if the range
-   *                                       is dynamic as per the rules in
-   *                                       `_isInDynamicContainer()`. Optional,
-   *                                       defaults to `true`
-   * @param {Object}     [dict]            Dictionary of properties belonging to
-   *                                       the currently active window
+   * @param  {nsIDOMRange} range            Range to fetch the rectangles from
+   * @param  {Boolean}     [checkIfDynamic] Whether we should check if the range
+   *                                        is dynamic as per the rules in
+   *                                        `_isInDynamicContainer()`. Optional,
+   *                                        defaults to `true`
+   * @param  {Object}      [dict]           Dictionary of properties belonging to
+   *                                        the currently active window
+   * @return {Set}         Set of rects that were found for the range
    */
   _updateRangeRects(range, checkIfDynamic = true, dict = null) {
     let window = range.startContainer.ownerDocument.defaultView;
@@ -769,23 +789,25 @@ FinderHighlighter.prototype = {
     } else
       bounds = this._getRootBounds(window);
 
+    let topBounds = this._getRootBounds(window.top, false);
     let rects = new Set();
     // A range may consist of multiple rectangles, we can also do these kind of
     // precise cut-outs. range.getBoundingClientRect() returns the fully
     // encompassing rectangle, which is too much for our purpose here.
-    for (let dims of range.getClientRects()) {
-      rects.add({
-        height: dims.bottom - dims.top,
-        width: dims.right - dims.left,
-        y: dims.top + bounds.top,
-        x: dims.left + bounds.left
-      });
+    for (let rect of range.getClientRects()) {
+      rect = Rect.fromRect(rect);
+      rect.x += bounds.x;
+      rect.y += bounds.y;
+      // If the rect is not even visible from the top document, we can ignore it.
+      if (rect.intersects(topBounds))
+        rects.add(rect);
     }
 
     dict = dict || this.getForWindow(window.top);
     dict.modalHighlightRectsMap.set(range, rects);
     if (checkIfDynamic && this._isInDynamicContainer(range))
       dict.dynamicRangesSet.add(range);
+    return rects;
   },
 
   /**
@@ -816,7 +838,7 @@ FinderHighlighter.prototype = {
    */
   _updateRangeOutline(dict, textContent = [], fontStyle = null) {
     let outlineNode = dict.modalHighlightOutline;
-    let range = dict.currentFoundRange;
+    let range = this.finder._fastFind.getFoundRange();
     if (!outlineNode || !range)
       return;
     let rect = range.getClientRects()[0];
@@ -878,6 +900,8 @@ FinderHighlighter.prototype = {
         // Make sure to at least show the dimmed background.
         this._repaintHighlightAllMask(window, false);
         this._scheduleRepaintOfMask(window);
+      } else {
+        this._scheduleRepaintOfMask(window, { scrollOnly: true });
       }
       return;
     }
@@ -950,11 +974,14 @@ FinderHighlighter.prototype = {
       let maskContent = [];
       const kRectClassName = kModalIdPrefix + "-findbar-modalHighlight-rect";
       for (let [range, rects] of dict.modalHighlightRectsMap) {
+        if (dict.updateAllRanges)
+          rects = this._updateRangeRects(range);
         for (let rect of rects) {
           maskContent.push(`<div class="${kRectClassName}" style="top: ${rect.y}px;
             left: ${rect.x}px; height: ${rect.height}px; width: ${rect.width}px;"></div>`);
         }
       }
+      dict.updateAllRanges = false;
       maskNode.innerHTML = maskContent.join("");
     }
 
@@ -998,14 +1025,20 @@ FinderHighlighter.prototype = {
    * @param {nsIDOMWindow} window
    * @param {Object}       options Dictionary of painter hints that contains the
    *                               following properties:
-   *   {Boolean} contentChanged Whether the documents' content changed in the
-   *                            meantime. This happens when the DOM is updated
-   *                            whilst the page is loaded.
-   *   {Boolean} scrollOnly     TRUE when the page has scrolled in the meantime,
-   *                            which means that the fixed positioned elements
-   *                            need to be repainted.
+   *   {Boolean} contentChanged  Whether the documents' content changed in the
+   *                             meantime. This happens when the DOM is updated
+   *                             whilst the page is loaded.
+   *   {Boolean} scrollOnly      TRUE when the page has scrolled in the meantime,
+   *                             which means that the fixed positioned elements
+   *                             need to be repainted.
+   *   {Boolean} updateAllRanges Whether to recalculate the rects of all ranges
+   *                             that were found up until now.
    */
-  _scheduleRepaintOfMask(window, { contentChanged, scrollOnly } = { contentChanged: false, scrollOnly: false }) {
+  _scheduleRepaintOfMask(window, { contentChanged, scrollOnly, updateAllRanges } =
+                                 { contentChanged: false, scrollOnly: false, updateAllRanges: false }) {
+    if (!this._modal)
+      return;
+
     window = window.top;
     let dict = this.getForWindow(window);
     let repaintFixedNodes = (scrollOnly && !!dict.dynamicRangesSet.size);
@@ -1014,6 +1047,9 @@ FinderHighlighter.prototype = {
     // `_repaintHighlightAllMask()` right after the timeout.
     if (!dict.unconditionalRepaintRequested)
       dict.unconditionalRepaintRequested = !contentChanged || repaintFixedNodes;
+    // Some events, like a resize, call for recalculation of all the rects of all ranges.
+    if (!dict.updateAllRanges)
+      dict.updateAllRanges = updateAllRanges;
 
     if (dict.modalRepaintScheduler)
       return;
@@ -1021,22 +1057,20 @@ FinderHighlighter.prototype = {
     dict.modalRepaintScheduler = window.setTimeout(() => {
       dict.modalRepaintScheduler = null;
 
-      if (dict.unconditionalRepaintRequested) {
+      let { width: previousWidth, height: previousHeight } = dict.lastWindowDimensions;
+      let { width, height } = dict.lastWindowDimensions = this._getWindowDimensions(window);
+      let pageContentChanged = (Math.abs(previousWidth - width) > kContentChangeThresholdPx ||
+                                Math.abs(previousHeight - height) > kContentChangeThresholdPx);
+      // When the page has changed significantly enough in size, we'll restart
+      // the iterator with the same parameters as before to find us new ranges.
+      if (pageContentChanged)
+        this.iterator.restart(this.finder);
+
+      if (dict.unconditionalRepaintRequested ||
+          (dict.modalHighlightRectsMap.size && pageContentChanged)) {
         dict.unconditionalRepaintRequested = false;
         this._repaintHighlightAllMask(window);
-        return;
       }
-
-      let { width, height } = this._getWindowDimensions(window);
-      if (!dict.modalHighlightRectsMap.size ||
-          (Math.abs(dict.lastWindowDimensions.width - width) < kContentChangeThresholdPx &&
-           Math.abs(dict.lastWindowDimensions.height - height) < kContentChangeThresholdPx)) {
-        return;
-      }
-
-      this.iterator.restart(this.finder);
-      dict.lastWindowDimensions = { width, height };
-      this._repaintHighlightAllMask(window);
     }, kModalHighlightRepaintFreqMs);
   },
 
@@ -1051,7 +1085,8 @@ FinderHighlighter.prototype = {
   _maybeInstallStyleSheet(window) {
     window = window.top;
     let dict = this.getForWindow(window);
-    if (dict.installedSheet)
+    let document = window.document;
+    if (dict.installedSheet == document)
       return;
 
     let dwu = this._getDWU(window);
@@ -1059,7 +1094,7 @@ FinderHighlighter.prototype = {
     try {
       dwu.loadSheetUsingURIString(uri, dwu.AGENT_SHEET);
     } catch (e) {}
-    dict.installedSheet = true;
+    dict.installedSheet = document;
   },
 
   /**
@@ -1077,14 +1112,16 @@ FinderHighlighter.prototype = {
     window = window.top;
     dict.highlightListeners = [
       this._scheduleRepaintOfMask.bind(this, window, { contentChanged: true }),
+      this._scheduleRepaintOfMask.bind(this, window, { updateAllRanges: true }),
       this._scheduleRepaintOfMask.bind(this, window, { scrollOnly: true }),
       this.hide.bind(this, window, null)
     ];
     let target = this.iterator._getDocShell(window).chromeEventHandler;
     target.addEventListener("MozAfterPaint", dict.highlightListeners[0]);
-    target.addEventListener("DOMMouseScroll", dict.highlightListeners[1]);
-    target.addEventListener("mousewheel", dict.highlightListeners[1]);
-    target.addEventListener("click", dict.highlightListeners[2]);
+    target.addEventListener("resize", dict.highlightListeners[1]);
+    target.addEventListener("DOMMouseScroll", dict.highlightListeners[2]);
+    target.addEventListener("mousewheel", dict.highlightListeners[2]);
+    target.addEventListener("click", dict.highlightListeners[3]);
   },
 
   /**
@@ -1100,9 +1137,10 @@ FinderHighlighter.prototype = {
 
     let target = this.iterator._getDocShell(window).chromeEventHandler;
     target.removeEventListener("MozAfterPaint", dict.highlightListeners[0]);
-    target.removeEventListener("DOMMouseScroll", dict.highlightListeners[1]);
-    target.removeEventListener("mousewheel", dict.highlightListeners[1]);
-    target.removeEventListener("click", dict.highlightListeners[2]);
+    target.removeEventListener("resize", dict.highlightListeners[1]);
+    target.removeEventListener("DOMMouseScroll", dict.highlightListeners[2]);
+    target.removeEventListener("mousewheel", dict.highlightListeners[2]);
+    target.removeEventListener("click", dict.highlightListeners[3]);
 
     dict.highlightListeners = null;
   },

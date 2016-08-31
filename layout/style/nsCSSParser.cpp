@@ -6031,6 +6031,23 @@ CSSParserImpl::ParsePseudoSelector(int32_t&       aDataMask,
     return eSelectorParsingStatus_Error;
   }
 
+  if (aSelector.IsPseudoElement()) {
+    CSSPseudoElementType type = aSelector.PseudoType();
+    if (!nsCSSPseudoElements::PseudoElementSupportsUserActionState(type)) {
+      // We only allow user action pseudo-classes on certain pseudo-elements.
+      REPORT_UNEXPECTED_TOKEN(PEPseudoSelNoUserActionPC);
+      UngetToken();
+      return eSelectorParsingStatus_Error;
+    }
+    if (!isPseudoClass || !pseudoClassIsUserAction) {
+      // CSS 4 Selectors says that pseudo-elements can only be followed by
+      // a user action pseudo-class.
+      REPORT_UNEXPECTED_TOKEN(PEPseudoClassNotUserAction);
+      UngetToken();
+      return eSelectorParsingStatus_Error;
+    }
+  }
+
   if (!parsingPseudoElement &&
       CSSPseudoClassType::negation == pseudoClassType) {
     if (aIsNegated) { // :not() can't be itself negated
@@ -6046,22 +6063,6 @@ CSSParserImpl::ParsePseudoSelector(int32_t&       aDataMask,
     }
   }
   else if (!parsingPseudoElement && isPseudoClass) {
-    if (aSelector.IsPseudoElement()) {
-      CSSPseudoElementType type = aSelector.PseudoType();
-      if (!nsCSSPseudoElements::PseudoElementSupportsUserActionState(type)) {
-        // We only allow user action pseudo-classes on certain pseudo-elements.
-        REPORT_UNEXPECTED_TOKEN(PEPseudoSelNoUserActionPC);
-        UngetToken();
-        return eSelectorParsingStatus_Error;
-      }
-      if (!pseudoClassIsUserAction) {
-        // CSS 4 Selectors says that pseudo-elements can only be followed by
-        // a user action pseudo-class.
-        REPORT_UNEXPECTED_TOKEN(PEPseudoClassNotUserAction);
-        UngetToken();
-        return eSelectorParsingStatus_Error;
-      }
-    }
     aDataMask |= SEL_MASK_PCLASS;
     if (eCSSToken_Function == mToken.mType) {
       nsSelectorParsingStatus parsingStatus;
@@ -6503,13 +6504,7 @@ CSSParserImpl::ParseSelector(nsCSSSelectorList* aList,
     ParseTypeOrUniversalSelector(dataMask, *selector, false);
 
   while (parsingStatus == eSelectorParsingStatus_Continue) {
-    if (eCSSToken_ID == mToken.mType) { // #id
-      parsingStatus = ParseIDSelector(dataMask, *selector);
-    }
-    else if (mToken.IsSymbol('.')) {    // .class
-      parsingStatus = ParseClassSelector(dataMask, *selector);
-    }
-    else if (mToken.IsSymbol(':')) {    // :pseudo
+    if (mToken.IsSymbol(':')) {    // :pseudo
       parsingStatus = ParsePseudoSelector(dataMask, *selector, false,
                                           getter_AddRefs(pseudoElement),
                                           getter_Transfers(pseudoElementArgs),
@@ -6527,6 +6522,17 @@ CSSParserImpl::ParseSelector(nsCSSSelectorList* aList,
         selector->mClassList = pseudoElementArgs.forget();
         selector->SetPseudoType(pseudoElementType);
       }
+    } else if (selector->IsPseudoElement()) {
+      // Once we parsed a pseudo-element, we can only parse
+      // pseudo-classes (and only a limited set, which
+      // ParsePseudoSelector knows how to handle).
+      parsingStatus = eSelectorParsingStatus_Done;
+      UngetToken();
+      break;
+    } else if (eCSSToken_ID == mToken.mType) { // #id
+      parsingStatus = ParseIDSelector(dataMask, *selector);
+    } else if (mToken.IsSymbol('.')) {    // .class
+      parsingStatus = ParseClassSelector(dataMask, *selector);
     }
     else if (mToken.IsSymbol('[')) {    // [attribute
       parsingStatus = ParseAttributeSelector(dataMask, *selector);
@@ -7452,9 +7458,9 @@ static const nsCSSPropertyID kBorderBlockEndIDs[] = {
   eCSSProperty_border_block_end_color
 };
 static const nsCSSPropertyID kColumnRuleIDs[] = {
-  eCSSProperty__moz_column_rule_width,
-  eCSSProperty__moz_column_rule_style,
-  eCSSProperty__moz_column_rule_color
+  eCSSProperty_column_rule_width,
+  eCSSProperty_column_rule_style,
+  eCSSProperty_column_rule_color
 };
 
 bool
@@ -11634,9 +11640,9 @@ CSSParserImpl::ParsePropertyByFunction(nsCSSPropertyID aPropID)
 
   case eCSSProperty_clip:
     return ParseRect(eCSSProperty_clip);
-  case eCSSProperty__moz_columns:
+  case eCSSProperty_columns:
     return ParseColumns();
-  case eCSSProperty__moz_column_rule:
+  case eCSSProperty_column_rule:
     return ParseBorderSide(kColumnRuleIDs, false);
   case eCSSProperty_content:
     return ParseContent();
@@ -13796,8 +13802,8 @@ CSSParserImpl::ParseColumns()
   // find.
   static const nsCSSPropertyID columnIDs[] = {
     eCSSPropertyExtra_x_auto_value,
-    eCSSProperty__moz_column_count,
-    eCSSProperty__moz_column_width
+    eCSSProperty_column_count,
+    eCSSProperty_column_width
   };
   const int32_t numProps = MOZ_ARRAY_LENGTH(columnIDs);
 

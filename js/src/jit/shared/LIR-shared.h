@@ -1404,13 +1404,17 @@ class LAsmJSInterruptCheck : public LInstructionHelper<0, 0, 0>
     }
 };
 
-class LAsmThrowUnreachable : public LInstructionHelper<0, 0, 0>
+class LWasmTrap : public LInstructionHelper<0, 0, 0>
 {
   public:
-    LIR_HEADER(AsmThrowUnreachable);
+    LIR_HEADER(WasmTrap);
 
-    LAsmThrowUnreachable()
+    LWasmTrap()
     { }
+
+    const MWasmTrap* mir() const {
+        return mir_->toWasmTrap();
+    }
 };
 
 template<size_t Defs, size_t Ops>
@@ -5715,6 +5719,71 @@ class LStoreElementHoleT : public LInstructionHelper<0, 4, 1>
 
     const MStoreElementHole* mir() const {
         return mir_->toStoreElementHole();
+    }
+    const LAllocation* object() {
+        return getOperand(0);
+    }
+    const LAllocation* elements() {
+        return getOperand(1);
+    }
+    const LAllocation* index() {
+        return getOperand(2);
+    }
+    const LAllocation* value() {
+        return getOperand(3);
+    }
+};
+
+// Like LStoreElementV, but can just ignore assignment (for eg. frozen objects)
+class LFallibleStoreElementV : public LInstructionHelper<0, 3 + BOX_PIECES, 1>
+{
+  public:
+    LIR_HEADER(FallibleStoreElementV)
+
+    LFallibleStoreElementV(const LAllocation& object, const LAllocation& elements,
+                           const LAllocation& index, const LBoxAllocation& value,
+                           const LDefinition& temp) {
+        setOperand(0, object);
+        setOperand(1, elements);
+        setOperand(2, index);
+        setBoxOperand(Value, value);
+        setTemp(0, temp);
+    }
+
+    static const size_t Value = 3;
+
+    const MFallibleStoreElement* mir() const {
+        return mir_->toFallibleStoreElement();
+    }
+    const LAllocation* object() {
+        return getOperand(0);
+    }
+    const LAllocation* elements() {
+        return getOperand(1);
+    }
+    const LAllocation* index() {
+        return getOperand(2);
+    }
+};
+
+// Like LStoreElementT, but can just ignore assignment (for eg. frozen objects)
+class LFallibleStoreElementT : public LInstructionHelper<0, 4, 1>
+{
+  public:
+    LIR_HEADER(FallibleStoreElementT)
+
+    LFallibleStoreElementT(const LAllocation& object, const LAllocation& elements,
+                           const LAllocation& index, const LAllocation& value,
+                           const LDefinition& temp) {
+        setOperand(0, object);
+        setOperand(1, elements);
+        setOperand(2, index);
+        setOperand(3, value);
+        setTemp(0, temp);
+    }
+
+    const MFallibleStoreElement* mir() const {
+        return mir_->toFallibleStoreElement();
     }
     const LAllocation* object() {
         return getOperand(0);

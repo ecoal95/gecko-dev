@@ -275,6 +275,10 @@ using namespace mozilla::system;
 #include "nsThread.h"
 #endif
 
+#ifdef ACCESSIBILITY
+#include "nsAccessibilityService.h"
+#endif
+
 // For VP9Benchmark::sBenchmarkFpsPref
 #include "Benchmark.h"
 
@@ -1085,7 +1089,6 @@ ContentParent::CreateBrowserOrApp(const TabContext& aContext,
   }
 
   if (aContext.IsMozBrowserElement() || !aContext.HasOwnApp()) {
-    RefPtr<TabParent> tp;
     RefPtr<nsIContentParent> constructorSender;
     if (isInContentProcess) {
       MOZ_ASSERT(aContext.IsMozBrowserElement());
@@ -1702,14 +1705,15 @@ ContentParent::AllocateLayerTreeId(ContentParent* aContent,
   GPUProcessManager* gpu = GPUProcessManager::Get();
 
   *aId = gpu->AllocateLayerTreeId();
+
+  if (!aContent || !aTopLevel) {
+    return false;
+  }
+
   gpu->MapLayerTreeId(*aId, aContent->OtherPid());
 
   if (!gfxPlatform::AsyncPanZoomEnabled()) {
     return true;
-  }
-
-  if (!aContent || !aTopLevel) {
-    return false;
   }
 
   return aContent->SendNotifyLayerAllocated(aTabId, *aId);
@@ -2843,19 +2847,24 @@ ContentParent::Observe(nsISupports* aSubject,
   }
 #endif
 #ifdef ACCESSIBILITY
-  // Make sure accessibility is running in content process when accessibility
-  // gets initiated in chrome process.
-  else if (aData && (*aData == '1') &&
-       !strcmp(aTopic, "a11y-init-or-shutdown")) {
+  else if (aData && !strcmp(aTopic, "a11y-init-or-shutdown")) {
+    if (*aData == '1') {
+      // Make sure accessibility is running in content process when
+      // accessibility gets initiated in chrome process.
 #if !defined(XP_WIN)
-    Unused << SendActivateA11y();
-#else
-    // On Windows we currently only enable a11y in the content process
-    // for testing purposes.
-    if (Preferences::GetBool(kForceEnableE10sPref, false)) {
       Unused << SendActivateA11y();
-    }
+#else
+      // On Windows we currently only enable a11y in the content process
+      // for testing purposes.
+      if (Preferences::GetBool(kForceEnableE10sPref, false)) {
+        Unused << SendActivateA11y();
+      }
 #endif
+    } else {
+      // If possible, shut down accessibility in content process when
+      // accessibility gets shutdown in chrome process.
+      Unused << SendShutdownA11y();
+    }
   }
 #endif
   else if (!strcmp(aTopic, "app-theme-changed")) {

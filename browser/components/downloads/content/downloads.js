@@ -382,14 +382,15 @@ const DownloadsPanel = {
     } else {
       itemClearList.setAttribute("hidden", "true");
     }
+    DownloadsViewController.updateCommands();
 
-    document.getElementById("downloadsFooterButtonsSplitter").classList
-      .add("downloadsDropmarkerSplitterExtend");
+    document.getElementById("downloadsFooter")
+      .setAttribute("showingdropdown", true);
   },
 
   onFooterPopupHidden(aEvent) {
-    document.getElementById("downloadsFooterButtonsSplitter").classList
-      .remove("downloadsDropmarkerSplitterExtend");
+    document.getElementById("downloadsFooter")
+      .removeAttribute("showingdropdown");
   },
 
   //////////////////////////////////////////////////////////////////////////////
@@ -1524,6 +1525,10 @@ const DownloadsFooter = {
         this._footerNode.setAttribute("showingsummary", "true");
       } else {
         this._footerNode.removeAttribute("showingsummary");
+      }
+      if (!aValue && this._showingSummary) {
+        // Make sure the panel's height shrinks when the summary is hidden.
+        DownloadsBlockedSubview.view.setHeightToFit();
       }
       this._showingSummary = aValue;
     }

@@ -94,7 +94,7 @@ static void
 TryToUseImplicitInterruptCheck(MIRGraph& graph, MBasicBlock* backedge)
 {
     // Implicit interrupt checks require asm.js signal handlers to be installed.
-    if (!wasm::HaveSignalHandlers())
+    if (!wasm::HaveSignalHandlers() || JitOptions.ionInterruptWithoutSignals)
         return;
 
     // To avoid triggering expensive interrupts (backedge patching) in
@@ -2530,9 +2530,9 @@ LIRGenerator::visitAsmJSInterruptCheck(MAsmJSInterruptCheck* ins)
 }
 
 void
-LIRGenerator::visitAsmThrowUnreachable(MAsmThrowUnreachable* ins)
+LIRGenerator::visitWasmTrap(MWasmTrap* ins)
 {
-    add(new(alloc()) LAsmThrowUnreachable, ins);
+    add(new(alloc()) LWasmTrap, ins);
 }
 
 void
@@ -3155,6 +3155,38 @@ LIRGenerator::visitStoreElementHole(MStoreElementHole* ins)
     add(lir, ins);
     assignSafepoint(lir, ins);
 }
+
+void
+LIRGenerator::visitFallibleStoreElement(MFallibleStoreElement* ins)
+{
+    MOZ_ASSERT(ins->elements()->type() == MIRType::Elements);
+    MOZ_ASSERT(ins->index()->type() == MIRType::Int32);
+
+    const LUse object = useRegister(ins->object());
+    const LUse elements = useRegister(ins->elements());
+    const LAllocation index = useRegisterOrConstant(ins->index());
+
+    // Use a temp register when adding new elements to unboxed arrays.
+    LDefinition tempDef = LDefinition::BogusTemp();
+    if (ins->unboxedType() != JSVAL_TYPE_MAGIC)
+        tempDef = temp();
+
+    LInstruction* lir;
+    switch (ins->value()->type()) {
+      case MIRType::Value:
+        lir = new(alloc()) LFallibleStoreElementV(object, elements, index, useBox(ins->value()),
+                                                  tempDef);
+        break;
+      default:
+        const LAllocation value = useRegisterOrNonDoubleConstant(ins->value());
+        lir = new(alloc()) LFallibleStoreElementT(object, elements, index, value, tempDef);
+        break;
+    }
+
+    add(lir, ins);
+    assignSafepoint(lir, ins);
+}
+
 
 void
 LIRGenerator::visitStoreUnboxedObjectOrNull(MStoreUnboxedObjectOrNull* ins)

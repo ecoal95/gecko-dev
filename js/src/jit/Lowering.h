@@ -191,7 +191,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitFunctionEnvironment(MFunctionEnvironment* ins);
     void visitInterruptCheck(MInterruptCheck* ins);
     void visitAsmJSInterruptCheck(MAsmJSInterruptCheck* ins);
-    void visitAsmThrowUnreachable(MAsmThrowUnreachable* ins);
+    void visitWasmTrap(MWasmTrap* ins);
     void visitAsmReinterpret(MAsmReinterpret* ins);
     void visitStoreSlot(MStoreSlot* ins);
     void visitFilterTypeSet(MFilterTypeSet* ins);
@@ -223,6 +223,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitLoadUnboxedString(MLoadUnboxedString* ins);
     void visitStoreElement(MStoreElement* ins);
     void visitStoreElementHole(MStoreElementHole* ins);
+    void visitFallibleStoreElement(MFallibleStoreElement* ins);
     void visitStoreUnboxedObjectOrNull(MStoreUnboxedObjectOrNull* ins);
     void visitStoreUnboxedString(MStoreUnboxedString* ins);
     void visitConvertUnboxedObjectToNative(MConvertUnboxedObjectToNative* ins);

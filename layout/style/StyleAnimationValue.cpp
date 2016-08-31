@@ -849,9 +849,7 @@ StyleAnimationValue::ComputeDistance(nsCSSPropertyID aProperty,
             (color2.GetColorValue(), StyleAnimationValue::ColorConstructor);
           double colorDistance;
 
-        #ifdef DEBUG
-          bool ok =
-        #endif
+          DebugOnly<bool> ok =
             StyleAnimationValue::ComputeDistance(eCSSProperty_color,
                                                  color1Value, color2Value,
                                                  colorDistance);
@@ -1260,9 +1258,7 @@ AddShadowItems(double aCoeff1, const nsCSSValue &aValue1,
     StyleAnimationValue color2Value
       (color2.GetColorValue(), StyleAnimationValue::ColorConstructor);
     StyleAnimationValue resultColorValue;
-  #ifdef DEBUG
-    bool ok =
-  #endif
+    DebugOnly<bool> ok =
       StyleAnimationValue::AddWeighted(eCSSProperty_color,
                                        aCoeff1, color1Value,
                                        aCoeff2, color2Value,
@@ -3669,7 +3665,7 @@ StyleAnimationValue::ExtractComputedValue(nsCSSPropertyID aProperty,
         BORDER_WIDTH_CASE(eCSSProperty_border_top_width, top)
         #undef BORDER_WIDTH_CASE
 
-        case eCSSProperty__moz_column_rule_width:
+        case eCSSProperty_column_rule_width:
           aComputedValue.SetCoordValue(
             static_cast<const nsStyleColumn*>(styleStruct)->
               GetComputedColumnRuleWidth());
@@ -3702,7 +3698,7 @@ StyleAnimationValue::ExtractComputedValue(nsCSSPropertyID aProperty,
           break;
         }
 
-        case eCSSProperty__moz_column_rule_color: {
+        case eCSSProperty_column_rule_color: {
           const nsStyleColumn *styleColumn =
             static_cast<const nsStyleColumn*>(styleStruct);
           nscolor color;
@@ -3715,7 +3711,7 @@ StyleAnimationValue::ExtractComputedValue(nsCSSPropertyID aProperty,
           break;
         }
 
-        case eCSSProperty__moz_column_count: {
+        case eCSSProperty_column_count: {
           const nsStyleColumn *styleColumn =
             static_cast<const nsStyleColumn*>(styleStruct);
           if (styleColumn->mColumnCount == NS_STYLE_COLUMN_COUNT_AUTO) {

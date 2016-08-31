@@ -294,6 +294,8 @@
     _(ArrayJoin)                    \
     _(StoreElementHoleV)            \
     _(StoreElementHoleT)            \
+    _(FallibleStoreElementV)        \
+    _(FallibleStoreElementT)        \
     _(LoadTypedArrayElementHole)    \
     _(LoadTypedArrayElementStatic)  \
     _(StoreTypedArrayElementHole)   \
@@ -369,7 +371,7 @@
     _(CallInstanceOf)               \
     _(InterruptCheck)               \
     _(AsmJSInterruptCheck)          \
-    _(AsmThrowUnreachable)          \
+    _(WasmTrap)                     \
     _(AsmReinterpret)               \
     _(AsmReinterpretToI64)          \
     _(AsmReinterpretFromI64)        \

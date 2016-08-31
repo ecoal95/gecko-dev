@@ -455,10 +455,6 @@ private:
 
   void EnsureTelemetryReported();
 
-#ifdef MOZ_RAW
-  static bool IsRawEnabled();
-#endif
-
   static bool IsOggEnabled();
   static bool IsOpusEnabled();
   static bool IsWaveEnabled();
@@ -826,9 +822,6 @@ protected:
 
 public:
   AbstractCanonical<media::NullableTimeUnit>* CanonicalDurationOrNull() override;
-  AbstractCanonical<Maybe<double>>* CanonicalExplicitDuration() override {
-    return &mExplicitDuration;
-  }
   AbstractCanonical<double>* CanonicalVolume() {
     return &mVolume;
   }
@@ -840,6 +833,9 @@ public:
   }
   AbstractCanonical<media::NullableTimeUnit>* CanonicalEstimatedDuration() {
     return &mEstimatedDuration;
+  }
+  AbstractCanonical<Maybe<double>>* CanonicalExplicitDuration() {
+    return &mExplicitDuration;
   }
   AbstractCanonical<PlayState>* CanonicalPlayState() {
     return &mPlayState;
