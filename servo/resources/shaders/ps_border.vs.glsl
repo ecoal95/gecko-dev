@@ -8,14 +8,15 @@ struct Border {
     vec4 verticalColor;
     vec4 horizontalColor;
     vec4 radii;
-    uvec4 border_style_trbl;
+    vec4 border_style_trbl;
+    vec4 part;
 };
 
 layout(std140) uniform Items {
     Border borders[WR_MAX_PRIM_ITEMS];
 };
 
-uint get_border_style(Border a_border, uint a_edge) {
+float get_border_style(Border a_border, uint a_edge) {
   switch (a_edge) {
     case PST_TOP:
     case PST_TOP_LEFT:
@@ -56,7 +57,7 @@ void main(void) {
     vRadii = border.radii;
 
     float x0, y0, x1, y1;
-    vBorderPart = border.info.layer_tile_part.z;
+    vBorderPart = uint(border.part.x);
     switch (vBorderPart) {
         // These are the layer tile part PrimitivePart as uploaded by the tiling.rs
         case PST_TOP_LEFT:
@@ -103,19 +104,20 @@ void main(void) {
             break;
     }
 
-    vBorderStyle = get_border_style(border, vBorderPart);
+    vBorderStyle = uint(get_border_style(border, vBorderPart));
 
     // y1 - y0 is the height of the corner / line
     // x1 - x0 is the width of the corner / line.
     float width = x1 - x0;
     float height = y1 - y0;
 
+    vPieceRect = vec4(x0, y0, width, height);
+
     // The fragment shader needs to calculate the distance from the bisecting line
     // to properly mix border colors. For transformed borders, we calculate this distance
     // in the fragment shader itself. For non-transformed borders, we can use the
     // interpolator.
 #ifdef WR_FEATURE_TRANSFORM
-    vPieceRect = vec4(x0, y0, width, height);
     vPieceRectHypotenuseLength = sqrt(pow(width, 2) + pow(height, 2));
 #else
     vDistanceFromMixLine = (vi.local_clamped_pos.x - x0) * height -

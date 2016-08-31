@@ -804,6 +804,18 @@
             "url": "/_mozilla/css/border_collapse_missing_cell_a.html"
           }
         ],
+        "css/border_collapse_row_a.html": [
+          {
+            "path": "css/border_collapse_row_a.html",
+            "references": [
+              [
+                "/_mozilla/css/border_collapse_row_ref.html",
+                "=="
+              ]
+            ],
+            "url": "/_mozilla/css/border_collapse_row_a.html"
+          }
+        ],
         "css/border_collapse_rowgroup_a.html": [
           {
             "path": "css/border_collapse_rowgroup_a.html",
@@ -1354,6 +1366,18 @@
               ]
             ],
             "url": "/_mozilla/css/data_img_a.html"
+          }
+        ],
+        "css/deferred-paint.html": [
+          {
+            "path": "css/deferred-paint.html",
+            "references": [
+              [
+                "/_mozilla/css/deferred-paint-ref.html",
+                "=="
+              ]
+            ],
+            "url": "/_mozilla/css/deferred-paint.html"
           }
         ],
         "css/direction_style_caching.html": [
@@ -6354,6 +6378,12 @@
             "url": "/_mozilla/css/float_relative_to_position.html"
           }
         ],
+        "css/media_calc_crash.html": [
+          {
+            "path": "css/media_calc_crash.html",
+            "url": "/_mozilla/css/media_calc_crash.html"
+          }
+        ],
         "css/meta_viewport_resize.html": [
           {
             "path": "css/meta_viewport_resize.html",
@@ -10132,6 +10162,18 @@
           "url": "/_mozilla/css/border_collapse_missing_cell_a.html"
         }
       ],
+      "css/border_collapse_row_a.html": [
+        {
+          "path": "css/border_collapse_row_a.html",
+          "references": [
+            [
+              "/_mozilla/css/border_collapse_row_ref.html",
+              "=="
+            ]
+          ],
+          "url": "/_mozilla/css/border_collapse_row_a.html"
+        }
+      ],
       "css/border_collapse_rowgroup_a.html": [
         {
           "path": "css/border_collapse_rowgroup_a.html",
@@ -10682,6 +10724,30 @@
             ]
           ],
           "url": "/_mozilla/css/data_img_a.html"
+        }
+      ],
+      "css/deferred-paint-ref.html": [
+        {
+          "path": "css/deferred-paint-ref.html",
+          "references": [
+            [
+              "/_mozilla/css/deferred-paint-ref.html",
+              "=="
+            ]
+          ],
+          "url": "/_mozilla/css/deferred-paint-ref.html"
+        }
+      ],
+      "css/deferred-paint.html": [
+        {
+          "path": "css/deferred-paint.html",
+          "references": [
+            [
+              "/_mozilla/css/deferred-paint-ref.html",
+              "=="
+            ]
+          ],
+          "url": "/_mozilla/css/deferred-paint.html"
         }
       ],
       "css/direction_style_caching.html": [
