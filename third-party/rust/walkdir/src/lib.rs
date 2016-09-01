@@ -89,12 +89,13 @@ for entry in walker.filter_entry(|e| !is_hidden(e)) {
 #[cfg(test)] extern crate quickcheck;
 #[cfg(test)] extern crate rand;
 
-use std::cmp::min;
+use std::cmp::{Ordering, min};
 use std::error;
 use std::fmt;
 use std::fs::{self, FileType, ReadDir};
 use std::io;
 use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::result;
 use std::vec;
@@ -190,6 +191,7 @@ struct WalkDirOptions {
     max_open: usize,
     min_depth: usize,
     max_depth: usize,
+    sorter: Option<Box<FnMut(&OsString,&OsString) -> Ordering + 'static>>,
 }
 
 impl WalkDir {
@@ -204,6 +206,7 @@ impl WalkDir {
                 max_open: 10,
                 min_depth: 0,
                 max_depth: ::std::usize::MAX,
+                sorter: None,
             },
             root: root.as_ref().to_path_buf(),
         }
@@ -283,6 +286,26 @@ impl WalkDir {
             n = 1;
         }
         self.opts.max_open = n;
+        self
+    }
+
+    /// Set a function for sorting directory entries.
+    ///
+    /// If a compare function is set, the resulting iterator will return all
+    /// paths in sorted order. The compare function will be called to compare
+    /// names from entries from the same directory using only the name of the
+    /// entry.
+    ///
+    /// ```rust,no-run
+    /// use std::cmp;
+    /// use std::ffi::OsString;
+    /// use walkdir::WalkDir;
+    ///
+    /// WalkDir::new("foo").sort_by(|a,b| a.cmp(b));
+    /// ```
+    pub fn sort_by<F>(mut self, cmp: F) -> Self
+            where F: FnMut(&OsString, &OsString) -> Ordering + 'static {
+        self.opts.sorter = Some(Box::new(cmp));
         self
     }
 }
@@ -545,7 +568,22 @@ impl Iter {
         let rd = fs::read_dir(dent.path()).map_err(|err| {
             Some(Error::from_path(self.depth, dent.path().to_path_buf(), err))
         });
-        self.stack_list.push(DirList::Opened { depth: self.depth, it: rd });
+        let mut list = DirList::Opened { depth: self.depth, it: rd };
+        if let Some(ref mut cmp) = self.opts.sorter {
+            let mut entries: Vec<_> = list.collect();
+            entries.sort_by(|a, b| {
+                match (a, b) {
+                    (&Ok(ref a), &Ok(ref b)) => {
+                        cmp(&a.file_name(), &b.file_name())
+                    }
+                    (&Err(_), &Err(_)) => Ordering::Equal,
+                    (&Ok(_), &Err(_)) => Ordering::Greater,
+                    (&Err(_), &Ok(_)) => Ordering::Less,
+                }
+            });
+            list = DirList::Closed(entries.into_iter());
+        }
+        self.stack_list.push(list);
         if self.opts.follow_links {
             self.stack_path.push(dent.path().to_path_buf());
         }
@@ -601,8 +639,6 @@ impl DirList {
     fn close(&mut self) {
         if let DirList::Opened { .. } = *self {
             *self = DirList::Closed(self.collect::<Vec<_>>().into_iter());
-        } else {
-            unreachable!("BUG: entry already closed");
         }
     }
 }
