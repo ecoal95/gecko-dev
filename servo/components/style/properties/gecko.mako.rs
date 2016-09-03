@@ -24,10 +24,9 @@ use gecko_bindings::bindings::{Gecko_EnsureImageLayersLength, Gecko_CreateGradie
 use gecko_bindings::bindings::{Gecko_CopyImageValueFrom, Gecko_CopyFontFamilyFrom};
 use gecko_bindings::bindings::{Gecko_FontFamilyList_AppendGeneric, Gecko_FontFamilyList_AppendNamed};
 use gecko_bindings::bindings::{Gecko_FontFamilyList_Clear, Gecko_InitializeImageLayer};
-use gecko_bindings::bindings::ServoComputedValuesBorrowed;
+use gecko_bindings::bindings::ServoComputedValuesBorrowedOrNull;
 use gecko_bindings::structs;
 use gecko_bindings::sugar::ns_style_coord::{CoordDataValue, CoordData, CoordDataMut};
-use gecko_bindings::sugar::refptr::HasArcFFI;
 use gecko_values::{StyleCoordHelpers, GeckoStyleCoordConvertible, convert_nscolor_to_rgba};
 use gecko_values::convert_rgba_to_nscolor;
 use gecko_values::round_border_to_device_pixels;
@@ -35,7 +34,7 @@ use logical_geometry::WritingMode;
 use properties::CascadePropertyFn;
 use properties::longhands;
 use std::fmt::{self, Debug};
-use std::mem::{transmute, uninitialized, zeroed};
+use std::mem::{transmute, zeroed};
 use std::ptr;
 use std::sync::atomic::{ATOMIC_USIZE_INIT, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -468,39 +467,70 @@ impl Debug for ${style_struct.gecko_struct_name} {
 
 <%def name="raw_impl_trait(style_struct, skip_longhands='', skip_additionals='')">
 <%
-   longhands = [x for x in style_struct.longhands
+    longhands = [x for x in style_struct.longhands
                 if not (skip_longhands == "*" or x.name in skip_longhands.split())]
 
-   #
-   # Make a list of types we can't auto-generate.
-   #
-   force_stub = [];
-   # These are currently being shuffled to a different style struct on the gecko side.
-   force_stub += ["backface-visibility", "transform-box", "transform-style"]
-   # These live in an nsFont member in Gecko. Should be straightforward to do manually.
-   force_stub += ["font-kerning", "font-stretch", "font-variant"]
-   # These have unusual representations in gecko.
-   force_stub += ["list-style-type", "text-overflow"]
-   # In a nsTArray, have to be done manually, but probably not too much work
-   # (the "filling them", not the "making them work")
-   force_stub += ["animation-name", "animation-duration",
+    #
+    # Make a list of types we can't auto-generate.
+    #
+    force_stub = [];
+    # These are currently being shuffled to a different style struct on the gecko side.
+    force_stub += ["backface-visibility", "transform-box", "transform-style"]
+    # These live in an nsFont member in Gecko. Should be straightforward to do manually.
+    force_stub += ["font-kerning", "font-stretch", "font-variant"]
+    # These have unusual representations in gecko.
+    force_stub += ["list-style-type", "text-overflow"]
+    # In a nsTArray, have to be done manually, but probably not too much work
+    # (the "filling them", not the "making them work")
+    force_stub += ["animation-name", "animation-duration",
                   "animation-timing-function", "animation-iteration-count",
                   "animation-direction", "animation-play-state",
                   "animation-fill-mode", "animation-delay"]
 
-   # Types used with predefined_type()-defined properties that we can auto-generate.
-   predefined_types = {
+    # These are part of shorthands so we must include them in stylo builds,
+    # but we haven't implemented the stylo glue for the longhand
+    # so we generate a stub
+    force_stub += ["list-style-image", # box
+                   "flex-basis", # position
+
+                   # transition
+                   "transition-duration", "transition-timing-function",
+                   "transition-property", "transition-delay",
+
+                   "background-size", # background
+                   "column-count", # column
+                   ]
+
+    # Types used with predefined_type()-defined properties that we can auto-generate.
+    predefined_types = {
        "LengthOrPercentage": impl_style_coord,
        "LengthOrPercentageOrAuto": impl_style_coord,
        "LengthOrPercentageOrNone": impl_style_coord,
        "Number": impl_simple,
        "Opacity": impl_simple,
-   }
+    }
 
-   keyword_longhands = [x for x in longhands if x.keyword and not x.name in force_stub]
-   predefined_longhands = [x for x in longhands
+    keyword_longhands = [x for x in longhands if x.keyword and not x.name in force_stub]
+    predefined_longhands = [x for x in longhands
                            if x.predefined_type in predefined_types and not x.name in force_stub]
-   stub_longhands = [x for x in longhands if x not in keyword_longhands + predefined_longhands]
+    stub_longhands = [x for x in longhands if x not in keyword_longhands + predefined_longhands]
+
+    # If one of the longhands is not handled
+    # by either:
+    # - being a keyword
+    # - being a predefined longhand
+    # - being a longhand with manual glue code (i.e. in skip_longhands)
+    # - being generated as a stub
+    #
+    # then we raise an error here.
+    #
+    # If you hit this error, please add `product="servo"` to the longhand.
+    # In case the longhand is used in a shorthand, add it to the force_stub
+    # list above.
+    for stub in stub_longhands:
+       if stub.name not in force_stub:
+           raise Exception("Don't know what to do with longhand %s in style struct %s"
+                           % (stub.name,style_struct. gecko_struct_name))
 %>
 impl ${style_struct.gecko_struct_name} {
     /*
@@ -1133,7 +1163,7 @@ fn static_assert() {
                             }
                         }
 
-                        let mut coord: nsStyleCoord = unsafe { uninitialized() };
+                        let mut coord: nsStyleCoord = nsStyleCoord::null();
                         for (index, stop) in gradient.stops.iter().enumerate() {
                             // NB: stops are guaranteed to be none in the gecko side by
                             // default.
@@ -1713,10 +1743,10 @@ fn static_assert() {
 <%def name="define_ffi_struct_accessor(style_struct)">
 #[no_mangle]
 #[allow(non_snake_case, unused_variables)]
-pub extern "C" fn Servo_GetStyle${style_struct.gecko_name}(computed_values: ServoComputedValuesBorrowed)
-  -> *const ${style_struct.gecko_ffi_name} {
-    ComputedValues::with(computed_values, |values| values.get_${style_struct.name_lower}().get_gecko()
-                                                as *const ${style_struct.gecko_ffi_name})
+pub extern "C" fn Servo_GetStyle${style_struct.gecko_name}(computed_values:
+        ServoComputedValuesBorrowedOrNull) -> *const ${style_struct.gecko_ffi_name} {
+    computed_values.as_arc::<ComputedValues>().get_${style_struct.name_lower}().get_gecko()
+        as *const ${style_struct.gecko_ffi_name}
 }
 </%def>
 
