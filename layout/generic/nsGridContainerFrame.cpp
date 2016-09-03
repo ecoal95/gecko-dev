@@ -1611,7 +1611,7 @@ struct nsGridContainerFrame::Tracks
     MOZ_ASSERT(aNewSize >= 0);
     auto& sz = mSizes[aRow];
     nscoord delta = aNewSize - sz.mBase;
-    NS_WARN_IF_FALSE(delta != nscoord(0), "Useless call to ResizeRow");
+    NS_WARNING_ASSERTION(delta != nscoord(0), "Useless call to ResizeRow");
     sz.mBase = aNewSize;
     const uint32_t numRows = mSizes.Length();
     for (uint32_t r = aRow + 1; r < numRows; ++r) {
@@ -5599,6 +5599,8 @@ nsGridContainerFrame::Reflow(nsPresContext*           aPresContext,
     ::MergeSortedFrameLists(mFrames, items, GetContent());
   }
 
+  RenumberList();
+
 #ifdef DEBUG
   mDidPushItemsBitMayLie = false;
   SanityCheckGridItemsBeforeReflow();
@@ -5902,6 +5904,8 @@ nscoord
 nsGridContainerFrame::IntrinsicISize(nsRenderingContext* aRenderingContext,
                                      IntrinsicISizeType  aConstraint)
 {
+  RenumberList();
+
   // Calculate the sum of column sizes under aConstraint.
   // http://dev.w3.org/csswg/css-grid/#intrinsic-sizes
   GridReflowInput state(this, *aRenderingContext);

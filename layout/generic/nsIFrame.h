@@ -3172,7 +3172,7 @@ public:
   inline bool IsBlockInside() const;
   inline bool IsBlockOutside() const;
   inline bool IsInlineOutside() const;
-  inline uint8_t GetDisplay() const;
+  inline mozilla::StyleDisplay GetDisplay() const;
   inline bool IsFloating() const;
   inline bool IsAbsPosContainingBlock() const;
   inline bool IsFixedPosContainingBlock() const;
@@ -3273,6 +3273,17 @@ public:
    * Returns true if the frame is scrolled out of view.
    */
   bool IsScrolledOutOfView();
+
+  /**
+   * If this returns true, the frame it's called on should get the
+   * NS_FRAME_HAS_DIRTY_CHILDREN bit set on it by the caller; either directly
+   * if it's already in reflow, or via calling FrameNeedsReflow() to schedule a
+   * reflow.
+   */
+  virtual bool RenumberFrameAndDescendants(int32_t* aOrdinal,
+                                           int32_t aDepth,
+                                           int32_t aIncrement,
+                                           bool aForCounting) { return false; }
 
 protected:
   // Members
