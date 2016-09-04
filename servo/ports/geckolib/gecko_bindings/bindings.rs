@@ -5,12 +5,57 @@ pub enum nsINode {}
 pub enum nsIDocument {}
 pub enum nsIPrincipal {}
 pub enum nsIURI {}
-pub type ServoComputedValuesStrong = ::sugar::refptr::Strong<ServoComputedValues>;
-pub type ServoComputedValuesBorrowed<'a> = ::sugar::refptr::Borrowed<'a, ServoComputedValues>;
-pub type RawServoStyleSheetStrong = ::sugar::refptr::Strong<RawServoStyleSheet>;
-pub type RawServoStyleSheetBorrowed<'a> = ::sugar::refptr::Borrowed<'a, RawServoStyleSheet>;
-pub type ServoDeclarationBlockStrong = ::sugar::refptr::Strong<ServoDeclarationBlock>;
-pub type ServoDeclarationBlockBorrowed<'a> = ::sugar::refptr::Borrowed<'a, ServoDeclarationBlock>;
+pub type ServoComputedValuesStrong = ::sugar::ownership::Strong<ServoComputedValues>;
+pub type ServoComputedValuesBorrowedOrNull<'a> = ::sugar::ownership::Borrowed<'a, ServoComputedValues>;
+pub type ServoComputedValuesBorrowed<'a> = &'a ServoComputedValues;
+enum ServoComputedValuesVoid{ }
+pub struct ServoComputedValues(ServoComputedValuesVoid);
+pub type RawServoStyleSheetStrong = ::sugar::ownership::Strong<RawServoStyleSheet>;
+pub type RawServoStyleSheetBorrowedOrNull<'a> = ::sugar::ownership::Borrowed<'a, RawServoStyleSheet>;
+pub type RawServoStyleSheetBorrowed<'a> = &'a RawServoStyleSheet;
+enum RawServoStyleSheetVoid{ }
+pub struct RawServoStyleSheet(RawServoStyleSheetVoid);
+pub type ServoDeclarationBlockStrong = ::sugar::ownership::Strong<ServoDeclarationBlock>;
+pub type ServoDeclarationBlockBorrowedOrNull<'a> = ::sugar::ownership::Borrowed<'a, ServoDeclarationBlock>;
+pub type ServoDeclarationBlockBorrowed<'a> = &'a ServoDeclarationBlock;
+enum ServoDeclarationBlockVoid{ }
+pub struct ServoDeclarationBlock(ServoDeclarationBlockVoid);
+pub type RawGeckoNodeBorrowed<'a> = &'a RawGeckoNode;
+pub type RawGeckoNodeBorrowedOrNull<'a> = ::sugar::ownership::Borrowed<'a, RawGeckoNode>;
+enum RawGeckoNodeVoid{ }
+pub struct RawGeckoNode(RawGeckoNodeVoid);
+pub type RawGeckoElementBorrowed<'a> = &'a RawGeckoElement;
+pub type RawGeckoElementBorrowedOrNull<'a> = ::sugar::ownership::Borrowed<'a, RawGeckoElement>;
+enum RawGeckoElementVoid{ }
+pub struct RawGeckoElement(RawGeckoElementVoid);
+pub type RawGeckoDocumentBorrowed<'a> = &'a RawGeckoDocument;
+pub type RawGeckoDocumentBorrowedOrNull<'a> = ::sugar::ownership::Borrowed<'a, RawGeckoDocument>;
+enum RawGeckoDocumentVoid{ }
+pub struct RawGeckoDocument(RawGeckoDocumentVoid);
+pub type RawServoStyleSetBorrowed<'a> = &'a RawServoStyleSet;
+pub type RawServoStyleSetBorrowedMut<'a> = &'a mut RawServoStyleSet;
+pub type RawServoStyleSetOwned = ::sugar::ownership::Owned<RawServoStyleSet>;
+pub type RawServoStyleSetBorrowedOrNull<'a> = ::sugar::ownership::Borrowed<'a, RawServoStyleSet>;
+pub type RawServoStyleSetBorrowedMutOrNull<'a> = ::sugar::ownership::BorrowedMut<'a, RawServoStyleSet>;
+pub type RawServoStyleSetOwnedOrNull = ::sugar::ownership::OwnedOrNull<RawServoStyleSet>;
+enum RawServoStyleSetVoid{ }
+pub struct RawServoStyleSet(RawServoStyleSetVoid);
+pub type ServoNodeDataBorrowed<'a> = &'a ServoNodeData;
+pub type ServoNodeDataBorrowedMut<'a> = &'a mut ServoNodeData;
+pub type ServoNodeDataOwned = ::sugar::ownership::Owned<ServoNodeData>;
+pub type ServoNodeDataBorrowedOrNull<'a> = ::sugar::ownership::Borrowed<'a, ServoNodeData>;
+pub type ServoNodeDataBorrowedMutOrNull<'a> = ::sugar::ownership::BorrowedMut<'a, ServoNodeData>;
+pub type ServoNodeDataOwnedOrNull = ::sugar::ownership::OwnedOrNull<ServoNodeData>;
+enum ServoNodeDataVoid{ }
+pub struct ServoNodeData(ServoNodeDataVoid);
+pub type StyleChildrenIteratorBorrowed<'a> = &'a StyleChildrenIterator;
+pub type StyleChildrenIteratorBorrowedMut<'a> = &'a mut StyleChildrenIterator;
+pub type StyleChildrenIteratorOwned = ::sugar::ownership::Owned<StyleChildrenIterator>;
+pub type StyleChildrenIteratorBorrowedOrNull<'a> = ::sugar::ownership::Borrowed<'a, StyleChildrenIterator>;
+pub type StyleChildrenIteratorBorrowedMutOrNull<'a> = ::sugar::ownership::BorrowedMut<'a, StyleChildrenIterator>;
+pub type StyleChildrenIteratorOwnedOrNull = ::sugar::ownership::OwnedOrNull<StyleChildrenIterator>;
+enum StyleChildrenIteratorVoid{ }
+pub struct StyleChildrenIterator(StyleChildrenIteratorVoid);
 use structs::nsStyleFont;
 unsafe impl Send for nsStyleFont {}
 unsafe impl Sync for nsStyleFont {}
@@ -159,41 +204,8 @@ use structs::StyleBasicShapeType;
 use structs::StyleBasicShape;
 use structs::nsCSSShadowArray;
 
-pub type RawGeckoNode = nsINode;
 pub enum Element { }
-pub type RawGeckoElement = Element;
-pub type RawGeckoDocument = nsIDocument;
-pub enum ServoNodeData { }
-pub enum ServoComputedValues { }
-pub enum RawServoStyleSheet { }
-pub enum RawServoStyleSet { }
 pub enum nsHTMLCSSStyleSheet { }
-pub enum ServoDeclarationBlock { }
-pub enum StyleChildrenIterator { }
-pub type ServoComputedValuesBorrowedOrNull = *mut ServoComputedValues;
-pub type RawServoStyleSheetBorrowedOrNull = *mut RawServoStyleSheet;
-pub type ServoDeclarationBlockBorrowedOrNull = *mut ServoDeclarationBlock;
-pub type RawServoStyleSetOwned = *mut RawServoStyleSet;
-pub type RawServoStyleSetBorrowed = *mut RawServoStyleSet;
-pub type RawServoStyleSetBorrowedMut = *mut RawServoStyleSet;
-pub type ServoNodeDataOwnedOrNull = *mut ServoNodeData;
-pub type ServoNodeDataBorrowedOrNull = *mut ServoNodeData;
-pub type ServoNodeDataBorrowedMutOrNull = *mut ServoNodeData;
-pub type ServoNodeDataOwned = *mut ServoNodeData;
-pub type ServoNodeDataBorrowed = *mut ServoNodeData;
-pub type ServoNodeDataBorrowedMut = *mut ServoNodeData;
-pub type StyleChildrenIteratorOwnedOrNull = *mut StyleChildrenIterator;
-pub type StyleChildrenIteratorBorrowedOrNull = *mut StyleChildrenIterator;
-pub type StyleChildrenIteratorBorrowedMutOrNull = *mut StyleChildrenIterator;
-pub type StyleChildrenIteratorOwned = *mut StyleChildrenIterator;
-pub type StyleChildrenIteratorBorrowed = *mut StyleChildrenIterator;
-pub type StyleChildrenIteratorBorrowedMut = *mut StyleChildrenIterator;
-pub type RawGeckoNodeBorrowed = *mut RawGeckoNode;
-pub type RawGeckoNodeBorrowedOrNull = *mut RawGeckoNode;
-pub type RawGeckoElementBorrowed = *mut RawGeckoElement;
-pub type RawGeckoElementBorrowedOrNull = *mut RawGeckoElement;
-pub type RawGeckoDocumentBorrowed = *mut RawGeckoDocument;
-pub type RawGeckoDocumentBorrowedOrNull = *mut RawGeckoDocument;
 pub type ThreadSafePrincipalHolder = nsMainThreadPtrHolder<nsIPrincipal>;
 pub type ThreadSafeURIHolder = nsMainThreadPtrHolder<nsIURI>;
 extern "C" {
