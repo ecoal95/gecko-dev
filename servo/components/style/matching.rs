@@ -865,6 +865,8 @@ pub trait MatchMethods : TNode {
                                     -> RestyleResult
         where Ctx: StyleContext<'a>
     {
+        debug_assert!(self.is_element() || self.is_text_node());
+
         // Get our parent's style. This must be unsafe so that we don't touch the parent's
         // borrow flags.
         //
