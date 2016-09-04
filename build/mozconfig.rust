@@ -8,3 +8,6 @@ CARGO="$topsrcdir/cargo/bin/cargo"
 
 # Enable rust in the build.
 ac_add_options --enable-rust
+
+# Enable stylo.
+ac_add_options --enable-stylo
