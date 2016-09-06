@@ -3,4 +3,4 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 extern crate geckoservo;
-extern crate mp4parse;
+extern crate mp4parse_capi;
