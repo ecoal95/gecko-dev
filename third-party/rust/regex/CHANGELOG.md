@@ -1,3 +1,21 @@
+0.1.75
+======
+* [PR #275](https://github.com/rust-lang-nursery/regex/pull/275):
+  Improves match verification performance in the Teddy SIMD searcher.
+* [PR #278](https://github.com/rust-lang-nursery/regex/pull/278):
+  Replaces slow substring loop in the Teddy SIMD searcher with Aho-Corasick.
+* Implemented DoubleEndedIterator on regex set match iterators.
+
+0.1.74
+======
+* Release regex-syntax 0.3.5 with a minor bug fix.
+* Fix bug #272.
+* Fix bug #277.
+* [PR #270](https://github.com/rust-lang-nursery/regex/pull/270):
+  Fixes bugs #264, #268 and an unreported where the DFA cache size could be
+  drastically under estimated in some cases (leading to high unexpected memory
+  usage).
+
 0.1.73
 ======
 * Release `regex-syntax 0.3.4`.

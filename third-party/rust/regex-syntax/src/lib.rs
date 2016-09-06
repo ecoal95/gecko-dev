@@ -528,6 +528,21 @@ impl Expr {
         }
     }
 
+    /// Returns true if and only if the expression has at least one matchable
+    /// sub-expression that must match the beginning of text.
+    pub fn has_anchored_start(&self) -> bool {
+        match *self {
+            Repeat { ref e, r, .. } => {
+                !r.matches_empty() && e.has_anchored_start()
+            }
+            Group { ref e, .. } => e.has_anchored_start(),
+            Concat(ref es) => es[0].has_anchored_start(),
+            Alternate(ref es) => es.iter().any(|e| e.has_anchored_start()),
+            StartText => true,
+            _ => false,
+        }
+    }
+
     /// Returns true if and only if the expression is required to match at the
     /// end of the text.
     pub fn is_anchored_end(&self) -> bool {
@@ -538,6 +553,21 @@ impl Expr {
             Group { ref e, .. } => e.is_anchored_end(),
             Concat(ref es) => es[es.len() - 1].is_anchored_end(),
             Alternate(ref es) => es.iter().all(|e| e.is_anchored_end()),
+            EndText => true,
+            _ => false,
+        }
+    }
+
+    /// Returns true if and only if the expression has at least one matchable
+    /// sub-expression that must match the beginning of text.
+    pub fn has_anchored_end(&self) -> bool {
+        match *self {
+            Repeat { ref e, r, .. } => {
+                !r.matches_empty() && e.has_anchored_end()
+            }
+            Group { ref e, .. } => e.has_anchored_end(),
+            Concat(ref es) => es[es.len() - 1].has_anchored_end(),
+            Alternate(ref es) => es.iter().any(|e| e.has_anchored_end()),
             EndText => true,
             _ => false,
         }
@@ -1498,7 +1528,7 @@ impl fmt::Display for ErrorKind {
                 write!(f, "Unrecognized escape sequence: '\\{}'.", c),
             UnrecognizedFlag(c) =>
                 write!(f, "Unrecognized flag: '{}'. \
-                           (Allowed flags: i, s, m, U, x.)", c),
+                           (Allowed flags: i, m, s, U, u, x.)", c),
             UnrecognizedUnicodeClass(ref s) =>
                 write!(f, "Unrecognized Unicode class name: '{}'.", s),
             StackExhausted =>
