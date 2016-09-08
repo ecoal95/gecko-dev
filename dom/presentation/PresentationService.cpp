@@ -111,6 +111,7 @@ public:
                             const nsAString& aId,
                             const nsAString& aOrigin,
                             uint64_t aWindowId,
+                            nsIDOMEventTarget* aEventTarget,
                             nsIPresentationServiceCallback* aCallback);
 
 private:
@@ -122,6 +123,7 @@ private:
   nsString mId;
   nsString mOrigin;
   uint64_t mWindowId;
+  nsWeakPtr mChromeEventHandler;
   nsCOMPtr<nsIPresentationServiceCallback> mCallback;
 };
 
@@ -137,11 +139,13 @@ PresentationDeviceRequest::PresentationDeviceRequest(
                                       const nsAString& aId,
                                       const nsAString& aOrigin,
                                       uint64_t aWindowId,
+                                      nsIDOMEventTarget* aEventTarget,
                                       nsIPresentationServiceCallback* aCallback)
   : mRequestUrls(aUrls)
   , mId(aId)
   , mOrigin(aOrigin)
   , mWindowId(aWindowId)
+  , mChromeEventHandler(do_GetWeakReference(aEventTarget))
   , mCallback(aCallback)
 {
   MOZ_ASSERT(!mRequestUrls.IsEmpty());
@@ -161,6 +165,14 @@ NS_IMETHODIMP
 PresentationDeviceRequest::GetRequestURLs(nsIArray** aUrls)
 {
   return ConvertURLArrayHelper(mRequestUrls, aUrls);
+}
+
+NS_IMETHODIMP
+PresentationDeviceRequest::GetChromeEventHandler(nsIDOMEventTarget** aChromeEventHandler)
+{
+  nsCOMPtr<nsIDOMEventTarget> handler(do_QueryReferent(mChromeEventHandler));
+  handler.forget(aChromeEventHandler);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -597,7 +609,8 @@ PresentationService::NotifyAvailableChange(bool aIsAvailable)
   nsTObserverArray<nsCOMPtr<nsIPresentationAvailabilityListener>>::ForwardIterator iter(mAvailabilityListeners);
   while (iter.HasMore()) {
     nsCOMPtr<nsIPresentationAvailabilityListener> listener = iter.GetNext();
-    NS_WARN_IF(NS_FAILED(listener->NotifyAvailableChange(aIsAvailable)));
+    Unused <<
+      NS_WARN_IF(NS_FAILED(listener->NotifyAvailableChange(aIsAvailable)));
   }
 }
 
@@ -634,6 +647,7 @@ PresentationService::StartSession(const nsTArray<nsString>& aUrls,
                                   const nsAString& aOrigin,
                                   const nsAString& aDeviceId,
                                   uint64_t aWindowId,
+                                  nsIDOMEventTarget* aEventTarget,
                                   nsIPresentationServiceCallback* aCallback)
 {
   PRES_DEBUG("%s:id[%s]\n", __func__, NS_ConvertUTF16toUTF8(aSessionId).get());
@@ -648,6 +662,7 @@ PresentationService::StartSession(const nsTArray<nsString>& aUrls,
                                   aSessionId,
                                   aOrigin,
                                   aWindowId,
+                                  aEventTarget,
                                   aCallback);
 
   if (aDeviceId.IsVoid()) {
@@ -863,7 +878,8 @@ PresentationService::RegisterAvailabilityListener(nsIPresentationAvailabilityLis
 
   // Leverage availablility change notification to assign
   // the initial value of availability object.
-  NS_WARN_IF(NS_FAILED(aListener->NotifyAvailableChange(mIsAvailable)));
+  Unused <<
+    NS_WARN_IF(NS_FAILED(aListener->NotifyAvailableChange(mIsAvailable)));
 
   return NS_OK;
 }
@@ -923,7 +939,7 @@ PresentationService::UnregisterSessionListener(const nsAString& aSessionId,
   if (info) {
     // When content side decide not handling this session anymore, simply
     // close the connection. Session info is kept for reconnection.
-    NS_WARN_IF(NS_FAILED(info->Close(NS_OK, nsIPresentationSessionListener::STATE_CLOSED)));
+    Unused << NS_WARN_IF(NS_FAILED(info->Close(NS_OK, nsIPresentationSessionListener::STATE_CLOSED)));
     return info->SetListener(nullptr);
   }
   return NS_OK;

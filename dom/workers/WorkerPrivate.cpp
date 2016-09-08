@@ -2540,7 +2540,7 @@ WorkerPrivateParent<Derived>::Freeze(nsPIDOMWindowInner* aWindow)
         // outlives this call.
         RefPtr<SharedWorker> kungFuDeathGrip = mSharedWorkers[i];
 
-        mSharedWorkers[i]->Freeze();
+        kungFuDeathGrip->Freeze();
       } else {
         MOZ_ASSERT_IF(mSharedWorkers[i]->GetOwner() && aWindow,
                       !SameCOMIdentity(mSharedWorkers[i]->GetOwner(),
@@ -2604,7 +2604,7 @@ WorkerPrivateParent<Derived>::Thaw(nsPIDOMWindowInner* aWindow)
         // outlives this call.
         RefPtr<SharedWorker> kungFuDeathGrip = mSharedWorkers[i];
 
-        mSharedWorkers[i]->Thaw();
+        kungFuDeathGrip->Thaw();
         anyRunning = true;
       } else {
         MOZ_ASSERT_IF(mSharedWorkers[i]->GetOwner() && aWindow,
@@ -3069,7 +3069,7 @@ WorkerPrivateParent<Derived>::MemoryPressure(bool aDummy)
 
   RefPtr<MemoryPressureRunnable> runnable =
     new MemoryPressureRunnable(ParentAsWorkerPrivate());
-  NS_WARN_IF(!runnable->Dispatch());
+  Unused << NS_WARN_IF(!runnable->Dispatch());
 }
 
 template <class Derived>
@@ -4130,7 +4130,7 @@ WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
     AssertIsOnMainThread();
 
     // Make sure that the IndexedDatabaseManager is set up
-    NS_WARN_IF(!IndexedDatabaseManager::GetOrCreate());
+    Unused << NS_WARN_IF(!IndexedDatabaseManager::GetOrCreate());
 
     nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
     MOZ_ASSERT(ssm);

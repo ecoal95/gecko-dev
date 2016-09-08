@@ -358,7 +358,7 @@ MemoryReportRequestParent::MemoryReportRequestParent(uint32_t aGeneration)
 {
   MOZ_COUNT_CTOR(MemoryReportRequestParent);
   mReporterManager = nsMemoryReporterManager::GetOrCreate();
-  NS_WARN_IF(!mReporterManager);
+  NS_WARNING_ASSERTION(mReporterManager, "GetOrCreate failed");
 }
 
 bool
@@ -3643,7 +3643,7 @@ ContentParent::DeallocPPresentationParent(PPresentationParent* aActor)
 bool
 ContentParent::RecvPPresentationConstructor(PPresentationParent* aActor)
 {
-  return static_cast<PresentationParent*>(aActor)->Init();
+  return static_cast<PresentationParent*>(aActor)->Init(mChildID);
 }
 
 PFlyWebPublishedServerParent*
@@ -5003,7 +5003,6 @@ ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
     return true;
   }
 
-  nsCOMPtr<mozIDOMWindowProxy> window;
   TabParent::AutoUseNewTab aunt(newTab, aWindowIsNew, aURLToLoad);
 
   nsCOMPtr<nsPIWindowWatcher> pwwatch =

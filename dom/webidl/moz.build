@@ -433,6 +433,7 @@ WEBIDL_FILES = [
     'StereoPannerNode.webidl',
     'Storage.webidl',
     'StorageEvent.webidl',
+    'StorageManager.webidl',
     'StorageType.webidl',
     'StyleSheet.webidl',
     'StyleSheetList.webidl',
@@ -918,11 +919,6 @@ if CONFIG['MOZ_B2G']:
     ]
     GENERATED_EVENTS_WEBIDL_FILES += [
         'MozApplicationEvent.webidl'
-    ]
-
-if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'android':
-    WEBIDL_FILES += [
-        'AlarmsManager.webidl',
     ]
 
 if CONFIG['ACCESSIBILITY']:

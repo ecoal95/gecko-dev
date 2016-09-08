@@ -1782,7 +1782,7 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(nsDisplayListBuilder* aB
 
   nsIFrame* frame = aBuilder->RootReferenceFrame();
   nsPresContext* presContext = frame->PresContext();
-  nsIPresShell* presShell = presContext->GetPresShell();
+  nsIPresShell* presShell = presContext->PresShell();
   nsRootPresContext* rootPresContext = presContext->GetRootPresContext();
 
   NotifySubDocInvalidationFunc computeInvalidFunc =
@@ -1809,10 +1809,7 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(nsDisplayListBuilder* aB
     BuildContainerLayerFor(aBuilder, layerManager, frame, nullptr, this,
                            containerParameters, nullptr);
 
-  nsIDocument* document = nullptr;
-  if (presShell) {
-    document = presShell->GetDocument();
-  }
+  nsIDocument* document = presShell->GetDocument();
 
   if (!root) {
     layerManager->SetUserData(&gLayerManagerLayerBuilder, oldBuilder);
@@ -6650,10 +6647,10 @@ nsCharClipDisplayItem::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
 
 nsDisplaySVGEffects::nsDisplaySVGEffects(nsDisplayListBuilder* aBuilder,
                                          nsIFrame* aFrame, nsDisplayList* aList,
-                                         bool aOpacityItemCreated)
+                                         bool aHandleOpacity)
   : nsDisplayWrapList(aBuilder, aFrame, aList)
   , mEffectsBounds(aFrame->GetVisualOverflowRectRelativeToSelf())
-  , mOpacityItemCreated(aOpacityItemCreated)
+  , mHandleOpacity(aHandleOpacity)
 {
   MOZ_COUNT_CTOR(nsDisplaySVGEffects);
 }
@@ -6741,9 +6738,9 @@ bool nsDisplaySVGEffects::ValidateSVGFrame()
 }
 
 nsDisplayMask::nsDisplayMask(nsDisplayListBuilder* aBuilder,
-                                         nsIFrame* aFrame, nsDisplayList* aList,
-                                         bool aOpacityItemCreated)
-  : nsDisplaySVGEffects(aBuilder, aFrame, aList, aOpacityItemCreated)
+                             nsIFrame* aFrame, nsDisplayList* aList,
+                             bool aHandleOpacity)
+  : nsDisplaySVGEffects(aBuilder, aFrame, aList, aHandleOpacity)
 {
   MOZ_COUNT_CTOR(nsDisplayMask);
 }
@@ -6785,7 +6782,7 @@ nsDisplayMask::BuildLayer(nsDisplayListBuilder* aBuilder,
     return nullptr;
   }
 
-  if (mFrame->StyleEffects()->mOpacity == 0.0f && !mOpacityItemCreated) {
+  if (mFrame->StyleEffects()->mOpacity == 0.0f && mHandleOpacity) {
     return nullptr;
   }
 
@@ -6817,7 +6814,8 @@ nsDisplayMask::GetLayerState(nsDisplayListBuilder* aBuilder,
 }
 
 bool nsDisplayMask::ComputeVisibility(nsDisplayListBuilder* aBuilder,
-                                              nsRegion* aVisibleRegion) {
+                                              nsRegion* aVisibleRegion) 
+{
   // Our children may be made translucent or arbitrarily deformed so we should
   // not allow them to subtract area from aVisibleRegion.
   nsRegion childrenVisible(mVisibleRect);
@@ -6835,7 +6833,8 @@ nsDisplayMask::PaintAsLayer(nsDisplayListBuilder* aBuilder,
   nsSVGIntegrationUtils::PaintFramesParams params(*aCtx->ThebesContext(),
                                                   mFrame,  mVisibleRect,
                                                   borderArea, aBuilder,
-                                                  aManager, mOpacityItemCreated);
+                                                  aManager,
+                                                  mHandleOpacity);
 
   image::DrawResult result =
     nsSVGIntegrationUtils::PaintMaskAndClipPath(params);
@@ -6886,9 +6885,9 @@ nsDisplayMask::PrintEffects(nsACString& aTo)
 #endif
 
 nsDisplayFilter::nsDisplayFilter(nsDisplayListBuilder* aBuilder,
-                                         nsIFrame* aFrame, nsDisplayList* aList,
-                                         bool aOpacityItemCreated)
-  : nsDisplaySVGEffects(aBuilder, aFrame, aList, aOpacityItemCreated)
+                                 nsIFrame* aFrame, nsDisplayList* aList,
+                                 bool aHandleOpacity)
+  : nsDisplaySVGEffects(aBuilder, aFrame, aList, aHandleOpacity)
 {
   MOZ_COUNT_CTOR(nsDisplayFilter);
 }
@@ -6909,7 +6908,7 @@ nsDisplayFilter::BuildLayer(nsDisplayListBuilder* aBuilder,
     return nullptr;
   }
 
-  if (mFrame->StyleEffects()->mOpacity == 0.0f && !mOpacityItemCreated) {
+  if (mFrame->StyleEffects()->mOpacity == 0.0f && mHandleOpacity) {
     return nullptr;
   }
 
@@ -6966,7 +6965,8 @@ nsDisplayFilter::GetLayerState(nsDisplayListBuilder* aBuilder,
 }
 
 bool nsDisplayFilter::ComputeVisibility(nsDisplayListBuilder* aBuilder,
-                                              nsRegion* aVisibleRegion) {
+                                        nsRegion* aVisibleRegion)
+{
   nsPoint offset = ToReferenceFrame();
   nsRect dirtyRect =
     nsSVGIntegrationUtils::GetRequiredSourceForInvalidArea(mFrame,
@@ -6990,7 +6990,8 @@ nsDisplayFilter::PaintAsLayer(nsDisplayListBuilder* aBuilder,
   nsSVGIntegrationUtils::PaintFramesParams params(*aCtx->ThebesContext(),
                                                   mFrame,  mVisibleRect,
                                                   borderArea, aBuilder,
-                                                  aManager, mOpacityItemCreated);
+                                                  aManager,
+                                                  mHandleOpacity);
 
   image::DrawResult result =
     nsSVGIntegrationUtils::PaintFilter(params);

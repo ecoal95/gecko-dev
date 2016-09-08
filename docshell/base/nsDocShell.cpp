@@ -1654,14 +1654,14 @@ nsDocShell::FirePageHideNotification(bool aIsUnload)
   if (mContentViewer && !mFiredUnloadEvent) {
     // Keep an explicit reference since calling PageHide could release
     // mContentViewer
-    nsCOMPtr<nsIContentViewer> kungFuDeathGrip(mContentViewer);
+    nsCOMPtr<nsIContentViewer> contentViewer(mContentViewer);
     mFiredUnloadEvent = true;
 
     if (mTiming) {
       mTiming->NotifyUnloadEventStart();
     }
 
-    mContentViewer->PageHide(aIsUnload);
+    contentViewer->PageHide(aIsUnload);
 
     if (mTiming) {
       mTiming->NotifyUnloadEventEnd();
@@ -2506,40 +2506,47 @@ nsDocShell::GetFullscreenAllowed(bool* aFullscreenAllowed)
   if (!win) {
     return NS_OK;
   }
-  nsCOMPtr<Element> frameElement = win->GetFrameElementInternal();
-  if (frameElement && !frameElement->IsXULElement()) {
-    // We do not allow document inside any containing element other
-    // than iframe to enter fullscreen.
-    if (frameElement->IsHTMLElement(nsGkAtoms::iframe)) {
-      // If any ancestor iframe does not have allowfullscreen attribute
-      // set, then fullscreen is not allowed.
-      if (!frameElement->HasAttr(kNameSpaceID_None,
-                                 nsGkAtoms::allowfullscreen) &&
-          !frameElement->HasAttr(kNameSpaceID_None,
-                                 nsGkAtoms::mozallowfullscreen)) {
-        return NS_OK;
-      }
-    } else if (frameElement->IsHTMLElement(nsGkAtoms::embed)) {
-      // Respect allowfullscreen only if this is a rewritten YouTube embed.
-      nsCOMPtr<nsIObjectLoadingContent> objectLoadingContent =
-        do_QueryInterface(frameElement);
-      if (!objectLoadingContent) {
-        return NS_OK;
-      }
-      nsObjectLoadingContent* olc =
-        static_cast<nsObjectLoadingContent*>(objectLoadingContent.get());
-      if (!olc->IsRewrittenYoutubeEmbed()) {
-        return NS_OK;
-      }
-      // We don't have to check prefixed attributes because Flash does not
-      // support them.
-      if (!frameElement->HasAttr(kNameSpaceID_None,
-                                 nsGkAtoms::allowfullscreen)) {
+  if (nsCOMPtr<Element> frameElement = win->GetFrameElementInternal()) {
+    if (frameElement->IsXULElement()) {
+      if (frameElement->HasAttr(kNameSpaceID_None,
+                                nsGkAtoms::disablefullscreen)) {
+        // Document inside this frame is explicitly disabled.
         return NS_OK;
       }
     } else {
-      // neither iframe nor embed
-      return NS_OK;
+      // We do not allow document inside any containing element other
+      // than iframe to enter fullscreen.
+      if (frameElement->IsHTMLElement(nsGkAtoms::iframe)) {
+        // If any ancestor iframe does not have allowfullscreen attribute
+        // set, then fullscreen is not allowed.
+        if (!frameElement->HasAttr(kNameSpaceID_None,
+                                  nsGkAtoms::allowfullscreen) &&
+            !frameElement->HasAttr(kNameSpaceID_None,
+                                  nsGkAtoms::mozallowfullscreen)) {
+          return NS_OK;
+        }
+      } else if (frameElement->IsHTMLElement(nsGkAtoms::embed)) {
+        // Respect allowfullscreen only if this is a rewritten YouTube embed.
+        nsCOMPtr<nsIObjectLoadingContent> objectLoadingContent =
+          do_QueryInterface(frameElement);
+        if (!objectLoadingContent) {
+          return NS_OK;
+        }
+        nsObjectLoadingContent* olc =
+          static_cast<nsObjectLoadingContent*>(objectLoadingContent.get());
+        if (!olc->IsRewrittenYoutubeEmbed()) {
+          return NS_OK;
+        }
+        // We don't have to check prefixed attributes because Flash does not
+        // support them.
+        if (!frameElement->HasAttr(kNameSpaceID_None,
+                                  nsGkAtoms::allowfullscreen)) {
+          return NS_OK;
+        }
+      } else {
+        // neither iframe nor embed
+        return NS_OK;
+      }
     }
   }
 
@@ -7583,6 +7590,7 @@ nsDocShell::EndPageLoad(nsIWebProgress* aProgress,
   // nsDocShell::EndPageLoad will clear mLSHE, but we may need this history
   // entry further down in this method.
   nsCOMPtr<nsISHEntry> loadingSHE = mLSHE;
+  mozilla::Unused << loadingSHE; // XXX: Not sure if we need this anymore
 
   //
   // one of many safeguards that prevent death and destruction if
@@ -8538,11 +8546,14 @@ nsDocShell::RestoreFromHistory()
   int32_t minFontSize = 0;
   float textZoom = 1.0f;
   float pageZoom = 1.0f;
+  float overrideDPPX = 0.0f;
+
   bool styleDisabled = false;
   if (oldCv && newCv) {
     oldCv->GetMinFontSize(&minFontSize);
     oldCv->GetTextZoom(&textZoom);
     oldCv->GetFullZoom(&pageZoom);
+    oldCv->GetOverrideDPPX(&overrideDPPX);
     oldCv->GetAuthorStyleDisabled(&styleDisabled);
   }
 
@@ -8775,6 +8786,7 @@ nsDocShell::RestoreFromHistory()
     newCv->SetMinFontSize(minFontSize);
     newCv->SetTextZoom(textZoom);
     newCv->SetFullZoom(pageZoom);
+    newCv->SetOverrideDPPX(overrideDPPX);
     newCv->SetAuthorStyleDisabled(styleDisabled);
   }
 
@@ -9268,6 +9280,7 @@ nsDocShell::SetupNewViewer(nsIContentViewer* aNewViewer)
   int32_t minFontSize;
   float textZoom;
   float pageZoom;
+  float overrideDPPX;
   bool styleDisabled;
   // |newMUDV| also serves as a flag to set the data from the above vars
   nsCOMPtr<nsIContentViewer> newCv;
@@ -9309,6 +9322,8 @@ nsDocShell::SetupNewViewer(nsIContentViewer* aNewViewer)
                           NS_ERROR_FAILURE);
         NS_ENSURE_SUCCESS(oldCv->GetFullZoom(&pageZoom),
                           NS_ERROR_FAILURE);
+        NS_ENSURE_SUCCESS(oldCv->GetOverrideDPPX(&overrideDPPX),
+                          NS_ERROR_FAILURE);
         NS_ENSURE_SUCCESS(oldCv->GetAuthorStyleDisabled(&styleDisabled),
                           NS_ERROR_FAILURE);
       }
@@ -9317,23 +9332,23 @@ nsDocShell::SetupNewViewer(nsIContentViewer* aNewViewer)
 
   nscolor bgcolor = NS_RGBA(0, 0, 0, 0);
   // Ensure that the content viewer is destroyed *after* the GC - bug 71515
-  nsCOMPtr<nsIContentViewer> kungfuDeathGrip = mContentViewer;
-  if (mContentViewer) {
+  nsCOMPtr<nsIContentViewer> contentViewer = mContentViewer;
+  if (contentViewer) {
     // Stop any activity that may be happening in the old document before
     // releasing it...
-    mContentViewer->Stop();
+    contentViewer->Stop();
 
     // Try to extract the canvas background color from the old
     // presentation shell, so we can use it for the next document.
     nsCOMPtr<nsIPresShell> shell;
-    mContentViewer->GetPresShell(getter_AddRefs(shell));
+    contentViewer->GetPresShell(getter_AddRefs(shell));
 
     if (shell) {
       bgcolor = shell->GetCanvasBackground();
     }
 
-    mContentViewer->Close(mSavingOldViewer ? mOSHE.get() : nullptr);
-    aNewViewer->SetPreviousViewer(mContentViewer);
+    contentViewer->Close(mSavingOldViewer ? mOSHE.get() : nullptr);
+    aNewViewer->SetPreviousViewer(contentViewer);
   }
   if (mOSHE && (!mContentViewer || !mSavingOldViewer)) {
     // We don't plan to save a viewer in mOSHE; tell it to drop
@@ -9376,6 +9391,8 @@ nsDocShell::SetupNewViewer(nsIContentViewer* aNewViewer)
     NS_ENSURE_SUCCESS(newCv->SetTextZoom(textZoom),
                       NS_ERROR_FAILURE);
     NS_ENSURE_SUCCESS(newCv->SetFullZoom(pageZoom),
+                      NS_ERROR_FAILURE);
+    NS_ENSURE_SUCCESS(newCv->SetOverrideDPPX(overrideDPPX),
                       NS_ERROR_FAILURE);
     NS_ENSURE_SUCCESS(newCv->SetAuthorStyleDisabled(styleDisabled),
                       NS_ERROR_FAILURE);
@@ -9752,13 +9769,14 @@ nsDocShell::InternalLoad(nsIURI* aURI,
     isJavaScript = false;
   }
 
+  RefPtr<nsGlobalWindow> scriptGlobal = mScriptGlobal;
+
   // First, notify any nsIContentPolicy listeners about the document load.
   // Only abort the load if a content policy listener explicitly vetos it!
   // Use nsPIDOMWindow since we _want_ to cross the chrome boundary if needed
   nsCOMPtr<Element> requestingElement =
-    mScriptGlobal->AsOuter()->GetFrameElementInternal();
+    scriptGlobal->AsOuter()->GetFrameElementInternal();
 
-  RefPtr<nsGlobalWindow> MMADeathGrip = mScriptGlobal;
 
   int16_t shouldLoad = nsIContentPolicy::ACCEPT;
   uint32_t contentType;
@@ -9804,7 +9822,7 @@ nsDocShell::InternalLoad(nsIURI* aURI,
 
   nsISupports* context = requestingElement;
   if (!context) {
-    context = ToSupports(mScriptGlobal);
+    context = ToSupports(scriptGlobal);
   }
 
   // XXXbz would be nice to know the loading principal here... but we don't
@@ -10310,8 +10328,8 @@ nsDocShell::InternalLoad(nsIURI* aURI,
       // applies to aURI.
       CopyFavicon(currentURI, aURI, doc->NodePrincipal(), UsePrivateBrowsing());
 
-      RefPtr<nsGlobalWindow> win = mScriptGlobal ?
-        mScriptGlobal->GetCurrentInnerWindowInternal() : nullptr;
+      RefPtr<nsGlobalWindow> win = scriptGlobal ?
+        scriptGlobal->GetCurrentInnerWindowInternal() : nullptr;
 
       // ScrollToAnchor doesn't necessarily cause us to scroll the window;
       // the function decides whether a scroll is appropriate based on the
@@ -10812,7 +10830,10 @@ nsDocShell::DoURILoad(nsIURI* aURI,
   // OriginAttributes of the parent document. Or in case there isn't a
   // parent document.
   NeckoOriginAttributes neckoAttrs;
-  neckoAttrs.InheritFromDocShellToNecko(GetOriginAttributes());
+  bool isTopLevelDoc = aContentPolicyType == nsIContentPolicy::TYPE_DOCUMENT &&
+                       mItemType == typeContent &&
+                       !GetIsMozBrowserOrApp();
+  neckoAttrs.InheritFromDocShellToNecko(GetOriginAttributes(), isTopLevelDoc, aURI);
   rv = loadInfo->SetOriginAttributes(neckoAttrs);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;

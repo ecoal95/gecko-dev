@@ -178,7 +178,7 @@ static const nsAttrValue::EnumTable kInputTypeTable[] = {
   { "time", NS_FORM_INPUT_TIME },
   { "url", NS_FORM_INPUT_URL },
   { "week", NS_FORM_INPUT_WEEK },
-  { 0 }
+  { nullptr, 0 }
 };
 
 // Default type is 'text'.
@@ -200,7 +200,7 @@ static const nsAttrValue::EnumTable kInputInputmodeTable[] = {
   { "lowercase", NS_INPUT_INPUTMODE_LOWERCASE },
   { "titlecase", NS_INPUT_INPUTMODE_TITLECASE },
   { "autocapitalized", NS_INPUT_INPUTMODE_AUTOCAPITALIZED },
-  { 0 }
+  { nullptr, 0 }
 };
 
 // Default inputmode value is "auto".
@@ -253,7 +253,7 @@ public:
     }
 
     mInputElement->SetFilesOrDirectories(array, true);
-    NS_WARN_IF(NS_FAILED(DispatchEvents()));
+    Unused << NS_WARN_IF(NS_FAILED(DispatchEvents()));
   }
 
   nsresult
@@ -264,7 +264,7 @@ public:
                                               static_cast<nsIDOMHTMLInputElement*>(mInputElement.get()),
                                               NS_LITERAL_STRING("input"), true,
                                               false);
-    NS_WARN_IF(NS_FAILED(rv));
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "DispatchTrustedEvent failed");
 
     rv = nsContentUtils::DispatchTrustedEvent(mInputElement->OwnerDoc(),
                                               static_cast<nsIDOMHTMLInputElement*>(mInputElement.get()),
@@ -3344,7 +3344,7 @@ HTMLInputElement::MaybeSubmitForm(nsPresContext* aPresContext)
     RefPtr<mozilla::dom::HTMLFormElement> form = mForm;
     InternalFormEvent event(true, eFormSubmit);
     nsEventStatus status = nsEventStatus_eIgnore;
-    shell->HandleDOMEventWithTarget(mForm, &event, &status);
+    shell->HandleDOMEventWithTarget(form, &event, &status);
   }
 
   return NS_OK;
@@ -4603,7 +4603,7 @@ HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
                               mForm->SubmissionCanProceed(this))) {
               // Hold a strong ref while dispatching
               RefPtr<mozilla::dom::HTMLFormElement> form(mForm);
-              presShell->HandleDOMEventWithTarget(mForm, &event, &status);
+              presShell->HandleDOMEventWithTarget(form, &event, &status);
               aVisitor.mEventStatus = nsEventStatus_eConsumeNoDefault;
             }
           }

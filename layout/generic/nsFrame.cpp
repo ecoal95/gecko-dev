@@ -2442,7 +2442,8 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
    */
   if (usingSVGEffects) {
     MOZ_ASSERT(StyleEffects()->HasFilters() ||
-               nsSVGIntegrationUtils::UsingMaskOrClipPathForFrame(this));
+               nsSVGIntegrationUtils::UsingMaskOrClipPathForFrame(this),
+               "Beside filter & mask/clip-path, what else effect do we have?");
 
     if (clipCapturedBy == ContainerItemType::eSVGEffects) {
       clipState.ExitStackingContextContents(&containerItemScrollClip);
@@ -2451,16 +2452,27 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     buildingDisplayList.SetDirtyRect(dirtyRectOutsideSVGEffects);
 
     // Skip all filter effects while generating glyph mask.
-    if (StyleEffects()->HasFilters() && !aBuilder->IsForGenerateGlyphMask()) {
+    bool createFilter =
+      StyleEffects()->HasFilters() && !aBuilder->IsForGenerateGlyphMask();
+    bool createMask = nsSVGIntegrationUtils::UsingMaskOrClipPathForFrame(this);
+
+    if (createFilter) {
+      // If we are going to create a mask display item, handle opacity effect
+      // in that mask display item; Otherwise, take care of opacity in this
+      // filter display item.
+      bool handleOpacity = !createMask && !useOpacity;
+
       /* List now emptied, so add the new list to the top. */
       resultList.AppendNewToTop(
-          new (aBuilder) nsDisplayFilter(aBuilder, this, &resultList, useOpacity));
+        new (aBuilder) nsDisplayFilter(aBuilder, this, &resultList,
+                                       handleOpacity));
     }
 
-    if (nsSVGIntegrationUtils::UsingMaskOrClipPathForFrame(this)) {
+    if (createMask) {
       /* List now emptied, so add the new list to the top. */
       resultList.AppendNewToTop(
-          new (aBuilder) nsDisplayMask(aBuilder, this, &resultList, useOpacity));
+          new (aBuilder) nsDisplayMask(aBuilder, this, &resultList,
+                                       !useOpacity));
     }
 
     // Also add the hoisted scroll info items. We need those for APZ scrolling
@@ -4491,19 +4503,19 @@ nsIFrame::InlinePrefISizeData::ForceBreak()
     for (uint32_t i = 0, i_end = mFloats.Length(); i != i_end; ++i) {
       const FloatInfo& floatInfo = mFloats[i];
       const nsStyleDisplay* floatDisp = floatInfo.Frame()->StyleDisplay();
-      uint8_t breakType = floatDisp->PhysicalBreakType(mLineContainerWM);
-      if (breakType == NS_STYLE_CLEAR_LEFT ||
-          breakType == NS_STYLE_CLEAR_RIGHT ||
-          breakType == NS_STYLE_CLEAR_BOTH) {
+      StyleClear breakType = floatDisp->PhysicalBreakType(mLineContainerWM);
+      if (breakType == StyleClear::Left ||
+          breakType == StyleClear::Right ||
+          breakType == StyleClear::Both) {
         nscoord floats_cur = NSCoordSaturatingAdd(floats_cur_left,
                                                   floats_cur_right);
         if (floats_cur > floats_done) {
           floats_done = floats_cur;
         }
-        if (breakType != NS_STYLE_CLEAR_RIGHT) {
+        if (breakType != StyleClear::Right) {
           floats_cur_left = 0;
         }
-        if (breakType != NS_STYLE_CLEAR_LEFT) {
+        if (breakType != StyleClear::Left) {
           floats_cur_right = 0;
         }
       }
