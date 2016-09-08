@@ -226,6 +226,11 @@ config = {
             "options": ["--suite=reftest"],
             "tests": ["tests/reftest/tests/layout/reftests/reftest.list"]
         },
+        "reftest-stylo": {
+            "options": ["--suite=reftest",
+                        "--disable-e10s"],
+            "tests": ["tests/reftest/tests/layout/reftests/reftest-stylo.list"]
+        },
         "crashtest": {
             "options": ["--suite=crashtest"],
             "tests": ["tests/reftest/tests/testing/crashtest/crashtests.list"]
