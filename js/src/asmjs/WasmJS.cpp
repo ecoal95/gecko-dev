@@ -18,6 +18,7 @@
 
 #include "asmjs/WasmJS.h"
 
+#include "mozilla/CheckedInt.h"
 #include "mozilla/Maybe.h"
 
 #include "asmjs/WasmCompile.h"
@@ -35,6 +36,7 @@
 using namespace js;
 using namespace js::jit;
 using namespace js::wasm;
+using mozilla::CheckedInt;
 using mozilla::Nothing;
 
 bool
@@ -710,12 +712,34 @@ wasm::ExportedFunctionToDefinitionIndex(JSFunction* fun)
 // ============================================================================
 // WebAssembly.Memory class and methods
 
+const ClassOps WasmMemoryObject::classOps_ =
+{
+    nullptr, /* addProperty */
+    nullptr, /* delProperty */
+    nullptr, /* getProperty */
+    nullptr, /* setProperty */
+    nullptr, /* enumerate */
+    nullptr, /* resolve */
+    nullptr, /* mayResolve */
+    WasmMemoryObject::finalize
+};
+
 const Class WasmMemoryObject::class_ =
 {
     "WebAssembly.Memory",
     JSCLASS_DELAY_METADATA_BUILDER |
-    JSCLASS_HAS_RESERVED_SLOTS(WasmMemoryObject::RESERVED_SLOTS)
+    JSCLASS_HAS_RESERVED_SLOTS(WasmMemoryObject::RESERVED_SLOTS) |
+    JSCLASS_FOREGROUND_FINALIZE,
+    &WasmMemoryObject::classOps_
 };
+
+/* static */ void
+WasmMemoryObject::finalize(FreeOp* fop, JSObject* obj)
+{
+    WasmMemoryObject& memory = obj->as<WasmMemoryObject>();
+    if (memory.hasObservers())
+        fop->delete_(&memory.observers());
+}
 
 /* static */ WasmMemoryObject*
 WasmMemoryObject::create(ExclusiveContext* cx, HandleArrayBufferObjectMaybeShared buffer,
@@ -727,6 +751,7 @@ WasmMemoryObject::create(ExclusiveContext* cx, HandleArrayBufferObjectMaybeShare
         return nullptr;
 
     obj->initReservedSlot(BUFFER_SLOT, ObjectValue(*buffer));
+    MOZ_ASSERT(!obj->hasObservers());
     return obj;
 }
 
@@ -811,33 +836,172 @@ IsMemory(HandleValue v)
     return v.isObject() && v.toObject().is<WasmMemoryObject>();
 }
 
-static bool
-MemoryBufferGetterImpl(JSContext* cx, const CallArgs& args)
+/* static */ bool
+WasmMemoryObject::bufferGetterImpl(JSContext* cx, const CallArgs& args)
 {
     args.rval().setObject(args.thisv().toObject().as<WasmMemoryObject>().buffer());
     return true;
 }
 
-static bool
-MemoryBufferGetter(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+WasmMemoryObject::bufferGetter(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    return CallNonGenericMethod<IsMemory, MemoryBufferGetterImpl>(cx, args);
+    return CallNonGenericMethod<IsMemory, bufferGetterImpl>(cx, args);
 }
 
 const JSPropertySpec WasmMemoryObject::properties[] =
 {
-    JS_PSG("buffer", MemoryBufferGetter, 0),
+    JS_PSG("buffer", WasmMemoryObject::bufferGetter, 0),
     JS_PS_END
 };
 
+/* static */ bool
+WasmMemoryObject::growImpl(JSContext* cx, const CallArgs& args)
+{
+    RootedWasmMemoryObject memory(cx, &args.thisv().toObject().as<WasmMemoryObject>());
+
+    double deltaDbl;
+    if (!ToInteger(cx, args.get(0), &deltaDbl))
+        return false;
+
+    if (deltaDbl < 0 || deltaDbl > UINT32_MAX) {
+        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_WASM_BAD_GROW);
+        return false;
+    }
+
+    uint32_t ret = grow(memory, uint32_t(deltaDbl), cx);
+
+    if (ret == uint32_t(-1)) {
+        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_WASM_BAD_GROW);
+        return false;
+    }
+
+    args.rval().setInt32(ret);
+    return true;
+}
+
+/* static */ bool
+WasmMemoryObject::grow(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    return CallNonGenericMethod<IsMemory, growImpl>(cx, args);
+}
+
 const JSFunctionSpec WasmMemoryObject::methods[] =
-{ JS_FS_END };
+{
+    JS_FN("grow", WasmMemoryObject::grow, 1, 0),
+    JS_FS_END
+};
 
 ArrayBufferObjectMaybeShared&
 WasmMemoryObject::buffer() const
 {
     return getReservedSlot(BUFFER_SLOT).toObject().as<ArrayBufferObjectMaybeShared>();
+}
+
+bool
+WasmMemoryObject::hasObservers() const
+{
+    return !getReservedSlot(OBSERVERS_SLOT).isUndefined();
+}
+
+WasmMemoryObject::WeakInstanceSet&
+WasmMemoryObject::observers() const
+{
+    MOZ_ASSERT(hasObservers());
+    return *reinterpret_cast<WeakInstanceSet*>(getReservedSlot(OBSERVERS_SLOT).toPrivate());
+}
+
+WasmMemoryObject::WeakInstanceSet*
+WasmMemoryObject::getOrCreateObservers(JSContext* cx)
+{
+    if (!hasObservers()) {
+        auto observers = MakeUnique<WeakInstanceSet>(cx->zone(), InstanceSet());
+        if (!observers || !observers->init()) {
+            ReportOutOfMemory(cx);
+            return nullptr;
+        }
+
+        setReservedSlot(OBSERVERS_SLOT, PrivateValue(observers.release()));
+    }
+
+    return &observers();
+}
+
+bool
+WasmMemoryObject::movingGrowable() const
+{
+#ifdef WASM_HUGE_MEMORY
+    return false;
+#else
+    return !buffer().wasmMaxSize();
+#endif
+}
+
+bool
+WasmMemoryObject::addMovingGrowObserver(JSContext* cx, WasmInstanceObject* instance)
+{
+    MOZ_ASSERT(movingGrowable());
+
+    WeakInstanceSet* observers = getOrCreateObservers(cx);
+    if (!observers)
+        return false;
+
+    if (!observers->putNew(instance)) {
+        ReportOutOfMemory(cx);
+        return false;
+    }
+
+    return true;
+}
+
+/* static */ uint32_t
+WasmMemoryObject::grow(HandleWasmMemoryObject memory, uint32_t delta, JSContext* cx)
+{
+    RootedArrayBufferObject oldBuf(cx, &memory->buffer().as<ArrayBufferObject>());
+
+    MOZ_ASSERT(oldBuf->byteLength() % PageSize == 0);
+    uint32_t oldNumPages = oldBuf->byteLength() / PageSize;
+
+    CheckedInt<uint32_t> newSize = oldNumPages;
+    newSize += delta;
+    newSize *= PageSize;
+    if (!newSize.isValid())
+        return -1;
+
+    RootedArrayBufferObject newBuf(cx);
+    uint8_t* prevMemoryBase = nullptr;
+
+    if (Maybe<uint32_t> maxSize = oldBuf->wasmMaxSize()) {
+        if (newSize.value() > maxSize.value())
+            return -1;
+
+        if (!ArrayBufferObject::wasmGrowToSizeInPlace(newSize.value(), oldBuf, &newBuf, cx))
+            return -1;
+    } else {
+#ifdef WASM_HUGE_MEMORY
+        if (!ArrayBufferObject::wasmGrowToSizeInPlace(newSize.value(), oldBuf, &newBuf, cx))
+            return -1;
+#else
+        MOZ_ASSERT(memory->movingGrowable());
+        prevMemoryBase = oldBuf->dataPointer();
+        if (!ArrayBufferObject::wasmMovingGrowToSize(newSize.value(), oldBuf, &newBuf, cx))
+            return -1;
+#endif
+    }
+
+    memory->setReservedSlot(BUFFER_SLOT, ObjectValue(*newBuf));
+
+    // Only notify moving-grow-observers after the BUFFER_SLOT has been updated
+    // since observers will call buffer().
+    if (memory->hasObservers()) {
+        MOZ_ASSERT(prevMemoryBase);
+        for (InstanceSet::Range r = memory->observers().all(); !r.empty(); r.popFront())
+            r.front()->instance().onMovingGrow(prevMemoryBase);
+    }
+
+    return oldNumPages;
 }
 
 // ============================================================================

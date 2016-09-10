@@ -49,18 +49,27 @@ H264Converter::Init()
            TrackType::kVideoTrack, __func__);
 }
 
-nsresult
+void
 H264Converter::Input(MediaRawData* aSample)
 {
   if (!mp4_demuxer::AnnexB::ConvertSampleToAVCC(aSample)) {
     // We need AVCC content to be able to later parse the SPS.
     // This is a no-op if the data is already AVCC.
-    return NS_ERROR_FAILURE;
+    mCallback->Error(MediaDataDecoderError::DECODE_ERROR);
+    return;
   }
 
   if (mInitPromiseRequest.Exists()) {
+    if (mNeedKeyframe) {
+      if (!aSample->mKeyframe) {
+        // Frames dropped, we need a new one.
+        mCallback->InputExhausted();
+        return;
+      }
+      mNeedKeyframe = false;
+    }
     mMediaRawSamples.AppendElement(aSample);
-    return NS_OK;
+    return;
   }
 
   nsresult rv;
@@ -72,52 +81,63 @@ H264Converter::Input(MediaRawData* aSample)
     if (rv == NS_ERROR_NOT_INITIALIZED) {
       // We are missing the required SPS to create the decoder.
       // Ignore for the time being, the MediaRawData will be dropped.
-      return NS_OK;
+      mCallback->InputExhausted();
+      return;
     }
   } else {
     rv = CheckForSPSChange(aSample);
   }
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_FAILED(rv)) {
+    mCallback->Error(MediaDataDecoderError::DECODE_ERROR);
+    return;
+  }
+
+  if (mNeedKeyframe && !aSample->mKeyframe) {
+    mCallback->InputExhausted();
+    return;
+  }
 
   if (!mNeedAVCC &&
       !mp4_demuxer::AnnexB::ConvertSampleToAnnexB(aSample)) {
-    return NS_ERROR_FAILURE;
+    mCallback->Error(MediaDataDecoderError::FATAL_ERROR);
+    return;
   }
+
+  mNeedKeyframe = false;
 
   aSample->mExtraData = mCurrentConfig.mExtraData;
 
-  return mDecoder->Input(aSample);
+  mDecoder->Input(aSample);
 }
 
-nsresult
+void
 H264Converter::Flush()
 {
+  mNeedKeyframe = true;
   if (mDecoder) {
-    return mDecoder->Flush();
+    mDecoder->Flush();
   }
-  return mLastError;
 }
 
-nsresult
+void
 H264Converter::Drain()
 {
+  mNeedKeyframe = true;
   if (mDecoder) {
-    return mDecoder->Drain();
+    mDecoder->Drain();
+    return;
   }
   mCallback->DrainComplete();
-  return mLastError;
 }
 
-nsresult
+void
 H264Converter::Shutdown()
 {
   if (mDecoder) {
-    nsresult rv = mDecoder->Shutdown();
+    mDecoder->Shutdown();
     mInitPromiseRequest.DisconnectIfExists();
     mDecoder = nullptr;
-    return rv;
   }
-  return NS_OK;
 }
 
 bool
@@ -137,6 +157,24 @@ H264Converter::CreateDecoder(DecoderDoctorDiagnostics* aDiagnostics)
     return NS_ERROR_NOT_INITIALIZED;
   }
   UpdateConfigFromExtraData(mCurrentConfig.mExtraData);
+
+  mp4_demuxer::SPSData spsdata;
+  if (mp4_demuxer::H264::DecodeSPSFromExtraData(mCurrentConfig.mExtraData, spsdata)) {
+    // Do some format check here.
+    // WMF H.264 Video Decoder and Apple ATDecoder do not support YUV444 format.
+    if (spsdata.chroma_format_idc == 3 /*YUV444*/) {
+      mLastError = NS_ERROR_FAILURE;
+      if (aDiagnostics) {
+        aDiagnostics->SetVideoFormatNotSupport();
+      }
+      return NS_ERROR_FAILURE;
+    }
+  } else if (mNeedAVCC) {
+    // SPS was invalid.
+    mLastError = NS_ERROR_FAILURE;
+    return NS_ERROR_FAILURE;
+  }
+
   if (!mNeedAVCC) {
     // When using a decoder handling AnnexB, we get here only once from the
     // constructor. We do want to get the dimensions extracted from the SPS.
@@ -157,6 +195,9 @@ H264Converter::CreateDecoder(DecoderDoctorDiagnostics* aDiagnostics)
     mLastError = NS_ERROR_FAILURE;
     return NS_ERROR_FAILURE;
   }
+
+  mNeedKeyframe = true;
+
   return NS_OK;
 }
 
@@ -190,10 +231,19 @@ void
 H264Converter::OnDecoderInitDone(const TrackType aTrackType)
 {
   mInitPromiseRequest.Complete();
+  bool gotInput = false;
   for (uint32_t i = 0 ; i < mMediaRawSamples.Length(); i++) {
-    if (NS_FAILED(mDecoder->Input(mMediaRawSamples[i]))) {
-      mCallback->Error(MediaDataDecoderError::FATAL_ERROR);
+    const RefPtr<MediaRawData>& sample = mMediaRawSamples[i];
+    if (mNeedKeyframe) {
+      if (!sample->mKeyframe) {
+        continue;
+      }
+      mNeedKeyframe = false;
     }
+    mDecoder->Input(sample);
+  }
+  if (!gotInput) {
+    mCallback->InputExhausted();
   }
   mMediaRawSamples.Clear();
 }

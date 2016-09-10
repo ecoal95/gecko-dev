@@ -2229,9 +2229,11 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     aBuilder->EnterSVGEffectsContents(&hoistedScrollInfoItemsStorage);
   }
 
-  // We build an opacity item if it's not going to be drawn by SVG content, or SVG effects.
-  // SVG effects won't handle the opacity if we want an active layer (for async animations),
-  // see nsSVGIntegrationsUtils::PaintFramesWithEffects.
+  // We build an opacity item if it's not going to be drawn by SVG content, or
+  // SVG effects. SVG effects won't handle the opacity if we want an active
+  // layer (for async animations), see
+  // nsSVGIntegrationsUtils::PaintMaskAndClipPath or
+  // nsSVGIntegrationsUtils::PaintFilter.
   bool useOpacity = HasVisualOpacity() && !nsSVGUtils::CanOptimizeOpacity(this) &&
                     (!usingSVGEffects || nsDisplayOpacity::NeedsActiveLayer(aBuilder, this));
   bool useBlendMode = effects->mMixBlendMode != NS_STYLE_BLEND_NORMAL;
@@ -3226,7 +3228,7 @@ nsFrame::IsSelectable(bool* aSelectable, StyleUserSelect* aSelectStyle) const
   if (mState & NS_FRAME_GENERATED_CONTENT) {
     *aSelectable = false;
   } else {
-    *aSelectable = allowSelection && (selectStyle != StyleUserSelect::None_);
+    *aSelectable = allowSelection && (selectStyle != StyleUserSelect::None);
   }
 
   return NS_OK;
@@ -3942,7 +3944,7 @@ static bool SelfIsSelectable(nsIFrame* aFrame, uint32_t aFlags)
     return false;
   }
   return !aFrame->IsGeneratedContentFrame() &&
-    aFrame->StyleUIReset()->mUserSelect != StyleUserSelect::None_;
+    aFrame->StyleUIReset()->mUserSelect != StyleUserSelect::None;
 }
 
 static bool SelectionDescendToKids(nsIFrame* aFrame) {
@@ -3958,7 +3960,7 @@ static bool SelectionDescendToKids(nsIFrame* aFrame) {
   // they can at the moment)
   return !aFrame->IsGeneratedContentFrame() &&
          style != StyleUserSelect::All  &&
-         style != StyleUserSelect::None_ &&
+         style != StyleUserSelect::None &&
          ((parent->GetStateBits() & NS_FRAME_INDEPENDENT_SELECTION) ||
           !(aFrame->GetStateBits() & NS_FRAME_INDEPENDENT_SELECTION));
 }
@@ -8608,7 +8610,7 @@ nsIFrame::IsFocusable(int32_t *aTabIndex, bool aWithMouse)
       StyleContext()->GetPseudo() != nsCSSAnonBoxes::anonymousGridItem) {
     const nsStyleUserInterface* ui = StyleUserInterface();
     if (ui->mUserFocus != StyleUserFocus::Ignore &&
-        ui->mUserFocus != StyleUserFocus::None_) {
+        ui->mUserFocus != StyleUserFocus::None) {
       // Pass in default tabindex of -1 for nonfocusable and 0 for focusable
       tabIndex = 0;
     }

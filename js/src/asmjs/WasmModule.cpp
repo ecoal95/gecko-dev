@@ -566,21 +566,21 @@ Module::instantiateMemory(JSContext* cx, MutableHandleWasmMemoryObject memory) c
     Maybe<uint32_t> declaredMax = metadata_->maxMemoryLength;
 
     if (memory) {
-        RootedArrayBufferObjectMaybeShared buffer(cx, &memory->buffer());
-        MOZ_RELEASE_ASSERT(buffer->is<SharedArrayBufferObject>() ||
-                           buffer->as<ArrayBufferObject>().isWasm());
+        ArrayBufferObjectMaybeShared& buffer = memory->buffer();
+        MOZ_ASSERT_IF(metadata_->isAsmJS(), buffer.isPreparedForAsmJS());
+        MOZ_ASSERT_IF(!metadata_->isAsmJS(), buffer.as<ArrayBufferObject>().isWasm());
 
-        uint32_t actualLength = buffer->wasmActualByteLength();
+        uint32_t actualLength = buffer.byteLength();
         if (actualLength < declaredMin || actualLength > declaredMax.valueOr(UINT32_MAX)) {
             JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_WASM_BAD_IMP_SIZE, "Memory");
             return false;
         }
 
-        // For asm.js maxMemoryLength doesn't play a role since we can't grow memory.
-        // For wasm we require that either both memory and module don't specify a max size
-        // OR that the memory's max size is less than the modules.
-        if (!metadata_->isAsmJS()) {
-            Maybe<uint32_t> actualMax = buffer->as<ArrayBufferObject>().wasmMaxSize();
+        if (metadata_->isAsmJS()) {
+            MOZ_ASSERT(IsValidAsmJSHeapLength(actualLength));
+            MOZ_ASSERT(actualLength == buffer.wasmMaxSize().value());
+        } else {
+            Maybe<uint32_t> actualMax = buffer.as<ArrayBufferObject>().wasmMaxSize();
             if (declaredMax.isSome() != actualMax.isSome() || declaredMax < actualMax) {
                 JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_WASM_BAD_IMP_SIZE, "Memory");
                 return false;

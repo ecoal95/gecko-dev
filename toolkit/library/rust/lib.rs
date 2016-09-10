@@ -4,12 +4,3 @@
 
 extern crate geckoservo;
 extern crate mp4parse_capi;
-
-use std::ffi::CStr;
-use std::os::raw::c_char;
-
-/// Used to implement `nsIDebug2::RustPanic` for testing purposes.
-#[no_mangle]
-pub extern fn intentional_panic(message: *const c_char) {
-    panic!("{}", unsafe { CStr::from_ptr(message) }.to_string_lossy());
-}

@@ -36,6 +36,11 @@ var gSearchPane = {
     document.getElementById("engineList").view = gEngineView;
     this.buildDefaultEngineDropDown();
 
+    let addEnginesLink = document.getElementById("addEngines");
+    let searchEnginesURL = Services.wm.getMostRecentWindow('navigator:browser')
+                                      .BrowserSearch.searchEnginesURL;
+    addEnginesLink.setAttribute("href", searchEnginesURL);
+
     window.addEventListener("click", this, false);
     window.addEventListener("command", this, false);
     window.addEventListener("dragstart", this, false);
@@ -122,10 +127,6 @@ var gSearchPane = {
             }
             engineList.blur();
           }
-        }
-        if (aEvent.target.id == "addEngines" && aEvent.button == 0) {
-          Services.wm.getMostRecentWindow('navigator:browser')
-                     .BrowserSearch.loadAddEngines();
         }
         break;
       case "command":
@@ -222,6 +223,8 @@ var gSearchPane = {
       let newValue = !gEngineView._engineStore.engines[index].shown;
       gEngineView.setCellValue(index, tree.columns.getFirstColumn(),
                                newValue.toString());
+      // Prevent page from scrolling on the space key.
+      aEvent.preventDefault();
     }
     else {
       let isMac = Services.appinfo.OS == "Darwin";

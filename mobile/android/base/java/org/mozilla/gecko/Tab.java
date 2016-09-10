@@ -84,6 +84,7 @@ public class Tab {
     private volatile int mLoadProgress;
     private volatile int mRecordingCount;
     private volatile boolean mIsAudioPlaying;
+    private volatile boolean mIsMediaPlaying;
     private String mMostRecentHomePanel;
     private boolean mShouldShowToolbarWithoutAnimationOnFirstSelection;
 
@@ -140,6 +141,7 @@ public class Tab {
         mPluginViews = new ArrayList<View>();
         mState = shouldShowProgress(url) ? STATE_LOADING : STATE_SUCCESS;
         mLoadProgress = LOAD_PROGRESS_INIT;
+        mIconRequestBuilder = Icons.with(mAppContext).pageUrl(mUrl);
 
         updateBookmark();
     }
@@ -450,13 +452,6 @@ public class Tab {
         // Static Favicons never change
         if (AboutPages.isBuiltinIconPage(mUrl) && mFavicon != null) {
             return;
-        }
-
-        if (mIconRequestBuilder == null) {
-            // For the first internal homepage we might want to load a favicon without ever receiving
-            // a location change event first. In this case we didn't start to build a request yet.
-            // Let's do that now.
-            mIconRequestBuilder = Icons.with(mAppContext).pageUrl(mUrl);
         }
 
         mRunningIconRequest = mIconRequestBuilder
@@ -818,6 +813,26 @@ public class Tab {
         return mRecordingCount > 0;
     }
 
+    /**
+     * The "MediaPlaying" is used for controling media control interface and
+     * means the tab has playing media.
+     *
+     * @param isMediaPlaying the tab has any playing media or not
+     */
+    public void setIsMediaPlaying(boolean isMediaPlaying) {
+        mIsMediaPlaying = isMediaPlaying;
+    }
+
+    public boolean isMediaPlaying() {
+        return mIsMediaPlaying;
+    }
+
+    /**
+     * The "AudioPlaying" is used for showing the tab sound indicator and means
+     * the tab has playing media and the media is audible.
+     *
+     * @param isAudioPlaying the tab has any audible playing media or not
+     */
     public void setIsAudioPlaying(boolean isAudioPlaying) {
         mIsAudioPlaying = isAudioPlaying;
     }

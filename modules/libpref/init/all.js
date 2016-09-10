@@ -321,7 +321,7 @@ pref("media.hardware-video-decoding.enabled", true);
 pref("media.hardware-video-decoding.force-enabled", false);
 
 pref("media.decoder.heuristic.dormant.enabled", true);
-pref("media.decoder.heuristic.dormant.timeout", 60000);
+pref("media.decoder.heuristic.dormant.timeout", 10000);
 
 #ifdef MOZ_DIRECTSHOW
 pref("media.directshow.enabled", true);
@@ -471,7 +471,9 @@ pref("media.peerconnection.identity.enabled", true);
 pref("media.peerconnection.identity.timeout", 10000);
 pref("media.peerconnection.ice.stun_client_maximum_transmits", 7);
 pref("media.peerconnection.ice.trickle_grace_period", 5000);
+pref("media.peerconnection.ice.no_host", false);
 pref("media.peerconnection.ice.default_address_only", false);
+pref("media.peerconnection.ice.proxy_only", false);
 
 // These values (aec, agc, and noice) are from media/webrtc/trunk/webrtc/common_types.h
 // kXxxUnchanged = 0, kXxxDefault = 1, and higher values are specific to each

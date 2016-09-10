@@ -2855,7 +2855,8 @@ PluginModuleParent::IsRemoteDrawingCoreAnimation(NPP instance, bool *aDrawing)
 
     return i->IsRemoteDrawingCoreAnimation(aDrawing);
 }
-
+#endif
+#if defined(XP_MACOSX) || defined(XP_WIN)
 nsresult
 PluginModuleParent::ContentsScaleFactorChanged(NPP instance, double aContentsScaleFactor)
 {
@@ -3365,4 +3366,20 @@ PluginModuleChromeParent::RecvProfile(const nsCString& aProfile)
     return true;
 }
 
+bool
+PluginModuleParent::AnswerGetKeyState(const int32_t& aVirtKey, int16_t* aRet)
+{
+    return false;
+}
 
+bool
+PluginModuleChromeParent::AnswerGetKeyState(const int32_t& aVirtKey,
+                                            int16_t* aRet)
+{
+#if defined(XP_WIN)
+    *aRet = ::GetKeyState(aVirtKey);
+    return true;
+#else
+    return PluginModuleParent::AnswerGetKeyState(aVirtKey, aRet);
+#endif
+}

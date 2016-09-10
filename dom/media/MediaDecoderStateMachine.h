@@ -251,6 +251,17 @@ public:
   size_t SizeOfAudioQueue() const;
 
 private:
+  class StateObject;
+  class DecodeMetadataState;
+  class WaitForCDMState;
+  class DormantState;
+  class DecodingFirstFrameState;
+  class DecodingState;
+  class SeekingState;
+  class BufferingState;
+  class CompletedState;
+  class ShutdownState;
+
   static const char* ToStateStr(State aState);
   const char* ToStateStr();
 
@@ -266,8 +277,6 @@ private:
   void SetDormant(bool aDormant);
 
   void SetAudioCaptured(bool aCaptured);
-
-  void ReadMetadata();
 
   RefPtr<MediaDecoder::SeekPromise> Seek(SeekTarget aTarget);
 
@@ -319,23 +328,13 @@ private:
   // request is discarded.
   void ScheduleStateMachineIn(int64_t aMicroseconds);
 
-  void OnDelayedSchedule()
-  {
-    MOZ_ASSERT(OnTaskQueue());
-    mDelayedScheduler.CompleteRequest();
-    ScheduleStateMachine();
-  }
-
-  void NotReached() { MOZ_DIAGNOSTIC_ASSERT(false); }
-
   // Discard audio/video data that are already played by MSG.
   void DiscardStreamData();
   bool HaveEnoughDecodedAudio();
   bool HaveEnoughDecodedVideo();
 
-  // Returns true if the state machine has shutdown or is in the process of
-  // shutting down. The decoder monitor must be held while calling this.
-  bool IsShutdown();
+  // True if shutdown process has begun.
+  bool IsShutdown() const;
 
   // Returns true if we're currently playing. The decoder monitor must
   // be held.
@@ -356,8 +355,6 @@ protected:
   virtual ~MediaDecoderStateMachine();
 
   void SetState(State aState);
-  void ExitState();
-  void EnterState();
 
   void BufferedRangeUpdated();
 
@@ -538,10 +535,6 @@ protected:
   // must be held when calling this. Called on the decode thread.
   int64_t GetDecodedAudioDuration();
 
-  // Promise callbacks for metadata reading.
-  void OnMetadataRead(MetadataHolder* aMetadata);
-  void OnMetadataNotRead(ReadMetadataFailureReason aReason);
-
   // Notify FirstFrameLoaded if having decoded first frames and
   // transition to SEEKING if there is any pending seek, or DECODING otherwise.
   void MaybeFinishDecodeFirstFrame();
@@ -612,6 +605,8 @@ private:
   // The decoder monitor must be obtained before modifying this state.
   // Accessed on state machine, audio, main, and AV thread.
   Watchable<State> mState;
+
+  UniquePtr<StateObject> mStateObj;
 
   // Time that buffering started. Used for buffering timeout and only
   // accessed on the state machine thread. This is null while we're not
@@ -815,11 +810,6 @@ private:
   // True if all video frames are already rendered.
   Watchable<bool> mVideoCompleted;
 
-  // True if we need to enter dormant state after reading metadata. Note that
-  // we can't enter dormant state until reading metadata is done for some
-  // limitations of the reader.
-  bool mPendingDormant = false;
-
   // Flag whether we notify metadata before decoding the first frame or after.
   //
   // Note that the odd semantics here are designed to replicate the current
@@ -851,9 +841,6 @@ private:
   // waiting to be awakened before it continues decoding. Synchronized
   // by the decoder monitor.
   bool mDecodeThreadWaiting;
-
-  // Track our request for metadata from the reader.
-  MozPromiseRequestHolder<MediaDecoderReader::MetadataPromise> mMetadataRequest;
 
   // Stores presentation info required for playback. The decoder monitor
   // must be held when accessing this.

@@ -58,15 +58,16 @@ class Instance
     static int32_t callImport_f64(Instance*, int32_t, int32_t, uint64_t*);
     static uint32_t growMemory_i32(Instance* instance, uint32_t delta);
     static uint32_t currentMemory_i32(Instance* instance);
-
     bool callImport(JSContext* cx, uint32_t funcImportIndex, unsigned argc, const uint64_t* argv,
                     MutableHandleValue rval);
-    uint32_t growMemory(uint32_t delta);
-    uint32_t currentMemory();
 
     // Only WasmInstanceObject can call the private trace function.
     friend class js::WasmInstanceObject;
     void tracePrivate(JSTracer* trc);
+
+    // Only WasmMemoryObject can call the private onMovingGrow notification.
+    friend class js::WasmMemoryObject;
+    void onMovingGrow(uint8_t* prevMemoryBase);
 
   public:
     Instance(JSContext* cx,
@@ -113,6 +114,10 @@ class Instance
     // be notified so it can go back to the generic callImport.
 
     void deoptimizeImportExit(uint32_t funcImportIndex);
+
+    // Called by simulators to check whether accessing 'numBytes' starting at
+    // 'addr' would trigger a fault and be safely handled by signal handlers.
+
     bool memoryAccessWouldFault(uint8_t* addr, unsigned numBytes);
 
     // See Code::ensureProfilingState comment.

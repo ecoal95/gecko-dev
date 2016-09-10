@@ -1335,7 +1335,7 @@ JS_STATIC_ASSERT(JSOP_IFNE == JSOP_IFEQ + 1);
  * 1. The nominal |this|, obj, is a global object.
  *
  * 2. The nominal |this|, obj, has one of LexicalEnvironment or Call class (this
- *    is what IsCacheableNonGlobalEnvironment tests). Such objects-as-envs must be
+ *    is what IsCacheableEnvironment tests). Such objects-as-envs must be
  *    censored with undefined.
  *
  * Otherwise, we bind |this| to the result of GetThisValue(). Only names inside
@@ -1350,10 +1350,10 @@ JS_STATIC_ASSERT(JSOP_IFNE == JSOP_IFEQ + 1);
 static inline Value
 ComputeImplicitThis(JSObject* obj)
 {
-    if (IsGlobalLexicalEnvironment(obj))
+    if (obj->is<GlobalObject>())
         return UndefinedValue();
 
-    if (IsCacheableNonGlobalEnvironment(obj))
+    if (IsCacheableEnvironment(obj))
         return UndefinedValue();
 
     return GetThisValue(obj);
@@ -5045,9 +5045,17 @@ js::ThrowUninitializedThis(JSContext* cx, AbstractFramePtr frame)
     if (frame.isFunctionFrame()) {
         fun = frame.callee();
     } else {
-        MOZ_ASSERT(frame.isEvalFrame());
-        MOZ_ASSERT(frame.script()->isDirectEvalInFunction());
-        for (ScopeIter si(frame.script()->enclosingScope()); si; si++) {
+        Scope* startingScope;
+        if (frame.isDebuggerEvalFrame()) {
+            AbstractFramePtr evalInFramePrev = frame.asInterpreterFrame()->evalInFramePrev();
+            startingScope = evalInFramePrev.script()->bodyScope();
+        } else {
+            MOZ_ASSERT(frame.isEvalFrame());
+            MOZ_ASSERT(frame.script()->isDirectEvalInFunction());
+            startingScope = frame.script()->enclosingScope();
+        }
+
+        for (ScopeIter si(startingScope); si; si++) {
             if (si.scope()->is<FunctionScope>()) {
                 fun = si.scope()->as<FunctionScope>().canonicalFunction();
                 break;

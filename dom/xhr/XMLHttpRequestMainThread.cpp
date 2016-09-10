@@ -1526,11 +1526,11 @@ XMLHttpRequestMainThread::OpenInternal(const nsACString& aMethod,
   mFlagAborted = false;
   mFlagTimedOut = false;
 
-  // The channel should really be created on send(), but we have a chrome-only
-  // XHR.channel API which necessitates creating the channel now, while doing
-  // the rest of the channel-setup later at send-time.
-  rv = CreateChannel();
-  NS_ENSURE_SUCCESS(rv, rv);
+  // Per spec we should only create the channel on send(), but we have internal
+  // code that relies on the channel being created now, and that code is not
+  // always IsSystemXHR(). However, we're not supposed to throw channel-creation
+  // errors during open(), so we silently ignore those here.
+  CreateChannel();
 
   // Step 12
   if (mState != State::opened) {
@@ -2229,7 +2229,11 @@ XMLHttpRequestMainThread::RequestBody<nsIDocument>::GetAsStream(
     if (!nsContentUtils::SerializeNodeToMarkup(mBody, true, serialized)) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
-    NS_ConvertUTF16toUTF8 utf8Serialized(serialized);
+
+    nsAutoCString utf8Serialized;
+    if (!AppendUTF16toUTF8(serialized, utf8Serialized, fallible)) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
 
     uint32_t written;
     rv = output->Write(utf8Serialized.get(), utf8Serialized.Length(), &written);
@@ -2268,7 +2272,11 @@ XMLHttpRequestMainThread::RequestBody<const nsAString>::GetAsStream(
   aContentType.AssignLiteral("text/plain");
   aCharset.AssignLiteral("UTF-8");
 
-  nsCString converted = NS_ConvertUTF16toUTF8(*mBody);
+  nsAutoCString converted;
+  if (!AppendUTF16toUTF8(*mBody, converted, fallible)) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
   *aContentLength = converted.Length();
   nsresult rv = NS_NewCStringInputStream(aResult, converted);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -2632,7 +2640,7 @@ XMLHttpRequestMainThread::InitiateFetch(nsIInputStream* aUploadStream,
 
     // Per spec, we throw on sync errors, but not async.
     if (mFlagSynchronous) {
-      return rv;
+      return NS_ERROR_DOM_NETWORK_ERR;
     }
   }
 
@@ -2724,18 +2732,24 @@ XMLHttpRequestMainThread::SendInternal(const RequestBodyBase* aBody)
 {
   NS_ENSURE_TRUE(mPrincipal, NS_ERROR_NOT_INITIALIZED);
 
-  PopulateNetworkInterfaceId();
+  // Steps 1 and 2
+  if (mState != State::opened || mFlagSend) {
+    return NS_ERROR_DOM_INVALID_STATE_ERR;
+  }
 
   nsresult rv = CheckInnerWindowCorrectness();
   if (NS_FAILED(rv)) {
     return NS_ERROR_DOM_INVALID_STATE_ERR;
   }
 
-  if (mState != State::opened || // Step 1
-      mFlagSend || // Step 2
-      !mChannel) { // Gecko-specific
-    return NS_ERROR_DOM_INVALID_STATE_ERR;
+  // If open() failed to create the channel, then throw a network error
+  // as per spec. We really should create the channel here in send(), but
+  // we have internal code relying on the channel being created in open().
+  if (!mChannel) {
+    return NS_ERROR_DOM_NETWORK_ERR;
   }
+
+  PopulateNetworkInterfaceId();
 
   // XXX We should probably send a warning to the JS console
   //     if there are no event listeners set and we are doing
@@ -2893,7 +2907,7 @@ XMLHttpRequestMainThread::SendInternal(const RequestBodyBase* aBody)
   if (!mChannel) {
     // Per spec, silently fail on async request failures; throw for sync.
     if (mFlagSynchronous) {
-      return NS_ERROR_FAILURE;
+      return NS_ERROR_DOM_NETWORK_ERR;
     } else {
       // Defer the actual sending of async events just in case listeners
       // are attached after the send() method is called.
