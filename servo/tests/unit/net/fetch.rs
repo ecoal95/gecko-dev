@@ -8,14 +8,13 @@ use devtools_traits::HttpResponse as DevtoolsHttpResponse;
 use http_loader::{expect_devtools_http_request, expect_devtools_http_response};
 use hyper::LanguageTag;
 use hyper::header::{Accept, AccessControlAllowCredentials, AccessControlAllowHeaders, AccessControlAllowOrigin};
-use hyper::header::{AccessControlAllowMethods, AccessControlMaxAge, AcceptLanguage, AcceptEncoding};
-use hyper::header::{AccessControlRequestHeaders, AccessControlRequestMethod, UserAgent, Date};
+use hyper::header::{AcceptEncoding, AcceptLanguage, AccessControlAllowMethods, AccessControlMaxAge};
+use hyper::header::{AccessControlRequestHeaders, AccessControlRequestMethod, Date, UserAgent};
 use hyper::header::{CacheControl, ContentLanguage, ContentLength, ContentType, Expires, LastModified};
-use hyper::header::{Headers, HttpDate, Host, Referer as HyperReferer};
-use hyper::header::{Location, SetCookie, Pragma, Encoding, qitem};
-use hyper::http::RawStatus;
+use hyper::header::{Encoding, Location, Pragma, SetCookie, qitem};
+use hyper::header::{Headers, Host, HttpDate, Referer as HyperReferer};
 use hyper::method::Method;
-use hyper::mime::{Mime, TopLevel, SubLevel};
+use hyper::mime::{Mime, SubLevel, TopLevel};
 use hyper::server::{Handler, Listening, Server};
 use hyper::server::{Request as HyperRequest, Response as HyperResponse};
 use hyper::status::StatusCode;
@@ -27,13 +26,12 @@ use net::http_loader::HttpState;
 use net_traits::FetchTaskTarget;
 use net_traits::request::{Origin, RedirectMode, Referer, Request, RequestMode};
 use net_traits::response::{CacheState, Response, ResponseBody, ResponseType};
-use std::borrow::Cow;
 use std::fs::File;
 use std::io::Read;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Sender, channel};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use time::{self, Duration};
 use unicase::UniCase;
@@ -834,7 +832,7 @@ fn test_fetch_with_devtools() {
 
     let httpresponse = DevtoolsHttpResponse {
         headers: Some(response_headers),
-        status: Some(RawStatus(200, Cow::Borrowed("OK"))),
+        status: Some((200, b"OK".to_vec())),
         body: None,
         pipeline_id: pipeline_id,
     };

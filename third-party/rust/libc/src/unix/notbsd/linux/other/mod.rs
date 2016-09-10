@@ -4,6 +4,40 @@ pub type rlim_t = c_ulong;
 pub type __priority_which_t = ::c_uint;
 
 s! {
+    pub struct __exit_status {
+        pub e_termination: ::c_short,
+        pub e_exit: ::c_short,
+    }
+
+    pub struct __timeval {
+        pub tv_sec: ::int32_t,
+        pub tv_usec: ::int32_t,
+    }
+
+    pub struct utmpx {
+        pub ut_type: ::c_short,
+        pub ut_pid: ::pid_t,
+        pub ut_line: [::c_char; __UT_LINESIZE],
+        pub ut_id: [::c_char; 4],
+
+        pub ut_user: [::c_char; __UT_NAMESIZE],
+        pub ut_host: [::c_char; __UT_HOSTSIZE],
+        pub ut_exit: __exit_status,
+
+        #[cfg(any(target_arch = "aarch64", target_pointer_width = "32"))]
+        pub ut_session: ::c_long,
+        #[cfg(any(target_arch = "aarch64", target_pointer_width = "32"))]
+        pub ut_tv: ::timeval,
+
+        #[cfg(not(any(target_arch = "aarch64", target_pointer_width = "32")))]
+        pub ut_session: ::int32_t,
+        #[cfg(not(any(target_arch = "aarch64", target_pointer_width = "32")))]
+        pub ut_tv: __timeval,
+
+        pub ut_addr_v6: [::int32_t; 4],
+        __glibc_reserved: [::c_char; 20],
+    }
+
     pub struct sigaction {
         pub sa_sigaction: ::sighandler_t,
         pub sa_mask: ::sigset_t,
@@ -89,39 +123,6 @@ s! {
         pub l_pid: ::pid_t,
     }
 
-    pub struct ipc_perm {
-        pub __key: ::key_t,
-        pub uid: ::uid_t,
-        pub gid: ::gid_t,
-        pub cuid: ::uid_t,
-        pub cgid: ::gid_t,
-        pub mode: ::c_ushort,
-        __pad1: ::c_ushort,
-        pub __seq: ::c_ushort,
-        __pad2: ::c_ushort,
-        __unused1: ::c_ulong,
-        __unused2: ::c_ulong
-    }
-
-    pub struct shmid_ds {
-        pub shm_perm: ::ipc_perm,
-        pub shm_segsz: ::size_t,
-        pub shm_atime: ::time_t,
-        #[cfg(target_pointer_width = "32")]
-        __unused1: ::c_ulong,
-        pub shm_dtime: ::time_t,
-        #[cfg(target_pointer_width = "32")]
-        __unused2: ::c_ulong,
-        pub shm_ctime: ::time_t,
-        #[cfg(target_pointer_width = "32")]
-        __unused3: ::c_ulong,
-        pub shm_cpid: ::pid_t,
-        pub shm_lpid: ::pid_t,
-        pub shm_nattch: ::shmatt_t,
-        __unused4: ::c_ulong,
-        __unused5: ::c_ulong
-    }
-
     // FIXME this is actually a union
     pub struct sem_t {
         #[cfg(target_pointer_width = "32")]
@@ -131,6 +132,20 @@ s! {
         __align: [::c_long; 0],
     }
 }
+
+pub const __UT_LINESIZE: usize = 32;
+pub const __UT_NAMESIZE: usize = 32;
+pub const __UT_HOSTSIZE: usize = 256;
+pub const EMPTY: ::c_short = 0;
+pub const RUN_LVL: ::c_short = 1;
+pub const BOOT_TIME: ::c_short = 2;
+pub const NEW_TIME: ::c_short = 3;
+pub const OLD_TIME: ::c_short = 4;
+pub const INIT_PROCESS: ::c_short = 5;
+pub const LOGIN_PROCESS: ::c_short = 6;
+pub const USER_PROCESS: ::c_short = 7;
+pub const DEAD_PROCESS: ::c_short = 8;
+pub const ACCOUNTING: ::c_short = 9;
 
 pub const RLIMIT_RSS: ::c_int = 5;
 pub const RLIMIT_NOFILE: ::c_int = 7;
@@ -330,12 +345,19 @@ pub const SIG_SETMASK: ::c_int = 2;
 pub const SIG_BLOCK: ::c_int = 0x000000;
 pub const SIG_UNBLOCK: ::c_int = 0x01;
 
+pub const POLLRDNORM: ::c_short = 0x040;
+pub const POLLWRNORM: ::c_short = 0x100;
+pub const POLLRDBAND: ::c_short = 0x080;
+pub const POLLWRBAND: ::c_short = 0x200;
+
 pub const FALLOC_FL_KEEP_SIZE: ::c_int = 0x01;
 pub const FALLOC_FL_PUNCH_HOLE: ::c_int = 0x02;
 
 pub const BUFSIZ: ::c_uint = 8192;
 pub const TMP_MAX: ::c_uint = 238328;
 pub const FOPEN_MAX: ::c_uint = 16;
+pub const POSIX_FADV_DONTNEED: ::c_int = 4;
+pub const POSIX_FADV_NOREUSE: ::c_int = 5;
 pub const POSIX_MADV_DONTNEED: ::c_int = 4;
 pub const _SC_2_C_VERSION: ::c_int = 96;
 pub const RUSAGE_THREAD: ::c_int = 1;
@@ -374,17 +396,9 @@ pub const TMPFS_MAGIC: ::c_long = 0x01021994;
 pub const USBDEVICE_SUPER_MAGIC: ::c_long = 0x00009fa2;
 
 pub const VEOF: usize = 4;
-pub const VEOL: usize = 11;
-pub const VEOL2: usize = 16;
-pub const VMIN: usize = 6;
-pub const IEXTEN: ::tcflag_t = 0x00008000;
-pub const TOSTOP: ::tcflag_t = 0x00000100;
-pub const FLUSHO: ::tcflag_t = 0x00001000;
 pub const IUTF8: ::tcflag_t = 0x00004000;
 
 pub const CPU_SETSIZE: ::c_int = 0x400;
-
-pub const EXTPROC: ::tcflag_t = 0x00010000;
 
 pub const QFMT_VFS_V1: ::c_int = 4;
 
@@ -438,36 +452,18 @@ pub const TCSANOW: ::c_int = 0;
 pub const TCSADRAIN: ::c_int = 1;
 pub const TCSAFLUSH: ::c_int = 2;
 
-pub const TCGETS: ::c_ulong = 0x5401;
-pub const TCSETS: ::c_ulong = 0x5402;
-pub const TCSETSW: ::c_ulong = 0x5403;
-pub const TCSETSF: ::c_ulong = 0x5404;
-pub const TCGETA: ::c_ulong = 0x5405;
-pub const TCSETA: ::c_ulong = 0x5406;
-pub const TCSETAW: ::c_ulong = 0x5407;
-pub const TCSETAF: ::c_ulong = 0x5408;
-pub const TCSBRK: ::c_ulong = 0x5409;
-pub const TCXONC: ::c_ulong = 0x540A;
-pub const TCFLSH: ::c_ulong = 0x540B;
 pub const TIOCGSOFTCAR: ::c_ulong = 0x5419;
 pub const TIOCSSOFTCAR: ::c_ulong = 0x541A;
-pub const TIOCINQ: ::c_ulong = 0x541B;
 pub const TIOCLINUX: ::c_ulong = 0x541C;
 pub const TIOCGSERIAL: ::c_ulong = 0x541E;
 pub const TIOCEXCL: ::c_ulong = 0x540C;
 pub const TIOCNXCL: ::c_ulong = 0x540D;
 pub const TIOCSCTTY: ::c_ulong = 0x540E;
-pub const TIOCGPGRP: ::c_ulong = 0x540F;
-pub const TIOCSPGRP: ::c_ulong = 0x5410;
-pub const TIOCOUTQ: ::c_ulong = 0x5411;
 pub const TIOCSTI: ::c_ulong = 0x5412;
-pub const TIOCGWINSZ: ::c_ulong = 0x5413;
-pub const TIOCSWINSZ: ::c_ulong = 0x5414;
 pub const TIOCMGET: ::c_ulong = 0x5415;
 pub const TIOCMBIS: ::c_ulong = 0x5416;
 pub const TIOCMBIC: ::c_ulong = 0x5417;
 pub const TIOCMSET: ::c_ulong = 0x5418;
-pub const FIONREAD: ::c_ulong = 0x541B;
 pub const TIOCCONS: ::c_ulong = 0x541D;
 
 pub const RTLD_DEEPBIND: ::c_int = 0x8;
@@ -496,6 +492,16 @@ cfg_if! {
     } else {
         pub const PTHREAD_STACK_MIN: ::size_t = 131072;
     }
+}
+
+extern {
+    pub fn utmpxname(file: *const ::c_char) -> ::c_int;
+    pub fn getutxent() -> *mut utmpx;
+    pub fn getutxid(ut: *const utmpx) -> *mut utmpx;
+    pub fn getutxline(ut: *const utmpx) -> *mut utmpx;
+    pub fn pututxline(ut: *const utmpx) -> *mut utmpx;
+    pub fn setutxent();
+    pub fn endutxent();
 }
 
 #[link(name = "util")]

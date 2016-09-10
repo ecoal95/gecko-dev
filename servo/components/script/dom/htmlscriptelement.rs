@@ -11,8 +11,8 @@ use dom::bindings::codegen::Bindings::HTMLScriptElementBinding::HTMLScriptElemen
 use dom::bindings::codegen::Bindings::NodeBinding::NodeMethods;
 use dom::bindings::global::GlobalRef;
 use dom::bindings::inheritance::Castable;
-use dom::bindings::js::RootedReference;
 use dom::bindings::js::{JS, Root};
+use dom::bindings::js::RootedReference;
 use dom::bindings::refcounted::Trusted;
 use dom::bindings::str::DOMString;
 use dom::document::Document;
@@ -26,8 +26,6 @@ use dom::window::ScriptHelpers;
 use encoding::label::encoding_from_whatwg_label;
 use encoding::types::{DecoderTrap, EncodingRef};
 use html5ever::tree_builder::NextParserState;
-use hyper::http::RawStatus;
-use hyper_serde::Serde;
 use ipc_channel::ipc;
 use ipc_channel::router::ROUTER;
 use js::jsval::UndefinedValue;
@@ -159,7 +157,7 @@ impl AsyncResponseListener for ScriptContext {
 
         let status_code = self.metadata.as_ref().and_then(|m| {
             match m.status {
-                Some(Serde(RawStatus(c, _))) => Some(c),
+                Some((c, _)) => Some(c),
                 _ => None,
             }
         }).unwrap_or(0);

@@ -3,9 +3,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use devtools_traits::{DevtoolScriptControlMsg, ScriptToDevtoolsControlMsg, WorkerId};
+use dom::bindings::codegen::Bindings::EventHandlerBinding::OnErrorEventHandlerNonNull;
 use dom::bindings::codegen::Bindings::FunctionBinding::Function;
 use dom::bindings::codegen::Bindings::WorkerGlobalScopeBinding::WorkerGlobalScopeMethods;
-use dom::bindings::error::{Error, ErrorResult, Fallible, report_pending_exception};
+use dom::bindings::error::{Error, ErrorResult, Fallible, report_pending_exception, ErrorInfo};
 use dom::bindings::global::GlobalRef;
 use dom::bindings::inheritance::Castable;
 use dom::bindings::js::{JS, MutNullableHeap, Root};
@@ -24,14 +25,14 @@ use js::jsapi::{HandleValue, JSAutoCompartment, JSContext, JSRuntime};
 use js::jsval::UndefinedValue;
 use js::rust::Runtime;
 use msg::constellation_msg::{PipelineId, ReferrerPolicy};
+use net_traits::{IpcSend, LoadOrigin};
 use net_traits::{LoadContext, ResourceThreads, load_whole_resource};
-use net_traits::{LoadOrigin, IpcSend};
 use profile_traits::{mem, time};
 use script_runtime::{CommonScriptMsg, ScriptChan, ScriptPort, maybe_take_panic_result};
 use script_thread::RunnableWrapper;
+use script_traits::{MsDuration, TimerEvent, TimerEventId, TimerEventRequest, TimerSource};
 use script_traits::ScriptMsg as ConstellationMsg;
 use script_traits::WorkerGlobalScopeInit;
-use script_traits::{MsDuration, TimerEvent, TimerEventId, TimerEventRequest, TimerSource};
 use std::cell::Cell;
 use std::default::Default;
 use std::panic;
@@ -248,6 +249,9 @@ impl WorkerGlobalScopeMethods for WorkerGlobalScope {
         })
     }
 
+    // https://html.spec.whatwg.org/multipage/#handler-workerglobalscope-onerror
+    error_event_handler!(error, GetOnerror, SetOnerror);
+
     // https://html.spec.whatwg.org/multipage/#dom-workerglobalscope-importscripts
     fn ImportScripts(&self, url_strings: Vec<DOMString>) -> ErrorResult {
         let mut urls = Vec::with_capacity(url_strings.len());
@@ -450,5 +454,12 @@ impl WorkerGlobalScope {
         if let Some(ref closing) = self.closing {
             closing.store(true, Ordering::SeqCst);
         }
+    }
+
+    /// https://html.spec.whatwg.org/multipage/#report-the-error
+    pub fn report_an_error(&self, error_info: ErrorInfo, value: HandleValue) {
+        self.downcast::<DedicatedWorkerGlobalScope>()
+            .expect("Should implement report_an_error for this worker")
+            .report_an_error(error_info, value);
     }
 }

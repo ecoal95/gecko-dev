@@ -29,23 +29,23 @@ use msg::constellation_msg::{FrameId, FrameType, PipelineId};
 use msg::constellation_msg::{Key, KeyModifiers, KeyState, LoadData};
 use msg::constellation_msg::{PipelineNamespace, PipelineNamespaceId, TraversalDirection};
 use msg::constellation_msg::{SubpageId, WindowSizeType};
+use net_traits::{self, IpcSend, ResourceThreads};
 use net_traits::bluetooth_thread::BluetoothMethodMsg;
 use net_traits::image_cache_thread::ImageCacheThread;
 use net_traits::storage_thread::StorageThreadMsg;
-use net_traits::{self, ResourceThreads, IpcSend};
 use offscreen_gl_context::{GLContextAttributes, GLLimits};
 use pipeline::{ChildProcess, InitialPipelineState, Pipeline};
 use profile_traits::mem;
 use profile_traits::time;
-use rand::{random, Rng, SeedableRng, StdRng};
+use rand::{Rng, SeedableRng, StdRng, random};
 use script_traits::{AnimationState, AnimationTickType, CompositorEvent};
 use script_traits::{ConstellationControlMsg, ConstellationMsg as FromCompositorMsg};
 use script_traits::{DocumentState, LayoutControlMsg};
 use script_traits::{IFrameLoadInfo, IFrameSandboxState, TimerEventRequest};
 use script_traits::{LayoutMsg as FromLayoutMsg, ScriptMsg as FromScriptMsg, ScriptThreadFactory};
-use script_traits::{MozBrowserEvent, MozBrowserErrorType, WebDriverCommandMsg, WindowSizeData};
-use script_traits::{ScopeThings, SWManagerMsg};
-use script_traits::{webdriver_msg, LogEntry, ServiceWorkerMsg};
+use script_traits::{LogEntry, ServiceWorkerMsg, webdriver_msg};
+use script_traits::{MozBrowserErrorType, MozBrowserEvent, WebDriverCommandMsg, WindowSizeData};
+use script_traits::{SWManagerMsg, ScopeThings};
 use std::borrow::ToOwned;
 use std::collections::{HashMap, VecDeque};
 use std::io::Error as IOError;
@@ -54,7 +54,7 @@ use std::marker::PhantomData;
 use std::mem::replace;
 use std::process;
 use std::sync::Arc;
-use std::sync::mpsc::{Sender, channel, Receiver};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 use std::time::Instant;
 use style_traits::PagePx;
@@ -219,7 +219,7 @@ pub struct InitialConstellationState {
     pub webrender_api_sender: Option<webrender_traits::RenderApiSender>,
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone)]
 struct FrameState {
     instant: Instant,
     pipeline_id: PipelineId,
@@ -2203,7 +2203,7 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
                     continue;
                 }
             };
-            evicted_pipelines.extend_from_slice(&frame.remove_forward_entries());
+            evicted_pipelines.extend(frame.remove_forward_entries());
             for entry in frame.next.iter().chain(frame.prev.iter()).chain(once(&frame.current)) {
                 let pipeline = match self.pipelines.get(&entry.pipeline_id) {
                     Some(pipeline) => pipeline,

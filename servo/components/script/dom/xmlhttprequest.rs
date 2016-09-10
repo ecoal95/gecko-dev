@@ -21,8 +21,8 @@ use dom::bindings::refcounted::Trusted;
 use dom::bindings::reflector::{Reflectable, reflect_dom_object};
 use dom::bindings::str::{ByteString, DOMString, USVString, is_token};
 use dom::blob::{Blob, BlobImpl};
-use dom::document::DocumentSource;
 use dom::document::{Document, IsHTMLDocument};
+use dom::document::DocumentSource;
 use dom::event::{Event, EventBubbles, EventCancelable};
 use dom::eventtarget::EventTarget;
 use dom::headers::is_forbidden_header_name;
@@ -34,23 +34,22 @@ use encoding::all::UTF_8;
 use encoding::label::encoding_from_whatwg_label;
 use encoding::types::{DecoderTrap, EncoderTrap, Encoding, EncodingRef};
 use euclid::length::Length;
-use hyper::header::Headers;
 use hyper::header::{ContentLength, ContentType};
-use hyper::http::RawStatus;
+use hyper::header::Headers;
 use hyper::method::Method;
-use hyper::mime::{self, Mime, Attr as MimeAttr, Value as MimeValue};
+use hyper::mime::{self, Attr as MimeAttr, Mime, Value as MimeValue};
 use hyper_serde::Serde;
 use ipc_channel::ipc;
 use ipc_channel::router::ROUTER;
-use js::jsapi::JS_ClearPendingException;
 use js::jsapi::{JSContext, JS_ParseJSON};
+use js::jsapi::JS_ClearPendingException;
 use js::jsval::{JSVal, NullValue, UndefinedValue};
 use msg::constellation_msg::{PipelineId, ReferrerPolicy};
+use net_traits::{CoreResourceThread, LoadOrigin};
+use net_traits::{FetchResponseListener, Metadata, NetworkError};
 use net_traits::CoreResourceMsg::Fetch;
 use net_traits::request::{CredentialsMode, Destination, RequestInit, RequestMode};
 use net_traits::trim_http_whitespace;
-use net_traits::{CoreResourceThread, LoadOrigin};
-use net_traits::{FetchResponseListener, Metadata, NetworkError};
 use network_listener::{NetworkListener, PreInvoke};
 use parse::html::{ParseContext, parse_html};
 use parse::xml::{self, parse_xml};
@@ -64,7 +63,7 @@ use std::sync::{Arc, Mutex};
 use string_cache::Atom;
 use time;
 use timers::{OneshotTimerCallback, OneshotTimerHandle};
-use url::{Url, Position};
+use url::{Position, Url};
 use util::prefs::PREFS;
 
 #[derive(JSTraceable, PartialEq, Copy, Clone, HeapSizeOf)]
@@ -91,7 +90,7 @@ struct XHRContext {
 #[derive(Clone)]
 pub enum XHRProgress {
     /// Notify that headers have been received
-    HeadersReceived(GenerationId, Option<Headers>, Option<RawStatus>),
+    HeadersReceived(GenerationId, Option<Headers>, Option<(u16, Vec<u8>)>),
     /// Partial progress (after receiving headers), containing portion of the response
     Loading(GenerationId, ByteString),
     /// Loading is done
@@ -879,7 +878,7 @@ impl XMLHttpRequest {
         self.process_partial_response(XHRProgress::HeadersReceived(
             gen_id,
             metadata.headers.map(Serde::into_inner),
-            metadata.status.map(Serde::into_inner)));
+            metadata.status));
         Ok(())
     }
 
@@ -943,9 +942,9 @@ impl XMLHttpRequest {
                 // Part of step 13, send() (processing response)
                 // XXXManishearth handle errors, if any (substep 1)
                 // Substep 2
-                status.map(|RawStatus(code, reason)| {
+                status.map(|(code, reason)| {
                     self.status.set(code);
-                    *self.status_text.borrow_mut() = ByteString::new(reason.into_owned().into_bytes());
+                    *self.status_text.borrow_mut() = ByteString::new(reason);
                 });
                 headers.as_ref().map(|h| *self.response_headers.borrow_mut() = h.clone());
 
@@ -1236,8 +1235,8 @@ impl XMLHttpRequest {
     fn filter_response_headers(&self) -> Headers {
         // https://fetch.spec.whatwg.org/#concept-response-header-list
         use hyper::error::Result;
-        use hyper::header::SetCookie;
         use hyper::header::{Header, HeaderFormat};
+        use hyper::header::SetCookie;
         use std::fmt;
 
         // a dummy header so we can use headers.remove::<SetCookie2>()

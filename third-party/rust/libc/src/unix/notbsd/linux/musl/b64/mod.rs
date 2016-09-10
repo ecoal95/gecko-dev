@@ -1,4 +1,3 @@
-pub type c_char = i8;
 pub type wchar_t = i32;
 pub type c_long = i64;
 pub type c_ulong = u64;
@@ -103,6 +102,14 @@ s! {
 
     pub struct sem_t {
         __val: [::c_int; 8],
+    }
+
+    pub struct siginfo_t {
+        pub si_signo: ::c_int,
+        pub si_errno: ::c_int,
+        pub si_code: ::c_int,
+        pub _pad: [::c_int; 29],
+        _align: [usize; 0],
     }
 }
 
@@ -329,6 +336,11 @@ pub const TIOCMBIC: ::c_int = 0x5417;
 pub const TIOCMSET: ::c_int = 0x5418;
 pub const FIONREAD: ::c_int = 0x541B;
 pub const TIOCCONS: ::c_int = 0x541D;
+
+pub const POSIX_MADV_DONTNEED: ::c_int = 0;
+pub const RUSAGE_CHILDREN: ::c_int = 1;
+pub const POLLWRNORM: ::c_short = 0x100;
+pub const POLLWRBAND: ::c_short = 0x200;
 
 cfg_if! {
     if #[cfg(target_arch = "aarch64")] {

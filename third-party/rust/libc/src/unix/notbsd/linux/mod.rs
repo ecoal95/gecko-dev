@@ -66,28 +66,30 @@ s! {
 
     pub struct pthread_mutex_t {
         #[cfg(any(target_arch = "mips", target_arch = "mipsel",
-                  target_arch = "arm"))]
+                  target_arch = "arm", target_arch = "powerpc"))]
         __align: [::c_long; 0],
         #[cfg(not(any(target_arch = "mips", target_arch = "mipsel",
-                      target_arch = "arm")))]
+                      target_arch = "arm", target_arch = "powerpc")))]
         __align: [::c_longlong; 0],
         size: [u8; __SIZEOF_PTHREAD_MUTEX_T],
     }
 
     pub struct pthread_rwlock_t {
         #[cfg(any(target_arch = "mips", target_arch = "mipsel",
-                  target_arch = "arm"))]
+                  target_arch = "arm", target_arch = "powerpc"))]
         __align: [::c_long; 0],
         #[cfg(not(any(target_arch = "mips", target_arch = "mipsel",
-                      target_arch = "arm")))]
+                      target_arch = "arm", target_arch = "powerpc")))]
         __align: [::c_longlong; 0],
         size: [u8; __SIZEOF_PTHREAD_RWLOCK_T],
     }
 
     pub struct pthread_mutexattr_t {
-        #[cfg(any(target_arch = "x86_64", target_arch = "powerpc64"))]
+        #[cfg(any(target_arch = "x86_64", target_arch = "powerpc64",
+                  target_arch = "mips64", target_arch = "s390x"))]
         __align: [::c_int; 0],
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "powerpc64")))]
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "powerpc64",
+                      target_arch = "mips64", target_arch = "s390x")))]
         __align: [::c_long; 0],
         size: [u8; __SIZEOF_PTHREAD_MUTEXATTR_T],
     }
@@ -477,6 +479,10 @@ pub const RB_POWER_OFF: ::c_int = 0x4321fedcu32 as i32;
 pub const RB_SW_SUSPEND: ::c_int = 0xd000fce2u32 as i32;
 pub const RB_KEXEC: ::c_int = 0x45584543u32 as i32;
 
+pub const SYNC_FILE_RANGE_WAIT_BEFORE: ::c_uint = 1;
+pub const SYNC_FILE_RANGE_WRITE: ::c_uint = 2;
+pub const SYNC_FILE_RANGE_WAIT_AFTER: ::c_uint = 4;
+
 f! {
     pub fn CPU_ZERO(cpuset: &mut cpu_set_t) -> () {
         for slot in cpuset.bits.iter_mut() {
@@ -488,6 +494,13 @@ f! {
         let size_in_bits = 8 * mem::size_of_val(&cpuset.bits[0]); // 32, 64 etc
         let (idx, offset) = (cpu / size_in_bits, cpu % size_in_bits);
         cpuset.bits[idx] |= 1 << offset;
+        ()
+    }
+
+    pub fn CPU_CLR(cpu: usize, cpuset: &mut cpu_set_t) -> () {
+        let size_in_bits = 8 * mem::size_of_val(&cpuset.bits[0]); // 32, 64 etc
+        let (idx, offset) = (cpu / size_in_bits, cpu % size_in_bits);
+        cpuset.bits[idx] &= !(1 << offset);
         ()
     }
 
@@ -503,6 +516,8 @@ f! {
 }
 
 extern {
+    pub fn lutimes(file: *const ::c_char, times: *const ::timeval) -> ::c_int;
+
     pub fn setpwent();
     pub fn getpwent() -> *mut passwd;
     pub fn shm_open(name: *const c_char, oflag: ::c_int,
@@ -590,21 +605,13 @@ extern {
     pub fn mq_setattr(mqd: ::mqd_t,
                       newattr: *const ::mq_attr,
                       oldattr: *mut ::mq_attr) -> ::c_int;
-    pub fn sched_getaffinity(pid: ::pid_t,
-                             cpusetsize: ::size_t,
-                             cpuset: *mut cpu_set_t) -> ::c_int;
-    pub fn sched_setaffinity(pid: ::pid_t,
-                             cpusetsize: ::size_t,
-                             cpuset: *const cpu_set_t) -> ::c_int;
     pub fn epoll_pwait(epfd: ::c_int,
                        events: *mut ::epoll_event,
                        maxevents: ::c_int,
                        timeout: ::c_int,
                        sigmask: *const ::sigset_t) -> ::c_int;
     pub fn dup3(oldfd: ::c_int, newfd: ::c_int, flags: ::c_int) -> ::c_int;
-    pub fn unshare(flags: ::c_int) -> ::c_int;
     pub fn sethostname(name: *const ::c_char, len: ::size_t) -> ::c_int;
-    pub fn setns(fd: ::c_int, nstype: ::c_int) -> ::c_int;
     pub fn mkostemp(template: *mut ::c_char, flags: ::c_int) -> ::c_int;
     pub fn mkostemps(template: *mut ::c_char,
                      suffixlen: ::c_int,
@@ -657,6 +664,8 @@ extern {
                     mode: ::mode_t) -> ::c_int;
     pub fn if_nameindex() -> *mut if_nameindex;
     pub fn if_freenameindex(ptr: *mut if_nameindex);
+    pub fn sync_file_range(fd: ::c_int, offset: ::off64_t,
+                           nbytes: ::off64_t, flags: ::c_uint) -> ::c_int;
 }
 
 cfg_if! {
@@ -667,6 +676,12 @@ cfg_if! {
     } else if #[cfg(any(target_arch = "mips", target_arch = "mipsel"))] {
         mod mips;
         pub use self::mips::*;
+    } else if #[cfg(any(target_arch = "s390x"))] {
+        mod s390x;
+        pub use self::s390x::*;
+    } else if #[cfg(any(target_arch = "mips64"))] {
+        mod mips64;
+        pub use self::mips64::*;
     } else {
         mod other;
         pub use self::other::*;

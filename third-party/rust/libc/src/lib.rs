@@ -166,6 +166,8 @@ extern {
                    mode: c_int,
                    size: size_t) -> c_int;
     pub fn setbuf(stream: *mut FILE, buf: *mut c_char);
+    pub fn getchar() -> c_int;
+    pub fn putchar(c: c_int) -> c_int;
     pub fn fgetc(stream: *mut FILE) -> c_int;
     pub fn fgets(buf: *mut c_char, n: c_int, stream: *mut FILE) -> *mut c_char;
     pub fn fputc(c: c_int, stream: *mut FILE) -> c_int;
@@ -245,6 +247,7 @@ extern {
     pub fn memcmp(cx: *const c_void, ct: *const c_void, n: size_t) -> c_int;
     pub fn memcpy(dest: *mut c_void, src: *const c_void, n: size_t) -> *mut c_void;
     pub fn memmove(dest: *mut c_void, src: *const c_void, n: size_t) -> *mut c_void;
+    pub fn memset(dest: *mut c_void, c: c_int, n: size_t) -> *mut c_void;
 }
 
 // These are all inline functions on android, so they end up just being entirely

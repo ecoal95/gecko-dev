@@ -432,6 +432,7 @@ pub const FIONBIO: ::c_int = 0x8004667e;
 
 pub const SIGCHLD: ::c_int = 18;
 pub const SIGBUS: ::c_int = 10;
+pub const SIGINFO: ::c_int = 41;
 pub const SIG_BLOCK: ::c_int = 1;
 pub const SIG_UNBLOCK: ::c_int = 2;
 pub const SIG_SETMASK: ::c_int = 3;
@@ -541,6 +542,7 @@ pub const SIGXCPU: ::c_int = 30;
 pub const SIGXFSZ: ::c_int = 31;
 
 pub const WNOHANG: ::c_int = 0x40;
+pub const WUNTRACED: ::c_int = 0x04;
 
 pub const PROT_NONE: ::c_int = 0;
 pub const PROT_READ: ::c_int = 1;
@@ -1033,4 +1035,6 @@ extern {
                                      clock_id: *mut clockid_t) -> ::c_int;
     pub fn pthread_condattr_setclock(attr: *mut pthread_condattr_t,
                                      clock_id: clockid_t) -> ::c_int;
+    pub fn sem_timedwait(sem: *mut sem_t,
+                         abstime: *const ::timespec) -> ::c_int;
 }
