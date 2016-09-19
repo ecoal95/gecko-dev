@@ -85,13 +85,13 @@ impl Worker {
         let worker_load_origin = WorkerScriptLoadOrigin {
             referrer_url: None,
             referrer_policy: None,
-            pipeline_id: Some(global.pipeline())
+            pipeline_id: Some(global.pipeline_id()),
         };
 
         let (devtools_sender, devtools_receiver) = ipc::channel().unwrap();
         let worker_id = global.get_next_worker_id();
         if let Some(ref chan) = global.devtools_chan() {
-            let pipeline_id = global.pipeline();
+            let pipeline_id = global.pipeline_id();
                 let title = format!("Worker for {}", worker_url);
                 let page_info = DevtoolsPageInfo {
                     title: title,
@@ -105,7 +105,7 @@ impl Worker {
         let init = prepare_workerscope_init(global, Some(devtools_sender));
 
         DedicatedWorkerGlobalScope::run_worker_scope(
-            init, worker_url, global.pipeline(), devtools_receiver, worker.runtime.clone(), worker_ref,
+            init, worker_url, global.pipeline_id(), devtools_receiver, worker.runtime.clone(), worker_ref,
             global.script_chan(), sender, receiver, worker_load_origin, closing);
 
         Ok(worker)
@@ -140,6 +140,7 @@ impl Worker {
         worker.upcast().fire_simple_event("error");
     }
 
+    #[allow(unsafe_code)]
     fn dispatch_error(&self, error_info: ErrorInfo) {
         let global = self.global();
         let event = ErrorEvent::new(global.r(),
@@ -150,14 +151,14 @@ impl Worker {
                                     error_info.filename.as_str().into(),
                                     error_info.lineno,
                                     error_info.column,
-                                    NullHandleValue);
+                                    unsafe { NullHandleValue });
 
         let handled = !event.upcast::<Event>().fire(self.upcast::<EventTarget>());
         if handled {
             return;
         }
 
-        global.r().report_an_error(error_info, NullHandleValue);
+        global.r().report_an_error(error_info, unsafe { NullHandleValue });
     }
 }
 

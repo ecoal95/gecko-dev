@@ -3732,6 +3732,18 @@
             "url": "/_mozilla/css/non-inline-block-resets-underline-property.html"
           }
         ],
+        "css/normalize-rotation.html": [
+          {
+            "path": "css/normalize-rotation.html",
+            "references": [
+              [
+                "/_mozilla/css/normalize-rotation-ref.html",
+                "=="
+              ]
+            ],
+            "url": "/_mozilla/css/normalize-rotation.html"
+          }
+        ],
         "css/noscript.html": [
           {
             "path": "css/noscript.html",
@@ -6496,6 +6508,12 @@
           {
             "path": "mozilla/MouseEvent.html",
             "url": "/_mozilla/mozilla/MouseEvent.html"
+          }
+        ],
+        "mozilla/activation.html": [
+          {
+            "path": "mozilla/activation.html",
+            "url": "/_mozilla/mozilla/activation.html"
           }
         ],
         "mozilla/bad_cert_detected.html": [
@@ -13136,6 +13154,18 @@
             ]
           ],
           "url": "/_mozilla/css/non-inline-block-resets-underline-property.html"
+        }
+      ],
+      "css/normalize-rotation.html": [
+        {
+          "path": "css/normalize-rotation.html",
+          "references": [
+            [
+              "/_mozilla/css/normalize-rotation-ref.html",
+              "=="
+            ]
+          ],
+          "url": "/_mozilla/css/normalize-rotation.html"
         }
       ],
       "css/noscript.html": [

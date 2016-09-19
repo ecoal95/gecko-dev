@@ -12,7 +12,7 @@ use dom::bindings::inheritance::Castable;
 use dom::bindings::js::{JS, MutNullableHeap, Root};
 use dom::bindings::reflector::Reflectable;
 use dom::bindings::str::DOMString;
-use dom::console::Console;
+use dom::console::TimerSet;
 use dom::crypto::Crypto;
 use dom::dedicatedworkerglobalscope::DedicatedWorkerGlobalScope;
 use dom::eventtarget::EventTarget;
@@ -80,7 +80,6 @@ pub struct WorkerGlobalScope {
     resource_threads: ResourceThreads,
     location: MutNullableHeap<JS<WorkerLocation>>,
     navigator: MutNullableHeap<JS<WorkerNavigator>>,
-    console: MutNullableHeap<JS<Console>>,
     crypto: MutNullableHeap<JS<Crypto>>,
     timers: OneshotTimers,
 
@@ -110,6 +109,9 @@ pub struct WorkerGlobalScope {
 
     #[ignore_heap_size_of = "Defined in std"]
     scheduler_chan: IpcSender<TimerEventRequest>,
+
+    /// Timers used by the Console API.
+    console_timers: TimerSet,
 }
 
 impl WorkerGlobalScope {
@@ -130,7 +132,6 @@ impl WorkerGlobalScope {
             resource_threads: init.resource_threads,
             location: Default::default(),
             navigator: Default::default(),
-            console: Default::default(),
             crypto: Default::default(),
             timers: OneshotTimers::new(timer_event_chan, init.scheduler_chan.clone()),
             mem_profiler_chan: init.mem_profiler_chan,
@@ -141,7 +142,12 @@ impl WorkerGlobalScope {
             devtools_wants_updates: Cell::new(false),
             constellation_chan: init.constellation_chan,
             scheduler_chan: init.scheduler_chan,
+            console_timers: TimerSet::new(),
         }
+    }
+
+    pub fn console_timers(&self) -> &TimerSet {
+        &self.console_timers
     }
 
     pub fn mem_profiler_chan(&self) -> &mem::ProfilerChan {
@@ -232,7 +238,7 @@ impl LoadOrigin for WorkerGlobalScope {
         None
     }
     fn pipeline_id(&self) -> Option<PipelineId> {
-        Some(self.pipeline())
+        Some(self.pipeline_id())
     }
 }
 
@@ -297,11 +303,6 @@ impl WorkerGlobalScopeMethods for WorkerGlobalScope {
     // https://html.spec.whatwg.org/multipage/#dom-worker-navigator
     fn Navigator(&self) -> Root<WorkerNavigator> {
         self.navigator.or_init(|| WorkerNavigator::new(self))
-    }
-
-    // https://developer.mozilla.org/en-US/docs/Web/API/WorkerGlobalScope/console
-    fn Console(&self) -> Root<Console> {
-        self.console.or_init(|| Console::new(GlobalRef::Worker(self)))
     }
 
     // https://html.spec.whatwg.org/multipage/#dfn-Crypto
@@ -396,12 +397,14 @@ impl WorkerGlobalScope {
     }
 
     pub fn script_chan(&self) -> Box<ScriptChan + Send> {
-        let dedicated =
-            self.downcast::<DedicatedWorkerGlobalScope>();
+        let dedicated = self.downcast::<DedicatedWorkerGlobalScope>();
+        let service_worker = self.downcast::<ServiceWorkerGlobalScope>();
         if let Some(dedicated) = dedicated {
             return dedicated.script_chan();
+        } else if let Some(service_worker) = service_worker {
+            return service_worker.script_chan();
         } else {
-            panic!("need to implement a sender for SharedWorker/ServiceWorker")
+            panic!("need to implement a sender for SharedWorker")
         }
     }
 
@@ -409,13 +412,13 @@ impl WorkerGlobalScope {
         FileReadingTaskSource(self.script_chan())
     }
 
-    pub fn pipeline(&self) -> PipelineId {
+    pub fn pipeline_id(&self) -> PipelineId {
         let dedicated = self.downcast::<DedicatedWorkerGlobalScope>();
         let service_worker = self.downcast::<ServiceWorkerGlobalScope>();
         if let Some(dedicated) = dedicated {
-            return dedicated.pipeline();
+            return dedicated.pipeline_id();
         } else if let Some(service_worker) = service_worker {
-            return service_worker.pipeline();
+            return service_worker.pipeline_id();
         } else {
             panic!("need to implement a sender for SharedWorker")
         }
