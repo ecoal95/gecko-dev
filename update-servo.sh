@@ -16,10 +16,10 @@ if [[ ! -z $(hg diff) ]]; then
   exit 1
 fi
 
-echo "invoking |rm -rf servo && rm -rf third-party/rust| in 3 seconds. Press ctrl-c to abort..."
+echo "invoking |rm -rf servo && rm -rf third_party/rust| in 3 seconds. Press ctrl-c to abort..."
 sleep 3
 echo "rm -rf servo && rm -rf third-party/rust"
-rm -rf servo && rm -rf third-party/rust
+rm -rf servo && rm -rf third_party/rust
 mkdir third-party/rust
 
 export SERVO_REV=`git ls-remote https://github.com/servo/servo HEAD | awk '{print $1}'`
@@ -38,7 +38,7 @@ mv .cargo .cargo-inactive
 echo "Re-vendoring dependencies..."
 pushd toolkit/library/rust
 cargo update
-cargo vendor ../../../third-party/rust
+cargo vendor ../../../third_party/rust
 popd
 echo "Restoring .cargo/..."
 mv .cargo-inactive .cargo
