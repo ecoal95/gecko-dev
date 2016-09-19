@@ -7,7 +7,6 @@
   <script type="text/javascript" src="/tests/SimpleTest/SpawnTask.js"></script>
   <script type="text/javascript" src="pwmgr_common.js"></script>
   <script type="text/javascript" src="prompt_common.js"></script>
-  <script type="text/javascript" src="notification_common.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
 <body>
@@ -25,6 +24,8 @@ var iframe = document.getElementById("iframe");
 // Force parent to not look for tab-modal prompts, as they're not used for auth prompts.
 isTabModal = false;
 
+const AUTHENTICATE_PATH = new URL("authenticate.sjs", window.location.href).pathname;
+
 let chromeScript = runInParent(SimpleTest.getTestFileURL("pwmgr_common.js"));
 
 runInParent(() => {
@@ -41,22 +42,46 @@ runInParent(() => {
             createInstance(Ci.nsILoginInfo);
   login4  = Cc["@mozilla.org/login-manager/loginInfo;1"].
             createInstance(Ci.nsILoginInfo);
+  let httpUpgradeLogin = Cc["@mozilla.org/login-manager/loginInfo;1"].
+                         createInstance(Ci.nsILoginInfo);
+  let httpsDowngradeLogin = Cc["@mozilla.org/login-manager/loginInfo;1"].
+                            createInstance(Ci.nsILoginInfo);
+  let dedupeHttpUpgradeLogin  = Cc["@mozilla.org/login-manager/loginInfo;1"].
+                                createInstance(Ci.nsILoginInfo);
+  let dedupeHttpsUpgradeLogin = Cc["@mozilla.org/login-manager/loginInfo;1"].
+                                createInstance(Ci.nsILoginInfo);
+
 
   login3A.init("http://mochi.test:8888", null, "mochitest",
                "mochiuser1", "mochipass1", "", "");
   login3B.init("http://mochi.test:8888", null, "mochitest2",
                "mochiuser2", "mochipass2", "", "");
   login4.init("http://mochi.test:8888", null, "mochitest3",
-               "mochiuser3", "mochipass3-old", "", "");
+              "mochiuser3", "mochipass3-old", "", "");
+  // Logins to test scheme upgrades (allowed) and downgrades (disallowed)
+  httpUpgradeLogin.init("http://example.com", null, "schemeUpgrade",
+                        "httpUser", "httpPass", "", "");
+  httpsDowngradeLogin.init("https://example.com", null, "schemeDowngrade",
+                           "httpsUser", "httpsPass", "", "");
+  // HTTP and HTTPS version of the same domain and realm but with different passwords.
+  dedupeHttpUpgradeLogin.init("http://example.org", null, "schemeUpgradeDedupe",
+                              "dedupeUser", "httpPass", "", "");
+  dedupeHttpsUpgradeLogin.init("https://example.org", null, "schemeUpgradeDedupe",
+                               "dedupeUser", "httpsPass", "", "");
+
 
   pwmgr.addLogin(login3A);
   pwmgr.addLogin(login3B);
   pwmgr.addLogin(login4);
+  pwmgr.addLogin(httpUpgradeLogin);
+  pwmgr.addLogin(httpsDowngradeLogin);
+  pwmgr.addLogin(dedupeHttpUpgradeLogin);
+  pwmgr.addLogin(dedupeHttpsUpgradeLogin);
 });
 
 add_task(function* test_iframe() {
   state = {
-    msg         : "http://mochi.test:8888 is requesting your username and password.\n\nThe site says: “mochitest”",
+    msg         : "http://mochi.test:8888 is requesting your username and password. The site says: “mochitest”",
     title       : "Authentication Required",
     textValue   : "mochiuser1",
     passValue   : "mochipass1",
@@ -85,7 +110,7 @@ add_task(function* test_iframe() {
                       iframe.contentDocument);
 
   state = {
-    msg         : "http://mochi.test:8888 is requesting your username and password.\n\nThe site says: “mochitest2”",
+    msg         : "http://mochi.test:8888 is requesting your username and password. The site says: “mochitest2”",
     title       : "Authentication Required",
     textValue   : "mochiuser2",
     passValue   : "mochipass2",
@@ -126,7 +151,7 @@ add_task(function* test_iframe() {
   // expected password (to trigger an auth prompt, and change-password
   // popup notification).
   state = {
-    msg         : "http://mochi.test:8888 is requesting your username and password.\n\nThe site says: “mochitest”",
+    msg         : "http://mochi.test:8888 is requesting your username and password. The site says: “mochitest”",
     title       : "Authentication Required",
     textValue   : "mochiuser1",
     passValue   : "mochipass1",
@@ -146,46 +171,19 @@ add_task(function* test_iframe() {
   };
   promptDone = handlePrompt(state, action);
   iframeLoaded = onloadPromiseFor("iframe");
+  let promptShownPromise = promisePromptShown("passwordmgr-prompt-change");
   iframe.src = "authenticate.sjs?user=mochiuser1&pass=mochipass1-new";
   yield promptDone;
   yield iframeLoaded;
   checkEchoedAuthInfo({user: "mochiuser1", pass: "mochipass1-new"},
                       iframe.contentDocument);
-
-
-  var pwchanged = promiseStorageChanged(["modifyLogin"]);
-
-  // Check for the popup notification, and change the password.
-  var popupNotifications = getPopupNotifications(window.top);
-  popup = getPopup(popupNotifications, "password-change");
-  ok(popup, "got popup notification");
-  clickPopupButton(popup, kChangeButton);
-  popup.remove();
-
-  yield pwchanged;
-
-  // Housekeeping: change it back
-  runInParent(() => {
-    const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
-    Cu.import("resource://gre/modules/Services.jsm");
-
-    var tmpLogin = Cc["@mozilla.org/login-manager/loginInfo;1"].
-                   createInstance(Ci.nsILoginInfo);
-    tmpLogin.init("http://mochi.test:8888", null, "mochitest",
-                  "mochiuser1", "mochipass1-new", "", "");
-    var login3A = Cc["@mozilla.org/login-manager/loginInfo;1"].
-                  createInstance(Ci.nsILoginInfo);
-    login3A.init("http://mochi.test:8888", null, "mochitest",
-                 "mochiuser1", "mochipass1", "", "");
-
-    Services.logins.modifyLogin(tmpLogin, login3A);
-  });
+  yield promptShownPromise;
 
   // Same as last test, but for a realm we haven't already authenticated
   // to (but have an existing saved login for, so that we'll trigger
   // a change-password popup notification.
   state = {
-    msg         : "http://mochi.test:8888 is requesting your username and password.\n\nThe site says: “mochitest3”",
+    msg         : "http://mochi.test:8888 is requesting your username and password. The site says: “mochitest3”",
     title       : "Authentication Required",
     textValue   : "mochiuser3",
     passValue   : "mochipass3-old",
@@ -205,24 +203,15 @@ add_task(function* test_iframe() {
   };
   promptDone = handlePrompt(state, action);
   iframeLoaded = onloadPromiseFor("iframe");
+  promptShownPromise = promisePromptShown("passwordmgr-prompt-change");
   iframe.src = "authenticate.sjs?user=mochiuser3&pass=mochipass3-new&realm=mochitest3";
   yield promptDone;
   yield iframeLoaded;
   checkEchoedAuthInfo({user: "mochiuser3", pass: "mochipass3-new"},
                       iframe.contentDocument);
+  yield promptShownPromise;
 
-  pwchanged = promiseStorageChanged(["modifyLogin"]);
-
-  // Check for the popup notification, and change the password.
-  popup = getPopup(popupNotifications, "password-change");
-  ok(popup, "got popup notification");
-  clickPopupButton(popup, kChangeButton);
-  popup.remove();
-
-  yield pwchanged;
-
-  // Housekeeping: change it back to the original login4. Actually,
-  // just delete it and we'll re-add it as the next test.
+  // Housekeeping: Delete login4 to test the save prompt in the next test.
   runInParent(() => {
     const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
     Cu.import("resource://gre/modules/Services.jsm");
@@ -230,7 +219,7 @@ add_task(function* test_iframe() {
     var tmpLogin = Cc["@mozilla.org/login-manager/loginInfo;1"].
                    createInstance(Ci.nsILoginInfo);
     tmpLogin.init("http://mochi.test:8888", null, "mochitest3",
-                  "mochiuser3", "mochipass3-new", "", "");
+                  "mochiuser3", "mochipass3-old", "", "");
     Services.logins.removeLogin(tmpLogin);
 
     // Clear cached auth from this subtest, and avoid leaking due to bug 459620.
@@ -240,7 +229,7 @@ add_task(function* test_iframe() {
   });
 
   state = {
-    msg         : "http://mochi.test:8888 is requesting your username and password.\n\nThe site says: “mochitest3”",
+    msg         : "http://mochi.test:8888 is requesting your username and password. The site says: “mochitest3”",
     title       : "Authentication Required",
     textValue   : "",
     passValue   : "",
@@ -263,20 +252,110 @@ add_task(function* test_iframe() {
   promptDone = handlePrompt(state, action);
 
   iframeLoaded = onloadPromiseFor("iframe");
+  promptShownPromise = promisePromptShown("passwordmgr-prompt-save");
   iframe.src = "authenticate.sjs?user=mochiuser3&pass=mochipass3-old&realm=mochitest3";
   yield promptDone;
   yield iframeLoaded;
   checkEchoedAuthInfo({user: "mochiuser3", pass: "mochipass3-old"},
                       iframe.contentDocument);
+  yield promptShownPromise;
+});
 
-  var pwsaved = promiseStorageChanged(["addLogin"]);
+add_task(function* test_schemeUpgrade() {
+  let state = {
+    msg         : "https://example.com is requesting your username and password. " +
+                  "WARNING: Your password will not be sent to the website you are currently visiting!",
+    title       : "Authentication Required",
+    textValue   : "httpUser",
+    passValue   : "httpPass",
+    iconClass   : "authentication-icon question-icon",
+    titleHidden : true,
+    textHidden  : false,
+    passHidden  : false,
+    checkHidden : true,
+    checkMsg    : "",
+    checked     : false,
+    focused     : "textField",
+    defButton   : "button0",
+  };
+  let action = {
+    buttonClick : "ok",
+  };
+  let promptDone = handlePrompt(state, action);
 
-  // Check for the popup notification, and change the password.
-  popup = getPopup(popupNotifications, "password-save");
-  ok(popup, "got popup notification");
-  clickPopupButton(popup, kRememberButton);
-  popup.remove();
-  yield pwsaved;
+  // The following tests are driven by iframe loads
+
+  let iframeLoaded = onloadPromiseFor("iframe");
+  iframe.src = "https://example.com" + AUTHENTICATE_PATH +
+               "?user=httpUser&pass=httpPass&realm=schemeUpgrade";
+  yield promptDone;
+  yield iframeLoaded;
+  checkEchoedAuthInfo({user: "httpUser", pass: "httpPass"},
+                      SpecialPowers.wrap(iframe).contentDocument);
+});
+
+add_task(function* test_schemeDowngrade() {
+  let state = {
+    msg         : "http://example.com is requesting your username and password. " +
+                  "WARNING: Your password will not be sent to the website you are currently visiting!",
+    title       : "Authentication Required",
+    textValue   : "", // empty because we shouldn't downgrade
+    passValue   : "",
+    iconClass   : "authentication-icon question-icon",
+    titleHidden : true,
+    textHidden  : false,
+    passHidden  : false,
+    checkHidden : true,
+    checkMsg    : "",
+    checked     : false,
+    focused     : "textField",
+    defButton   : "button0",
+  };
+  let action = {
+    buttonClick : "cancel",
+  };
+  let promptDone = handlePrompt(state, action);
+
+  // The following tests are driven by iframe loads
+
+  let iframeLoaded = onloadPromiseFor("iframe");
+  iframe.src = "http://example.com" + AUTHENTICATE_PATH +
+               "?user=unused&pass=unused&realm=schemeDowngrade";
+  yield promptDone;
+  yield iframeLoaded;
+});
+
+add_task(function* test_schemeUpgrade_dedupe() {
+  let state = {
+    msg         : "https://example.org is requesting your username and password. " +
+                  "WARNING: Your password will not be sent to the website you are currently visiting!",
+    title       : "Authentication Required",
+    textValue   : "dedupeUser",
+    passValue   : "httpsPass",
+    iconClass   : "authentication-icon question-icon",
+    titleHidden : true,
+    textHidden  : false,
+    passHidden  : false,
+    checkHidden : true,
+    checkMsg    : "",
+    checked     : false,
+    focused     : "textField",
+    defButton   : "button0",
+  };
+  let action = {
+    buttonClick : "ok",
+  };
+  let promptDone = handlePrompt(state, action);
+
+  // The following tests are driven by iframe loads
+
+  let iframeLoaded = onloadPromiseFor("iframe");
+  iframe.src = "https://example.org" + AUTHENTICATE_PATH +
+               "?user=dedupeUser&pass=httpsPass&realm=schemeUpgradeDedupe";
+  yield promptDone;
+  yield iframeLoaded;
+  checkEchoedAuthInfo({user: "dedupeUser", pass: "httpsPass"},
+                      SpecialPowers.wrap(iframe).contentDocument);
 });
 </script>
 </pre>

@@ -224,6 +224,7 @@ public:
   // Event handlers for various events.
   // Return true if the event is handled by this state object.
   virtual bool HandleDormant(bool aDormant) { return false; }
+  virtual bool HandleCDMProxyReady() { return false; }
 
 protected:
   using Master = MediaDecoderStateMachine;
@@ -262,8 +263,8 @@ public:
         [this] (MetadataHolder* aMetadata) {
           OnMetadataRead(aMetadata);
         },
-        [this] (ReadMetadataFailureReason aReason) {
-          OnMetadataNotRead(aReason);
+        [this] (const MediaResult& aError) {
+          OnMetadataNotRead(aError);
         }));
   }
 
@@ -354,11 +355,11 @@ private:
     SetState(DECODER_STATE_DECODING_FIRSTFRAME);
   }
 
-  void OnMetadataNotRead(ReadMetadataFailureReason aReason)
+  void OnMetadataNotRead(const MediaResult& aError)
   {
     mMetadataRequest.Complete();
     SWARN("Decode metadata failed, shutting down decoder");
-    mMaster->DecodeError();
+    mMaster->DecodeError(aError);
   }
 
   MozPromiseRequestHolder<MediaDecoderReader::MetadataPromise> mMetadataRequest;
@@ -378,6 +379,12 @@ public:
   State GetState() const override
   {
     return DECODER_STATE_WAIT_FOR_CDM;
+  }
+
+  bool HandleCDMProxyReady() override
+  {
+    SetState(DECODER_STATE_DECODING_FIRSTFRAME);
+    return true;
   }
 };
 
@@ -972,12 +979,12 @@ MediaDecoderStateMachine::OnVideoPopped(const RefPtr<MediaData>& aSample)
 
 void
 MediaDecoderStateMachine::OnNotDecoded(MediaData::Type aType,
-                                       MediaDecoderReader::NotDecodedReason aReason)
+                                       const MediaResult& aError)
 {
   MOZ_ASSERT(OnTaskQueue());
   MOZ_ASSERT(mState != DECODER_STATE_SEEKING);
 
-  SAMPLE_LOG("OnNotDecoded (aType=%u, aReason=%u)", aType, aReason);
+  SAMPLE_LOG("OnNotDecoded (aType=%u, aError=%u)", aType, aError.Code());
   bool isAudio = aType == MediaData::AUDIO_DATA;
   MOZ_ASSERT_IF(!isAudio, aType == MediaData::VIDEO_DATA);
 
@@ -986,15 +993,9 @@ MediaDecoderStateMachine::OnNotDecoded(MediaData::Type aType,
     return;
   }
 
-  // If this is a decode error, delegate to the generic error path.
-  if (aReason == MediaDecoderReader::DECODE_ERROR) {
-    DecodeError();
-    return;
-  }
-
   // If the decoder is waiting for data, we tell it to call us back when the
   // data arrives.
-  if (aReason == MediaDecoderReader::WAITING_FOR_DATA) {
+  if (aError == NS_ERROR_DOM_MEDIA_WAITING_FOR_DATA) {
     MOZ_ASSERT(mReader->IsWaitForDataSupported(),
                "Readers that send WAITING_FOR_DATA need to implement WaitForData");
     mReader->WaitForData(aType);
@@ -1010,7 +1011,7 @@ MediaDecoderStateMachine::OnNotDecoded(MediaData::Type aType,
     return;
   }
 
-  if (aReason == MediaDecoderReader::CANCELED) {
+  if (aError == NS_ERROR_DOM_MEDIA_CANCELED) {
     if (isAudio) {
       EnsureAudioDecodeTaskQueued();
     } else {
@@ -1019,9 +1020,14 @@ MediaDecoderStateMachine::OnNotDecoded(MediaData::Type aType,
     return;
   }
 
+  // If this is a decode error, delegate to the generic error path.
+  if (aError != NS_ERROR_DOM_MEDIA_END_OF_STREAM) {
+    DecodeError(aError);
+    return;
+  }
+
   // This is an EOS. Finish off the queue, and then handle things based on our
   // state.
-  MOZ_ASSERT(aReason == MediaDecoderReader::END_OF_STREAM);
   if (isAudio) {
     AudioQueue().Finish();
     StopPrerollingAudio();
@@ -1212,7 +1218,7 @@ MediaDecoderStateMachine::SetMediaDecoderReaderWrapperCallback()
     if (aData.is<MediaData*>()) {
       OnAudioDecoded(aData.as<MediaData*>());
     } else {
-      OnNotDecoded(MediaData::AUDIO_DATA, aData.as<MediaDecoderReader::NotDecodedReason>());
+      OnNotDecoded(MediaData::AUDIO_DATA, aData.as<MediaResult>());
     }
   });
 
@@ -1223,7 +1229,7 @@ MediaDecoderStateMachine::SetMediaDecoderReaderWrapperCallback()
       auto&& v = aData.as<Type>();
       OnVideoDecoded(Get<0>(v), Get<1>(v));
     } else {
-      OnNotDecoded(MediaData::VIDEO_DATA, aData.as<MediaDecoderReader::NotDecodedReason>());
+      OnNotDecoded(MediaData::VIDEO_DATA, aData.as<MediaResult>());
     }
   });
 
@@ -2076,7 +2082,7 @@ MediaDecoderStateMachine::OnSeekTaskRejected(SeekTaskRejectValue aValue)
     StopPrerollingVideo();
   }
 
-  DecodeError();
+  DecodeError(aValue.mError);
 
   DiscardSeekTaskIfExist();
 }
@@ -2285,13 +2291,13 @@ bool MediaDecoderStateMachine::HasLowUndecodedData(int64_t aUsecs)
 }
 
 void
-MediaDecoderStateMachine::DecodeError()
+MediaDecoderStateMachine::DecodeError(const MediaResult& aError)
 {
   MOZ_ASSERT(OnTaskQueue());
   MOZ_ASSERT(!IsShutdown());
   DECODER_WARN("Decode error");
   // Notify the decode error and MediaDecoder will shut down MDSM.
-  mOnPlaybackEvent.Notify(MediaEventType::DecodeError);
+  mOnPlaybackErrorEvent.Notify(aError);
 }
 
 void
@@ -2912,7 +2918,7 @@ MediaDecoderStateMachine::OnMediaSinkVideoError()
   if (HasAudio()) {
     return;
   }
-  DecodeError();
+  DecodeError(MediaResult(NS_ERROR_DOM_MEDIA_MEDIASINK_ERR, __func__));
 }
 
 void MediaDecoderStateMachine::OnMediaSinkAudioComplete()
@@ -2943,7 +2949,7 @@ void MediaDecoderStateMachine::OnMediaSinkAudioError()
 
   // Otherwise notify media decoder/element about this error for it makes
   // no sense to play an audio-only file without sound output.
-  DecodeError();
+  DecodeError(MediaResult(NS_ERROR_DOM_MEDIA_MEDIASINK_ERR, __func__));
 }
 
 #ifdef MOZ_EME
@@ -2954,9 +2960,7 @@ MediaDecoderStateMachine::OnCDMProxyReady(RefPtr<CDMProxy> aProxy)
   mCDMProxyPromise.Complete();
   mCDMProxy = aProxy;
   mReader->SetCDMProxy(aProxy);
-  if (mState == DECODER_STATE_WAIT_FOR_CDM) {
-    SetState(DECODER_STATE_DECODING_FIRSTFRAME);
-  }
+  mStateObj->HandleCDMProxyReady();
 }
 
 void

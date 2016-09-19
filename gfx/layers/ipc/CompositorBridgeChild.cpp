@@ -22,6 +22,7 @@
 #include "mozilla/layers/TextureClientPool.h"// for TextureClientPool
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/GPUProcessManager.h"
+#include "mozilla/gfx/Logging.h"
 #include "mozilla/mozalloc.h"           // for operator new, etc
 #include "nsAutoPtr.h"
 #include "nsDebug.h"                    // for NS_RUNTIMEABORT
@@ -254,7 +255,6 @@ CompositorBridgeChild::AllocPLayerTransactionChild(const nsTArray<LayersBackend>
                                                    TextureFactoryIdentifier*,
                                                    bool*)
 {
-  MOZ_ASSERT(mCanSend);
   LayerTransactionChild* c = new LayerTransactionChild(aId);
   c->AddIPDLReference();
   return c;
@@ -694,19 +694,15 @@ CompositorBridgeChild::CancelNotifyAfterRemotePaint(TabChild* aTabChild)
 bool
 CompositorBridgeChild::SendWillClose()
 {
-  MOZ_ASSERT(mCanSend);
-  if (!mCanSend) {
-    return true;
-  }
+  MOZ_RELEASE_ASSERT(mCanSend);
   return PCompositorBridgeChild::SendWillClose();
 }
 
 bool
 CompositorBridgeChild::SendPause()
 {
-  MOZ_ASSERT(mCanSend);
   if (!mCanSend) {
-    return true;
+    return false;
   }
   return PCompositorBridgeChild::SendPause();
 }
@@ -714,9 +710,8 @@ CompositorBridgeChild::SendPause()
 bool
 CompositorBridgeChild::SendResume()
 {
-  MOZ_ASSERT(mCanSend);
   if (!mCanSend) {
-    return true;
+    return false;
   }
   return PCompositorBridgeChild::SendResume();
 }
@@ -724,9 +719,8 @@ CompositorBridgeChild::SendResume()
 bool
 CompositorBridgeChild::SendNotifyChildCreated(const uint64_t& id)
 {
-  MOZ_ASSERT(mCanSend);
   if (!mCanSend) {
-    return true;
+    return false;
   }
   return PCompositorBridgeChild::SendNotifyChildCreated(id);
 }
@@ -734,9 +728,8 @@ CompositorBridgeChild::SendNotifyChildCreated(const uint64_t& id)
 bool
 CompositorBridgeChild::SendAdoptChild(const uint64_t& id)
 {
-  MOZ_ASSERT(mCanSend);
   if (!mCanSend) {
-    return true;
+    return false;
   }
   return PCompositorBridgeChild::SendAdoptChild(id);
 }
@@ -744,9 +737,8 @@ CompositorBridgeChild::SendAdoptChild(const uint64_t& id)
 bool
 CompositorBridgeChild::SendMakeSnapshot(const SurfaceDescriptor& inSnapshot, const gfx::IntRect& dirtyRect)
 {
-  MOZ_ASSERT(mCanSend);
   if (!mCanSend) {
-    return true;
+    return false;
   }
   return PCompositorBridgeChild::SendMakeSnapshot(inSnapshot, dirtyRect);
 }
@@ -754,9 +746,8 @@ CompositorBridgeChild::SendMakeSnapshot(const SurfaceDescriptor& inSnapshot, con
 bool
 CompositorBridgeChild::SendFlushRendering()
 {
-  MOZ_ASSERT(mCanSend);
   if (!mCanSend) {
-    return true;
+    return false;
   }
   return PCompositorBridgeChild::SendFlushRendering();
 }
@@ -764,9 +755,8 @@ CompositorBridgeChild::SendFlushRendering()
 bool
 CompositorBridgeChild::SendStartFrameTimeRecording(const int32_t& bufferSize, uint32_t* startIndex)
 {
-  MOZ_ASSERT(mCanSend);
   if (!mCanSend) {
-    return true;
+    return false;
   }
   return PCompositorBridgeChild::SendStartFrameTimeRecording(bufferSize, startIndex);
 }
@@ -774,9 +764,8 @@ CompositorBridgeChild::SendStartFrameTimeRecording(const int32_t& bufferSize, ui
 bool
 CompositorBridgeChild::SendStopFrameTimeRecording(const uint32_t& startIndex, nsTArray<float>* intervals)
 {
-  MOZ_ASSERT(mCanSend);
   if (!mCanSend) {
-    return true;
+    return false;
   }
   return PCompositorBridgeChild::SendStopFrameTimeRecording(startIndex, intervals);
 }
@@ -784,9 +773,8 @@ CompositorBridgeChild::SendStopFrameTimeRecording(const uint32_t& startIndex, ns
 bool
 CompositorBridgeChild::SendNotifyRegionInvalidated(const nsIntRegion& region)
 {
-  MOZ_ASSERT(mCanSend);
   if (!mCanSend) {
-    return true;
+    return false;
   }
   return PCompositorBridgeChild::SendNotifyRegionInvalidated(region);
 }
@@ -794,34 +782,31 @@ CompositorBridgeChild::SendNotifyRegionInvalidated(const nsIntRegion& region)
 bool
 CompositorBridgeChild::SendRequestNotifyAfterRemotePaint()
 {
-  MOZ_ASSERT(mCanSend);
   if (!mCanSend) {
-    return true;
+    return false;
   }
   return PCompositorBridgeChild::SendRequestNotifyAfterRemotePaint();
 }
 
 bool
-CompositorBridgeChild::SendClearVisibleRegions(uint64_t aLayersId,
-                                               uint32_t aPresShellId)
+CompositorBridgeChild::SendClearApproximatelyVisibleRegions(uint64_t aLayersId,
+                                                            uint32_t aPresShellId)
 {
-  MOZ_ASSERT(mCanSend);
   if (!mCanSend) {
-    return true;
+    return false;
   }
-  return PCompositorBridgeChild::SendClearVisibleRegions(aLayersId, aPresShellId);
+  return PCompositorBridgeChild::SendClearApproximatelyVisibleRegions(aLayersId,
+                                                                aPresShellId);
 }
 
 bool
-CompositorBridgeChild::SendUpdateVisibleRegion(VisibilityCounter aCounter,
-                                               const ScrollableLayerGuid& aGuid,
-                                               const CSSIntRegion& aRegion)
+CompositorBridgeChild::SendNotifyApproximatelyVisibleRegion(const ScrollableLayerGuid& aGuid,
+                                                            const CSSIntRegion& aRegion)
 {
-  MOZ_ASSERT(mCanSend);
   if (!mCanSend) {
-    return true;
+    return false;
   }
-  return PCompositorBridgeChild::SendUpdateVisibleRegion(aCounter, aGuid, aRegion);
+  return PCompositorBridgeChild::SendNotifyApproximatelyVisibleRegion(aGuid, aRegion);
 }
 
 PTextureChild*
@@ -1084,7 +1069,9 @@ CompositorBridgeChild::DeallocPAPZCTreeManagerChild(PAPZCTreeManagerChild* aActo
 void
 CompositorBridgeChild::ProcessingError(Result aCode, const char* aReason)
 {
-  MOZ_RELEASE_ASSERT(aCode == MsgDropped, "Processing error in CompositorBridgeChild");
+  if (aCode != MsgDropped) {
+    gfxDevCrash(gfx::LogReason::ProcessingError) << "Processing error in CompositorBridgeChild: " << int(aCode);
+  }
 }
 
 } // namespace layers

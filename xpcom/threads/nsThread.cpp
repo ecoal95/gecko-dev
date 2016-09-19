@@ -21,7 +21,7 @@
 #include "nsCOMPtr.h"
 #include "nsQueryObject.h"
 #include "pratom.h"
-#include "mozilla/CycleCollectedJSRuntime.h"
+#include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/Logging.h"
 #include "nsIObserverService.h"
 #include "mozilla/HangMonitor.h"
@@ -748,7 +748,8 @@ nsThread::DispatchInternal(already_AddRefed<nsIRunnable> aEvent, uint32_t aFlags
     return NS_OK;
   }
 
-  NS_ASSERTION(aFlags == NS_DISPATCH_NORMAL, "unexpected dispatch flags");
+  NS_ASSERTION(aFlags == NS_DISPATCH_NORMAL ||
+               aFlags == NS_DISPATCH_AT_END, "unexpected dispatch flags");
   return PutEvent(event.take(), aTarget);
 }
 
@@ -1259,7 +1260,7 @@ nsThread::PopEventQueue(nsIEventTarget* aInnermostTarget)
 }
 
 void
-nsThread::SetScriptObserver(mozilla::CycleCollectedJSRuntime* aScriptObserver)
+nsThread::SetScriptObserver(mozilla::CycleCollectedJSContext* aScriptObserver)
 {
   if (!aScriptObserver) {
     mScriptObserver = nullptr;

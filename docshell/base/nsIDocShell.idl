@@ -301,6 +301,15 @@ interface nsIDocShell : nsIDocShellTreeItem
   [infallible] attribute boolean allowContentRetargetingOnChildren;
 
   /**
+   * True if this docShell should inherit the private browsing ID from
+   * its parent when reparented.
+   *
+   * NOTE: This should *not* be set false in new code, or for docShells
+   * inserted anywhere other than as children of panels.
+   */
+  [infallible] attribute boolean inheritPrivateBrowsingId;
+
+  /**
    * Get an enumerator over this docShell and its children.
    *
    * @param aItemType  - Only include docShells of this type, or if typeAll,
@@ -635,12 +644,6 @@ interface nsIDocShell : nsIDocShellTreeItem
    * like image frame discarding. Docshells are active unless told otherwise.
    */
   attribute boolean isActive;
-
-  /**
-   * Sets whether a docshell is active, as above, but ensuring it does
-   * not discard its layers
-   */
-  void setIsActiveAndForeground(in boolean aIsActive);
 
   /**
    * Puts the docshell in prerendering mode. noscript because we want only

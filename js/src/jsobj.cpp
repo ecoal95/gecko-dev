@@ -2622,8 +2622,15 @@ js::PreventExtensions(JSContext* cx, HandleObject obj, ObjectOpResult& result, I
         }
     }
 
-    if (!obj->setFlags(cx, BaseShape::NOT_EXTENSIBLE, JSObject::GENERATE_SHAPE))
+    if (!obj->setFlags(cx, BaseShape::NOT_EXTENSIBLE, JSObject::GENERATE_SHAPE)) {
+        // We failed to mark the object non-extensible, so reset the frozen
+        // flag on the elements.
+        MOZ_ASSERT(obj->nonProxyIsExtensible());
+        if (obj->isNative() && obj->as<NativeObject>().getElementsHeader()->isFrozen())
+            obj->as<NativeObject>().getElementsHeader()->markNotFrozen();
         return false;
+    }
+
     return result.succeed();
 }
 
@@ -3691,8 +3698,9 @@ JSObject::allocKindForTenure(const js::Nursery& nursery) const
         return GetBackgroundAllocKind(TypedArrayObject::AllocKindForLazyBuffer(nbytes));
     }
 
-    // Proxies have finalizers and are not nursery allocated.
-    MOZ_ASSERT(!IsProxy(this));
+    // Proxies that are CrossCompartmentWrappers may be nursery allocated.
+    if (IsProxy(this))
+        return as<ProxyObject>().allocKindForTenure();
 
     // Unboxed plain objects are sized according to the data they store.
     if (is<UnboxedPlainObject>()) {

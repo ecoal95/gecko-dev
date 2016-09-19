@@ -1689,7 +1689,8 @@ CanvasRenderingContext2D::RegisterAllocation()
   // XXX - It would make more sense to track the allocation in
   // PeristentBufferProvider, rather than here.
   static bool registered = false;
-  if (!registered) {
+  // FIXME: Disable the reporter for now, see bug 1241865
+  if (!registered && false) {
     registered = true;
     RegisterStrongMemoryReporter(new Canvas2dPixelsReporter());
   }
@@ -1908,6 +1909,8 @@ CanvasRenderingContext2D::ReturnTarget(bool aForceReset)
         // balance out here. See the comment in RestoreClipsAndTransformToTarget.
         mTarget->PopClip();
       }
+
+      mTarget->SetTransform(Matrix());
     }
 
     mBufferProvider->ReturnDrawTarget(mTarget.forget());
@@ -2464,7 +2467,9 @@ CanvasRenderingContext2D::CreatePattern(const CanvasImageSource& aSource,
 
     htmlElement = img;
   } else if (aSource.IsHTMLVideoElement()) {
-    htmlElement = &aSource.GetAsHTMLVideoElement();
+    auto& video = aSource.GetAsHTMLVideoElement();
+    video.MarkAsContentSource(mozilla::dom::HTMLVideoElement::CallerAPI::CREATE_PATTERN);
+    htmlElement = &video;
   } else {
     // Special case for ImageBitmap
     ImageBitmap& imgBitmap = aSource.GetAsImageBitmap();
@@ -2986,10 +2991,13 @@ CanvasRenderingContext2D::FillRect(double aX, double aY, double aW,
     bounds = mTarget->GetTransform().TransformBounds(fillRect);
   }
 
+  AntialiasMode antialiasMode = CurrentState().imageSmoothingEnabled ?
+                                AntialiasMode::DEFAULT : AntialiasMode::NONE;
+
   AdjustedTarget(this, bounds.IsEmpty() ? nullptr : &bounds)->
     FillRect(gfx::Rect(aX, aY, aW, aH),
              CanvasGeneralPattern().ForStyle(this, Style::FILL, mTarget),
-             DrawOptions(state.globalAlpha, op));
+             DrawOptions(state.globalAlpha, op, antialiasMode));
 
   RedrawUser(gfxRect(aX, aY, aW, aH));
 }
@@ -4765,6 +4773,7 @@ CanvasRenderingContext2D::DrawImage(const CanvasImageSource& aImage,
       element = img;
     } else {
       HTMLVideoElement* video = &aImage.GetAsHTMLVideoElement();
+      video->MarkAsContentSource(mozilla::dom::HTMLVideoElement::CallerAPI::DRAW_IMAGE);
       element = video;
     }
 
@@ -4947,11 +4956,15 @@ CanvasRenderingContext2D::DrawImage(const CanvasImageSource& aImage,
   }
 
   SamplingFilter samplingFilter;
+  AntialiasMode antialiasMode;
 
-  if (CurrentState().imageSmoothingEnabled)
+  if (CurrentState().imageSmoothingEnabled) {
     samplingFilter = gfx::SamplingFilter::LINEAR;
-  else
+    antialiasMode = AntialiasMode::DEFAULT;
+  } else {
     samplingFilter = gfx::SamplingFilter::POINT;
+    antialiasMode = AntialiasMode::NONE;
+  }
 
   gfx::Rect bounds;
 
@@ -4974,8 +4987,8 @@ CanvasRenderingContext2D::DrawImage(const CanvasImageSource& aImage,
       DrawSurface(srcSurf,
                   gfx::Rect(aDx, aDy, aDw, aDh),
                   sourceRect,
-                  DrawSurfaceOptions(samplingFilter),
-                  DrawOptions(CurrentState().globalAlpha, UsedOperation()));
+                  DrawSurfaceOptions(samplingFilter, SamplingBounds::UNBOUNDED),
+                  DrawOptions(CurrentState().globalAlpha, UsedOperation(), antialiasMode));
   } else {
     DrawDirectlyToCanvas(drawInfo, &bounds,
                          gfx::Rect(aDx, aDy, aDw, aDh),
@@ -5243,8 +5256,13 @@ CanvasRenderingContext2D::DrawWindow(nsGlobalWindow& aWindow, double aX,
     thebes->SetMatrix(gfxMatrix(matrix._11, matrix._12, matrix._21,
                                 matrix._22, matrix._31, matrix._32));
   } else {
+    IntSize dtSize = IntSize::Ceil(sw, sh);
+    if (!Factory::AllowedSurfaceSize(dtSize)) {
+      aError.Throw(NS_ERROR_FAILURE);
+      return;
+    }
     drawDT =
-      gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(IntSize::Ceil(sw, sh),
+      gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(dtSize,
                                                                    SurfaceFormat::B8G8R8A8);
     if (!drawDT || !drawDT->IsValid()) {
       aError.Throw(NS_ERROR_FAILURE);
@@ -5270,6 +5288,12 @@ CanvasRenderingContext2D::DrawWindow(nsGlobalWindow& aWindow, double aX,
       return;
     }
     RefPtr<DataSourceSurface> data = snapshot->GetDataSurface();
+    if (!data || !Factory::AllowedSurfaceSize(data->GetSize())) {
+      gfxCriticalError() << "Unexpected invalid data source surface " <<
+        (data ? data->GetSize() : IntSize(0,0));
+      aError.Throw(NS_ERROR_FAILURE);
+      return;
+    }
 
     DataSourceSurface::MappedSurface rawData;
     if (NS_WARN_IF(!data->Map(DataSourceSurface::READ, &rawData))) {

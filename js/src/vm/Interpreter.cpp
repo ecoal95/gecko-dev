@@ -15,6 +15,7 @@
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/PodOperations.h"
+#include "mozilla/Sprintf.h"
 
 #include <string.h>
 
@@ -360,6 +361,9 @@ bool
 js::RunScript(JSContext* cx, RunState& state)
 {
     JS_CHECK_RECURSION(cx, return false);
+
+    // Since any script can conceivably GC, make sure it's safe to do so.
+    JS::AutoAssertOnGC::VerifyIsSafeToGC(cx->runtime());
 
     if (!Debugger::checkNoExecute(cx, state.script()))
         return false;
@@ -2124,10 +2128,12 @@ CASE(JSOP_ITER)
 {
     MOZ_ASSERT(REGS.stackDepth() >= 1);
     uint8_t flags = GET_UINT8(REGS.pc);
-    MutableHandleValue res = REGS.stackHandleAt(-1);
-    if (!ValueToIterator(cx, flags, res))
+    HandleValue val = REGS.stackHandleAt(-1);
+    ReservedRooted<JSObject*> iter(&rootObject0);
+    iter.set(ValueToIterator(cx, flags, val));
+    if (!iter)
         goto error;
-    MOZ_ASSERT(res.isObject());
+    REGS.sp[-1].setObject(*iter);
 }
 END_CASE(JSOP_ITER)
 
@@ -4118,7 +4124,7 @@ END_CASE(JSOP_IS_CONSTRUCTING)
 DEFAULT()
 {
     char numBuf[12];
-    snprintf(numBuf, sizeof numBuf, "%d", *REGS.pc);
+    SprintfLiteral(numBuf, "%d", *REGS.pc);
     JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
                          JSMSG_BAD_BYTECODE, numBuf);
     goto error;

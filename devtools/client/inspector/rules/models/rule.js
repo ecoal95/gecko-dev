@@ -12,7 +12,7 @@ const {ELEMENT_STYLE} = require("devtools/shared/specs/styles");
 const {TextProperty} =
       require("devtools/client/inspector/rules/models/text-property");
 const {promiseWarn} = require("devtools/client/inspector/shared/utils");
-const {parseDeclarations} = require("devtools/shared/css-parsing-utils");
+const {parseDeclarations} = require("devtools/shared/css/parsing-utils");
 const Services = require("Services");
 
 const STYLE_INSPECTOR_PROPERTIES = "devtools-shared/locale/styleinspector.properties";
@@ -189,7 +189,7 @@ Rule.prototype = {
     }
 
     this.applyProperties((modifications) => {
-      modifications.createProperty(ind, name, value, priority);
+      modifications.createProperty(ind, name, value, priority, enabled);
       // Now that the rule has been updated, the server might have given us data
       // that changes the state of the property. Update it now.
       prop.updateEditor();

@@ -36,6 +36,7 @@
 # include "vtune/VTuneWrapper.h"
 #endif
 
+#include "jit/MacroAssembler-inl.h"
 #include "vm/ArrayBufferObject-inl.h"
 
 using namespace js;
@@ -231,7 +232,6 @@ CodeSegment::create(JSContext* cx,
     cs->interruptCode_ = codeBase + linkData.interruptOffset;
     cs->outOfBoundsCode_ = codeBase + linkData.outOfBoundsOffset;
     cs->unalignedAccessCode_ = codeBase + linkData.unalignedAccessOffset;
-    cs->badIndirectCallCode_ = codeBase + linkData.badIndirectCallOffset;
 
     {
         JitContext jcx(CompileRuntime::get(cx->compartment()->runtimeFromAnyThread()));

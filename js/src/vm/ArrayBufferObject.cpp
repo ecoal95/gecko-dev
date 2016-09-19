@@ -624,12 +624,12 @@ WasmArrayRawBuffer::Release(void* mem)
     MOZ_RELEASE_ASSERT(header->mappedSize() <= SIZE_MAX - gc::SystemPageSize());
     size_t mappedSizeWithHeader = header->mappedSize() + gc::SystemPageSize();
 
+    MemProfiler::RemoveNative(base);
 # ifdef XP_WIN
     VirtualFree(base, 0, MEM_RELEASE);
 # else  // XP_WIN
     munmap(base, mappedSizeWithHeader);
 # endif  // !XP_WIN
-    MemProfiler::RemoveNative(base);
 
 #  if defined(MOZ_VALGRIND) && defined(VALGRIND_ENABLE_ADDR_ERROR_REPORTING_IN_RANGE)
     VALGRIND_ENABLE_ADDR_ERROR_REPORTING_IN_RANGE(base, mappedSizeWithHeader);
@@ -843,6 +843,18 @@ ArrayBufferObject::wasmMappedSize() const
     return byteLength();
 }
 
+size_t
+js::WasmArrayBufferMappedSize(const ArrayBufferObjectMaybeShared* buf)
+{
+    if (buf->is<ArrayBufferObject>())
+        return buf->as<ArrayBufferObject>().wasmMappedSize();
+#ifdef WASM_HUGE_MEMORY
+    return wasm::HugeMappedSize;
+#else
+    return buf->as<SharedArrayBufferObject>().byteLength();
+#endif
+}
+
 Maybe<uint32_t>
 ArrayBufferObject::wasmMaxSize() const
 {
@@ -850,6 +862,15 @@ ArrayBufferObject::wasmMaxSize() const
         return contents().wasmBuffer()->maxSize();
     else
         return Some<uint32_t>(byteLength());
+}
+
+Maybe<uint32_t>
+js::WasmArrayBufferMaxSize(const ArrayBufferObjectMaybeShared* buf)
+{
+    if (buf->is<ArrayBufferObject>())
+        return buf->as<ArrayBufferObject>().wasmMaxSize();
+
+    return Some(buf->as<SharedArrayBufferObject>().byteLength());
 }
 
 /* static */ bool

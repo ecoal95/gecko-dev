@@ -169,6 +169,7 @@ XMLHttpRequestMainThread::XMLHttpRequestMainThread()
     mFlagSyncLooping(false), mFlagBackgroundRequest(false),
     mFlagHadUploadListenersOnSend(false), mFlagACwithCredentials(false),
     mFlagTimedOut(false), mFlagDeleted(false), mFlagSend(false),
+    mSendExtraLoadingEvents(Preferences::GetBool("dom.fire_extra_xhr_loading_readystatechanges", true)),
     mUploadTransferred(0), mUploadTotal(0), mUploadComplete(true),
     mProgressSinceLastProgressEvent(false),
     mRequestSentTime(0), mTimeoutMilliseconds(0),
@@ -288,7 +289,7 @@ XMLHttpRequestMainThread::ResetResponse()
 {
   mResponseXML = nullptr;
   mResponseBody.Truncate();
-  mResponseText.Truncate();
+  TruncateResponseText();
   mResponseBlob = nullptr;
   mDOMBlob = nullptr;
   mBlobSet = nullptr;
@@ -420,7 +421,7 @@ XMLHttpRequestMainThread::SizeOfEventTargetIncludingThis(
   // - Binary extensions, but they're *extremely* unlikely to do any memory
   //   reporting.
   //
-  n += mResponseText.SizeOfExcludingThisEvenIfShared(aMallocSizeOf);
+  n += mResponseText.SizeOfThis(aMallocSizeOf);
 
   return n;
 
@@ -535,18 +536,17 @@ XMLHttpRequestMainThread::AppendToResponseText(const char * aSrcBuffer,
                                        &destBufferLen);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  uint32_t size = mResponseText.Length() + destBufferLen;
-  if (size < (uint32_t)destBufferLen) {
+  CheckedInt32 size = mResponseText.Length();
+  size += destBufferLen;
+  if (!size.isValid()) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  if (!mResponseText.SetCapacity(size, fallible)) {
+  XMLHttpRequestStringWriterHelper helper(mResponseText);
+
+  if (!helper.AddCapacity(destBufferLen)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
-
-  char16_t* destBuffer = mResponseText.BeginWriting() + mResponseText.Length();
-
-  CheckedInt32 totalChars = mResponseText.Length();
 
   // This code here is basically a copy of a similar thing in
   // nsScanner::Append(const char* aBuffer, uint32_t aLen).
@@ -554,16 +554,12 @@ XMLHttpRequestMainThread::AppendToResponseText(const char * aSrcBuffer,
   int32_t destlen = (int32_t)destBufferLen;
   rv = mDecoder->Convert(aSrcBuffer,
                          &srclen,
-                         destBuffer,
+                         helper.EndOfExistingData(),
                          &destlen);
   MOZ_ASSERT(NS_SUCCEEDED(rv));
+  MOZ_ASSERT(destlen <= destBufferLen);
 
-  totalChars += destlen;
-  if (!totalChars.isValid()) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
-  mResponseText.SetLength(totalChars.value());
+  helper.AddLength(destlen);
   return NS_OK;
 }
 
@@ -571,9 +567,7 @@ NS_IMETHODIMP
 XMLHttpRequestMainThread::GetResponseText(nsAString& aResponseText)
 {
   ErrorResult rv;
-  nsString responseText;
-  GetResponseText(responseText, rv);
-  aResponseText = responseText;
+  GetResponseText(aResponseText, rv);
   return rv.StealNSResult();
 }
 
@@ -581,7 +575,23 @@ void
 XMLHttpRequestMainThread::GetResponseText(nsAString& aResponseText,
                                           ErrorResult& aRv)
 {
-  aResponseText.Truncate();
+  XMLHttpRequestStringSnapshot snapshot;
+  GetResponseText(snapshot, aRv);
+  if (aRv.Failed()) {
+    return;
+  }
+
+  if (!snapshot.GetAsString(aResponseText)) {
+    aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
+}
+
+void
+XMLHttpRequestMainThread::GetResponseText(XMLHttpRequestStringSnapshot& aSnapshot,
+                                          ErrorResult& aRv)
+{
+  aSnapshot.Reset();
 
   if (mResponseType != XMLHttpRequestResponseType::_empty &&
       mResponseType != XMLHttpRequestResponseType::Text &&
@@ -592,7 +602,7 @@ XMLHttpRequestMainThread::GetResponseText(nsAString& aResponseText,
 
   if (mResponseType == XMLHttpRequestResponseType::Moz_chunked_text &&
       !mInLoadProgressEvent) {
-    aResponseText.SetIsVoid(true);
+    aSnapshot.SetVoid();
     return;
   }
 
@@ -605,7 +615,7 @@ XMLHttpRequestMainThread::GetResponseText(nsAString& aResponseText,
   // more.
   if ((!mResponseXML && !mErrorParsingXML) ||
       mResponseBodyDecodedPos == mResponseBody.Length()) {
-    aResponseText = mResponseText;
+    mResponseText.CreateSnapshot(aSnapshot);
     return;
   }
 
@@ -627,7 +637,7 @@ XMLHttpRequestMainThread::GetResponseText(nsAString& aResponseText,
     mResponseBodyDecodedPos = 0;
   }
 
-  aResponseText = mResponseText;
+  mResponseText.CreateSnapshot(aSnapshot);
 }
 
 nsresult
@@ -637,11 +647,14 @@ XMLHttpRequestMainThread::CreateResponseParsedJSON(JSContext* aCx)
     return NS_ERROR_FAILURE;
   }
 
+  nsAutoString string;
+  if (!mResponseText.GetAsString(string)) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
   // The Unicode converter has already zapped the BOM if there was one
   JS::Rooted<JS::Value> value(aCx);
-  if (!JS_ParseJSON(aCx,
-                    static_cast<const char16_t*>(mResponseText.get()), mResponseText.Length(),
-                    &value)) {
+  if (!JS_ParseJSON(aCx, string.BeginReading(), string.Length(), &value)) {
     return NS_ERROR_FAILURE;
   }
 
@@ -749,7 +762,7 @@ XMLHttpRequestMainThread::GetResponse(JSContext* aCx,
   case XMLHttpRequestResponseType::Text:
   case XMLHttpRequestResponseType::Moz_chunked_text:
   {
-    nsString str;
+    nsAutoString str;
     aRv = GetResponseText(str);
     if (aRv.Failed()) {
       return;
@@ -823,7 +836,7 @@ XMLHttpRequestMainThread::GetResponse(JSContext* aCx,
 
     if (mResultJSON.isUndefined()) {
       aRv = CreateResponseParsedJSON(aCx);
-      mResponseText.Truncate();
+      TruncateResponseText();
       if (aRv.Failed()) {
         // Per spec, errors aren't propagated. null is returned instead.
         aRv = NS_OK;
@@ -1332,7 +1345,7 @@ XMLHttpRequestMainThread::DispatchProgressEvent(DOMEventTargetHelper* aTarget,
     if (mResponseType == XMLHttpRequestResponseType::Moz_chunked_text ||
         mResponseType == XMLHttpRequestResponseType::Moz_chunked_arraybuffer) {
       mResponseBody.Truncate();
-      mResponseText.Truncate();
+      TruncateResponseText();
       mResultArrayBuffer = nullptr;
       mArrayBufferBuilder.reset();
     }
@@ -1378,22 +1391,8 @@ XMLHttpRequestMainThread::Open(const nsACString& aMethod, const nsACString& aUrl
                                bool aAsync, const nsAString& aUsername,
                                const nsAString& aPassword, uint8_t optional_argc)
 {
-  Optional<bool> async;
-  if (!optional_argc) {
-    // No optional arguments were passed in. Default async to true.
-    async.Construct() = true;
-  } else {
-    async.Construct() = aAsync;
-  }
-  Optional<nsAString> username;
-  if (optional_argc > 1) {
-    username = &aUsername;
-  }
-  Optional<nsAString> password;
-  if (optional_argc > 2) {
-    password = &aPassword;
-  }
-  return OpenInternal(aMethod, aUrl, async, username, password);
+  return Open(aMethod, aUrl, optional_argc > 0 ? aAsync : true,
+              aUsername, aPassword);
 }
 
 // This case is hit when the async parameter is outright omitted, which
@@ -1402,8 +1401,7 @@ void
 XMLHttpRequestMainThread::Open(const nsACString& aMethod, const nsAString& aUrl,
                                ErrorResult& aRv)
 {
-  aRv = OpenInternal(aMethod, NS_ConvertUTF16toUTF8(aUrl), Optional<bool>(true),
-                     Optional<nsAString>(), Optional<nsAString>());
+  Open(aMethod, aUrl, true, NullString(), NullString(), aRv);
 }
 
 // This case is hit when the async parameter is specified, even if the
@@ -1413,30 +1411,29 @@ void
 XMLHttpRequestMainThread::Open(const nsACString& aMethod,
                                const nsAString& aUrl,
                                bool aAsync,
-                               const Optional<nsAString>& aUsername,
-                               const Optional<nsAString>& aPassword,
+                               const nsAString& aUsername,
+                               const nsAString& aPassword,
                                ErrorResult& aRv)
 {
-  aRv = OpenInternal(aMethod, NS_ConvertUTF16toUTF8(aUrl),
-                     Optional<bool>(aAsync), aUsername, aPassword);
+  nsresult rv = Open(aMethod, NS_ConvertUTF16toUTF8(aUrl), aAsync, aUsername, aPassword);
+  if (NS_FAILED(rv)) {
+    aRv.Throw(rv);
+  }
 }
 
 nsresult
-XMLHttpRequestMainThread::OpenInternal(const nsACString& aMethod,
-                                       const nsACString& aUrl,
-                                       const Optional<bool>& aAsync,
-                                       const Optional<nsAString>& aUsername,
-                                       const Optional<nsAString>& aPassword)
-{
-  bool async = aAsync.WasPassed() ? aAsync.Value() : true;
-
+XMLHttpRequestMainThread::Open(const nsACString& aMethod,
+                               const nsACString& aUrl,
+                               bool aAsync,
+                               const nsAString& aUsername,
+                               const nsAString& aPassword) {
   // Gecko-specific
-  if (!async && !DontWarnAboutSyncXHR() && GetOwner() &&
+  if (!aAsync && !DontWarnAboutSyncXHR() && GetOwner() &&
       GetOwner()->GetExtantDoc()) {
     GetOwner()->GetExtantDoc()->WarnOnceAbout(nsIDocument::eSyncXMLHttpRequest);
   }
 
-  Telemetry::Accumulate(Telemetry::XMLHTTPREQUEST_ASYNC_OR_SYNC, async ? 0 : 1);
+  Telemetry::Accumulate(Telemetry::XMLHTTPREQUEST_ASYNC_OR_SYNC, aAsync ? 0 : 1);
 
   // Step 1
   nsCOMPtr<nsIDocument> responsibleDocument = GetDocumentIfCurrent();
@@ -1476,29 +1473,27 @@ XMLHttpRequestMainThread::OpenInternal(const nsACString& aMethod,
     return NS_ERROR_DOM_INVALID_STATE_ERR;
   }
 
-  // Step 7 is already done above.
-  // Note that the username and password are already passed in as null by Open()
-  // if the async parameter is omitted, so there's no need check again here.
+  // Step 7
+  // This is already handled by the other Open() method, which passes
+  // username and password in as NullStrings.
 
   // Step 8
-  if (aAsync.WasPassed()) {
-    nsAutoCString host;
-    parsedURL->GetHost(host);
-    if (!host.IsEmpty()) {
-      nsAutoCString userpass;
-      if (aUsername.WasPassed()) {
-        CopyUTF16toUTF8(aUsername.Value(), userpass);
-      }
-      userpass.AppendLiteral(":");
-      if (aPassword.WasPassed()) {
-        AppendUTF16toUTF8(aPassword.Value(), userpass);
-      }
-      parsedURL->SetUserPass(userpass);
+  nsAutoCString host;
+  parsedURL->GetHost(host);
+  if (!host.IsEmpty()) {
+    nsAutoCString userpass;
+    if (!aUsername.IsVoid()) {
+      CopyUTF16toUTF8(aUsername, userpass);
     }
+    userpass.AppendLiteral(":");
+    if (!aPassword.IsVoid()) {
+      AppendUTF16toUTF8(aPassword, userpass);
+    }
+    parsedURL->SetUserPass(userpass);
   }
 
   // Step 9
-  if (!async && HasOrHasHadOwner() && (mTimeoutMilliseconds ||
+  if (!aAsync && HasOrHasHadOwner() && (mTimeoutMilliseconds ||
        mResponseType != XMLHttpRequestResponseType::_empty)) {
     if (mTimeoutMilliseconds) {
       LogMessage("TimeoutSyncXHRWarning", GetOwner());
@@ -1517,7 +1512,7 @@ XMLHttpRequestMainThread::OpenInternal(const nsACString& aMethod,
   mFlagSend = false;
   mRequestMethod.Assign(method);
   mRequestURL = parsedURL;
-  mFlagSynchronous = !async;
+  mFlagSynchronous = !aAsync;
   mAuthorRequestHeaders.Clear();
   ResetResponse();
 
@@ -1691,6 +1686,7 @@ XMLHttpRequestMainThread::OnDataAvailable(nsIRequest *request,
   MOZ_ASSERT(mContext.get() == ctxt,"start context different from OnDataAvailable context");
 
   mProgressSinceLastProgressEvent = true;
+  XMLHttpRequestBinding::ClearCachedResponseTextValue(this);
 
   bool cancelable = false;
   if ((mResponseType == XMLHttpRequestResponseType::Blob ||
@@ -1719,7 +1715,9 @@ XMLHttpRequestMainThread::OnDataAvailable(nsIRequest *request,
 
   mDataAvailable += totalRead;
 
-  ChangeState(State::loading);
+  if (mState == State::headers_received || mSendExtraLoadingEvents) {
+    ChangeState(State::loading);
+  }
 
   if (!mFlagSynchronous && !mProgressTimerIsActive) {
     StartProgressEventTimer();
@@ -2145,7 +2143,7 @@ XMLHttpRequestMainThread::MatchCharsetAndDecoderToResponseDocument()
 {
   if (mResponseXML && mResponseCharset != mResponseXML->GetDocumentCharacterSet()) {
     mResponseCharset = mResponseXML->GetDocumentCharacterSet();
-    mResponseText.Truncate();
+    TruncateResponseText();
     mResponseBodyDecodedPos = 0;
     mDecoder = EncodingUtils::DecoderForEncoding(mResponseCharset);
   }
@@ -3535,6 +3533,13 @@ XMLHttpRequestMainThread::ShouldBlockAuthPrompt()
   }
 
   return false;
+}
+
+void
+XMLHttpRequestMainThread::TruncateResponseText()
+{
+  mResponseText.Truncate();
+  XMLHttpRequestBinding::ClearCachedResponseTextValue(this);
 }
 
 NS_IMPL_ISUPPORTS(XMLHttpRequestMainThread::nsHeaderVisitor, nsIHttpHeaderVisitor)

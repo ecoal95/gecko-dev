@@ -38,6 +38,7 @@ public:
     }
     return "H264Converter decoder (pending)";
   }
+  void SetSeekThreshold(const media::TimeUnit& aTime) override;
 
   nsresult GetLastError() const { return mLastError; }
 
@@ -51,7 +52,7 @@ private:
   void UpdateConfigFromExtraData(MediaByteBuffer* aExtraData);
 
   void OnDecoderInitDone(const TrackType aTrackType);
-  void OnDecoderInitFailed(MediaDataDecoder::DecoderFailureReason aReason);
+  void OnDecoderInitFailed(MediaResult aError);
 
   RefPtr<PlatformDecoderModule> mPDM;
   VideoInfo mOriginalConfig;

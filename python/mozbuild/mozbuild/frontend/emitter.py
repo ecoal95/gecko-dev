@@ -381,6 +381,33 @@ class TreeMetadataEmitter(LoggingMixin):
         with open(toml_file, 'r') as f:
             return pytoml.load(f)
 
+    def _verify_deps(self, context, crate_dir, crate_name, dependencies, description='Dependency'):
+        """Verify that a crate's dependencies all specify local paths."""
+        for dep_crate_name, values in dependencies.iteritems():
+            # A simple version number.
+            if isinstance(values, (str, unicode)):
+                raise SandboxValidationError(
+                    '%s %s of crate %s does not list a path' % (description, dep_crate_name, crate_name),
+                    context)
+
+            dep_path = values.get('path', None)
+            if not dep_path:
+                raise SandboxValidationError(
+                    '%s %s of crate %s does not list a path' % (description, dep_crate_name, crate_name),
+                    context)
+
+            # Try to catch the case where somebody listed a
+            # local path for development.
+            if os.path.isabs(dep_path):
+                raise SandboxValidationError(
+                    '%s %s of crate %s has a non-relative path' % (description, dep_crate_name, crate_name),
+                    context)
+
+            if not os.path.exists(mozpath.join(context.config.topsrcdir, crate_dir, dep_path)):
+                raise SandboxValidationError(
+                    '%s %s of crate %s refers to a non-existent path' % (description, dep_crate_name, crate_name),
+                    context)
+
     def _rust_library(self, context, libname, static_args):
         # We need to note any Rust library for linking purposes.
         cargo_file = mozpath.join(context.srcdir, 'Cargo.toml')
@@ -413,6 +440,7 @@ class TreeMetadataEmitter(LoggingMixin):
             raise SandboxValidationError(
                 'crate-type %s is not permitted for %s' % (crate_type, libname),
                 context)
+
 
         return RustLibrary(context, libname, cargo_file, crate_type, **static_args)
 

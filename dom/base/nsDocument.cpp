@@ -243,7 +243,7 @@
 #include "nsIMutableArray.h"
 #include "mozilla/dom/DOMStringList.h"
 #include "nsWindowMemoryReporter.h"
-#include "nsLocation.h"
+#include "mozilla/dom/Location.h"
 #include "mozilla/dom/FontFaceSet.h"
 #include "mozilla/dom/BoxObject.h"
 #include "gfxPrefs.h"
@@ -6518,7 +6518,7 @@ nsDocument::GetLocation(nsIDOMLocation **_retval)
   return NS_OK;
 }
 
-already_AddRefed<nsLocation>
+already_AddRefed<Location>
 nsIDocument::GetLocation() const
 {
   nsCOMPtr<nsPIDOMWindowInner> w = do_QueryInterface(mScriptGlobalObject);
@@ -6529,7 +6529,7 @@ nsIDocument::GetLocation() const
 
   nsGlobalWindow* window = nsGlobalWindow::Cast(w);
   ErrorResult dummy;
-  RefPtr<nsLocation> loc = window->GetLocation(dummy);
+  RefPtr<Location> loc = window->GetLocation(dummy);
   dummy.SuppressException();
   return loc.forget();
 }
@@ -12046,11 +12046,6 @@ nsDocument::UpdateVisibilityState()
                                          NS_LITERAL_STRING("visibilitychange"),
                                          /* bubbles = */ true,
                                          /* cancelable = */ false);
-    nsContentUtils::DispatchTrustedEvent(this, static_cast<nsIDocument*>(this),
-                                         NS_LITERAL_STRING("mozvisibilitychange"),
-                                         /* bubbles = */ true,
-                                         /* cancelable = */ false);
-
     EnumerateActivityObservers(NotifyActivityChanged, nullptr);
   }
 
@@ -12110,24 +12105,10 @@ nsDocument::MaybeActiveMediaComponents()
 }
 
 NS_IMETHODIMP
-nsDocument::GetMozHidden(bool* aHidden)
-{
-  *aHidden = MozHidden();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsDocument::GetHidden(bool* aHidden)
 {
   *aHidden = Hidden();
   return NS_OK;
-}
-
-NS_IMETHODIMP
-nsDocument::GetMozVisibilityState(nsAString& aState)
-{
-  WarnOnceAbout(ePrefixedVisibilityAPI);
-  return GetVisibilityState(aState);
 }
 
 NS_IMETHODIMP
