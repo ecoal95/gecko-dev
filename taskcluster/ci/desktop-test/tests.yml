@@ -421,7 +421,7 @@ reftest-stylo:
     treeherder-symbol: tc-R(Rs)
     chunks: 8
     mozharness:
-        script: mozharness/scripts/desktop_unittest.py
+        script: desktop_unittest.py
         no-read-buildbot-config: true
         config:
             by-test-platform:
