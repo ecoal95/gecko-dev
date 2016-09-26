@@ -87,7 +87,7 @@ ${helpers.single_keyword("mask-mode",
 // TODO implement all of repeat-style for background and mask
 // https://drafts.csswg.org/css-backgrounds-3/#repeat-style
 ${helpers.single_keyword("mask-repeat",
-                         "repeat repeat-x repeat-y no-repeat",
+                         "repeat repeat-x repeat-y space round no-repeat",
                          vector=True,
                          products="gecko",
                          animatable=False)}
@@ -236,6 +236,17 @@ ${helpers.single_keyword("mask-composite",
                     computed_value::T::Image(image.to_computed_value(context)),
                 SpecifiedValue::Url(ref url, ref data) =>
                     computed_value::T::Url(url.clone(), data.clone()),
+            }
+        }
+
+        #[inline]
+        fn from_computed_value(computed: &computed_value::T) -> Self {
+            match *computed {
+                computed_value::T::None => SpecifiedValue::None,
+                computed_value::T::Image(ref image) =>
+                    SpecifiedValue::Image(ToComputedValue::from_computed_value(image)),
+                computed_value::T::Url(ref url, ref data) =>
+                    SpecifiedValue::Url(url.clone(), data.clone()),
             }
         }
     }

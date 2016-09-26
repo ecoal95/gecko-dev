@@ -27,7 +27,7 @@ use dom::bindings::codegen::Bindings::DocumentBinding::{DocumentMethods, Documen
 use dom::bindings::codegen::Bindings::LocationBinding::LocationMethods;
 use dom::bindings::codegen::Bindings::WindowBinding::WindowMethods;
 use dom::bindings::conversions::{ConversionResult, FromJSValConvertible, StringificationBehavior};
-use dom::bindings::global::GlobalRef;
+use dom::bindings::global::{GlobalRef, GlobalRoot};
 use dom::bindings::inheritance::Castable;
 use dom::bindings::js::{JS, MutNullableHeap, Root, RootCollection};
 use dom::bindings::js::{RootCollectionPtr, RootedReference};
@@ -77,8 +77,8 @@ use parse::xml::{self, parse_xml};
 use profile_traits::mem::{self, OpaqueSender, Report, ReportKind, ReportsChan};
 use profile_traits::time::{self, ProfilerCategory, profile};
 use script_layout_interface::message::{self, NewLayoutThreadInfo, ReflowQueryType};
-use script_runtime::{CommonScriptMsg, ScriptChan, ScriptThreadEventCategory};
-use script_runtime::{ScriptPort, StackRootTLS, get_reports, new_rt_and_cx};
+use script_runtime::{CommonScriptMsg, ScriptChan, ScriptThreadEventCategory, EnqueuedPromiseCallback};
+use script_runtime::{ScriptPort, StackRootTLS, get_reports, new_rt_and_cx, PromiseJobQueue};
 use script_traits::{CompositorEvent, ConstellationControlMsg, EventResult};
 use script_traits::{InitialScriptState, MouseButton, MouseEventType, MozBrowserEvent};
 use script_traits::{NewLayoutInfo, ScriptMsg as ConstellationMsg};
@@ -228,8 +228,9 @@ pub enum MainThreadScriptMsg {
     /// should be closed (only dispatched to ScriptThread).
     ExitWindow(PipelineId),
     /// Begins a content-initiated load on the specified pipeline (only
-    /// dispatched to ScriptThread).
-    Navigate(PipelineId, LoadData),
+    /// dispatched to ScriptThread). Allows for a replace bool to be passed. If true,
+    /// the current entry will be replaced instead of a new entry being added.
+    Navigate(PipelineId, LoadData, bool),
     /// Tasks that originate from the DOM manipulation task source
     DOMManipulation(DOMManipulationTask),
     /// Tasks that originate from the user interaction task source
@@ -393,6 +394,8 @@ pub struct ScriptThread {
     timer_event_port: Receiver<TimerEvent>,
 
     content_process_shutdown_chan: IpcSender<()>,
+
+    promise_job_queue: PromiseJobQueue,
 }
 
 /// In the event of thread panic, all data on the stack runs its destructor. However, there
@@ -598,6 +601,8 @@ impl ScriptThread {
             timer_event_port: timer_event_port,
 
             content_process_shutdown_chan: state.content_process_shutdown_chan,
+
+            promise_job_queue: PromiseJobQueue::new(),
         }
     }
 
@@ -877,8 +882,8 @@ impl ScriptThread {
 
     fn handle_msg_from_constellation(&self, msg: ConstellationControlMsg) {
         match msg {
-            ConstellationControlMsg::Navigate(parent_pipeline_id, pipeline_id, load_data) =>
-                self.handle_navigate(parent_pipeline_id, Some(pipeline_id), load_data),
+            ConstellationControlMsg::Navigate(parent_pipeline_id, pipeline_id, load_data, replace) =>
+                self.handle_navigate(parent_pipeline_id, Some(pipeline_id), load_data, replace),
             ConstellationControlMsg::SendEvent(id, event) =>
                 self.handle_event(id, event),
             ConstellationControlMsg::ResizeInactive(id, new_size) =>
@@ -933,8 +938,8 @@ impl ScriptThread {
 
     fn handle_msg_from_script(&self, msg: MainThreadScriptMsg) {
         match msg {
-            MainThreadScriptMsg::Navigate(parent_pipeline_id, load_data) =>
-                self.handle_navigate(parent_pipeline_id, None, load_data),
+            MainThreadScriptMsg::Navigate(parent_pipeline_id, load_data, replace) =>
+                self.handle_navigate(parent_pipeline_id, None, load_data, replace),
             MainThreadScriptMsg::ExitWindow(id) =>
                 self.handle_exit_window_msg(id),
             MainThreadScriptMsg::DocumentLoadsComplete(id) =>
@@ -2000,7 +2005,10 @@ impl ScriptThread {
     /// https://html.spec.whatwg.org/multipage/#navigating-across-documents
     /// The entry point for content to notify that a new load has been requested
     /// for the given pipeline (specifically the "navigate" algorithm).
-    fn handle_navigate(&self, parent_pipeline_id: PipelineId, pipeline_id: Option<PipelineId>, load_data: LoadData) {
+    fn handle_navigate(&self, parent_pipeline_id: PipelineId,
+                              pipeline_id: Option<PipelineId>,
+                              load_data: LoadData,
+                              replace: bool) {
         // Step 7.
         {
             let nurl = &load_data.url;
@@ -2026,12 +2034,12 @@ impl ScriptThread {
                     doc.find_iframe(pipeline_id)
                 });
                 if let Some(iframe) = iframe.r() {
-                    iframe.navigate_or_reload_child_browsing_context(Some(load_data));
+                    iframe.navigate_or_reload_child_browsing_context(Some(load_data), replace);
                 }
             }
             None => {
                 self.constellation_chan
-                    .send(ConstellationMsg::LoadUrl(parent_pipeline_id, load_data))
+                    .send(ConstellationMsg::LoadUrl(parent_pipeline_id, load_data, replace))
                     .unwrap();
             }
         }
@@ -2169,6 +2177,33 @@ impl ScriptThread {
             let location = win.Location();
             location.Reload();
         }
+    }
+
+    pub fn enqueue_promise_job(job: EnqueuedPromiseCallback, global: GlobalRef) {
+        SCRIPT_THREAD_ROOT.with(|root| {
+            let script_thread = unsafe { &*root.get().unwrap() };
+            script_thread.promise_job_queue.enqueue(job, global);
+        });
+    }
+
+    pub fn flush_promise_jobs(global: GlobalRef) {
+        SCRIPT_THREAD_ROOT.with(|root| {
+            let script_thread = unsafe { &*root.get().unwrap() };
+            let _ = script_thread.dom_manipulation_task_source.queue(box FlushPromiseJobs, global);
+        })
+    }
+
+    fn do_flush_promise_jobs(&self) {
+        self.promise_job_queue.flush_promise_jobs(|id| {
+            self.find_child_context(id).map(|context| GlobalRoot::Window(context.active_window()))
+        });
+    }
+}
+
+struct FlushPromiseJobs;
+impl Runnable for FlushPromiseJobs {
+    fn main_thread_handler(self: Box<FlushPromiseJobs>, script_thread: &ScriptThread) {
+        script_thread.do_flush_promise_jobs();
     }
 }
 

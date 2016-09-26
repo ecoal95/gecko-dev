@@ -375,38 +375,44 @@ PrimitiveInfo fetch_text_run_glyph(int index, out vec4 color, out vec4 uv_rect) 
 
 struct Image {
     PrimitiveInfo info;
-    vec4 st_rect;               // Location of the image texture in the texture atlas.
-    vec4 stretch_size_uvkind;   // Size of the actual image.
+    vec4 st_rect;                        // Location of the image texture in the texture atlas.
+    vec4 stretch_size_and_tile_spacing;  // Size of the actual image and amount of space between
+                                         //     tiled instances of this image.
+    vec4 uvkind;                         // Type of texture coordinates.
 };
 
 Image fetch_image(int index) {
     Image image;
 
-    int offset = index * 5;
+    int offset = index * 6;
 
     image.info = unpack_prim_info(offset);
     image.st_rect = data[offset + 3];
-    image.stretch_size_uvkind = data[offset + 4];
+    image.stretch_size_and_tile_spacing = data[offset + 4];
+    image.uvkind = data[offset + 5];
 
     return image;
 }
 
 struct ImageClip {
     PrimitiveInfo info;
-    vec4 st_rect;               // Location of the image texture in the texture atlas.
-    vec4 stretch_size_uvkind;   // Size of the actual image.
+    vec4 st_rect;                        // Location of the image texture in the texture atlas.
+    vec4 stretch_size_and_tile_spacing;  // Size of the actual image and amount of space between
+                                         //     tiled instances of this image.
+    vec4 uvkind;                         // Type of texture coordinates.
     Clip clip;
 };
 
 ImageClip fetch_image_clip(int index) {
     ImageClip image;
 
-    int offset = index * 14;
+    int offset = index * 15;
 
     image.info = unpack_prim_info(offset);
     image.st_rect = data[offset + 3];
-    image.stretch_size_uvkind = data[offset + 4];
-    image.clip = unpack_clip(offset + 5);
+    image.stretch_size_and_tile_spacing = data[offset + 4];
+    image.uvkind = data[offset + 5];
+    image.clip = unpack_clip(offset + 6);
 
     return image;
 }
@@ -508,39 +514,31 @@ AngleGradient fetch_angle_gradient(int index) {
 }
 
 struct Blend {
-    vec4 target_rect;
-    vec4 src_rect;
-    vec4 opacity;
+    vec4 src_id_target_id_opacity;
 };
 
 Blend fetch_blend(int index) {
     Blend blend;
 
-    int offset = index * 3;
+    int offset = index * 1;
 
-    blend.target_rect = data[offset + 0];
-    blend.src_rect = data[offset + 1];
-    blend.opacity = data[offset + 2];
+    blend.src_id_target_id_opacity = data[offset + 0];
 
     return blend;
 }
 
 struct Composite {
-    vec4 src0;
-    vec4 src1;
-    vec4 target_rect;
+    vec4 src0_src1_target_id;
     vec4 info_amount;
 };
 
 Composite fetch_composite(int index) {
     Composite composite;
 
-    int offset = index * 4;
+    int offset = index * 2;
 
-    composite.src0 = data[offset + 0];
-    composite.src1 = data[offset + 1];
-    composite.target_rect = data[offset + 2];
-    composite.info_amount = data[offset + 3];
+    composite.src0_src1_target_id = data[offset + 0];
+    composite.info_amount = data[offset + 1];
 
     return composite;
 }

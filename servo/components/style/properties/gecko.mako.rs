@@ -27,9 +27,9 @@ use gecko_bindings::bindings::{Gecko_FontFamilyList_Clear, Gecko_InitializeImage
 use gecko_bindings::bindings::ServoComputedValuesBorrowedOrNull;
 use gecko_bindings::structs;
 use gecko_bindings::sugar::ns_style_coord::{CoordDataValue, CoordData, CoordDataMut};
-use gecko_values::{StyleCoordHelpers, GeckoStyleCoordConvertible, convert_nscolor_to_rgba};
-use gecko_values::convert_rgba_to_nscolor;
-use gecko_values::round_border_to_device_pixels;
+use gecko::values::{StyleCoordHelpers, GeckoStyleCoordConvertible, convert_nscolor_to_rgba};
+use gecko::values::convert_rgba_to_nscolor;
+use gecko::values::round_border_to_device_pixels;
 use logical_geometry::WritingMode;
 use properties::CascadePropertyFn;
 use properties::longhands;
@@ -1011,14 +1011,20 @@ fn static_assert() {
         use gecko_bindings::structs::nsStyleImageLayers_Repeat;
         use gecko_bindings::structs::NS_STYLE_IMAGELAYER_REPEAT_REPEAT;
         use gecko_bindings::structs::NS_STYLE_IMAGELAYER_REPEAT_NO_REPEAT;
+        use gecko_bindings::structs::NS_STYLE_IMAGELAYER_REPEAT_SPACE;
+        use gecko_bindings::structs::NS_STYLE_IMAGELAYER_REPEAT_ROUND;
 
         let (repeat_x, repeat_y) = match servo {
           T::repeat_x => (NS_STYLE_IMAGELAYER_REPEAT_REPEAT,
                           NS_STYLE_IMAGELAYER_REPEAT_NO_REPEAT),
           T::repeat_y => (NS_STYLE_IMAGELAYER_REPEAT_NO_REPEAT,
                           NS_STYLE_IMAGELAYER_REPEAT_REPEAT),
-          T::repeat => (NS_STYLE_IMAGELAYER_REPEAT_REPEAT,
-                        NS_STYLE_IMAGELAYER_REPEAT_REPEAT),
+          T::repeat  => (NS_STYLE_IMAGELAYER_REPEAT_REPEAT,
+                         NS_STYLE_IMAGELAYER_REPEAT_REPEAT),
+          T::space => (NS_STYLE_IMAGELAYER_REPEAT_SPACE,
+                       NS_STYLE_IMAGELAYER_REPEAT_SPACE),
+          T::round => (NS_STYLE_IMAGELAYER_REPEAT_ROUND,
+                       NS_STYLE_IMAGELAYER_REPEAT_ROUND),
           T::no_repeat => (NS_STYLE_IMAGELAYER_REPEAT_NO_REPEAT,
                            NS_STYLE_IMAGELAYER_REPEAT_NO_REPEAT),
         };
@@ -1616,8 +1622,8 @@ clip-path
         use gecko_bindings::structs::StyleClipPathGeometryBox;
         use gecko_bindings::structs::{StyleBasicShape, StyleBasicShapeType, StyleShapeSourceType};
         use gecko_bindings::structs::{StyleClipPath, StyleFillRule};
-        use gecko_conversions::basic_shape::set_corners_from_radius;
-        use gecko_values::GeckoStyleCoordConvertible;
+        use gecko::conversions::basic_shape::set_corners_from_radius;
+        use gecko::values::GeckoStyleCoordConvertible;
         use values::computed::basic_shape::*;
         let ref mut clip_path = self.gecko.mClipPath;
         // clean up existing struct
@@ -1640,7 +1646,7 @@ clip-path
                 fn init_shape(clip_path: &mut StyleClipPath, ty: StyleBasicShapeType) -> &mut StyleBasicShape {
                     unsafe {
                         // We have to be very careful to avoid a copy here!
-                        let ref mut union = clip_path.StyleShapeSource_nsStyleStruct_h_unnamed_26;
+                        let ref mut union = clip_path.__bindgen_anon_1;
                         let mut shape: &mut *mut StyleBasicShape = union.mBasicShape.as_mut();
                         *shape = Gecko_NewBasicShape(ty);
                         &mut **shape
@@ -1738,7 +1744,7 @@ clip-path
                 } else {
                     Some(clip_path.mReferenceBox.into())
                 };
-                let union = clip_path.StyleShapeSource_nsStyleStruct_h_unnamed_26;
+                let union = clip_path.__bindgen_anon_1;
                 let shape = unsafe { &**union.mBasicShape.as_ref() };
                 ShapeSource::Shape(shape.into(), reference)
             }

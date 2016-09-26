@@ -5,25 +5,8 @@
 #![allow(unsafe_code)]
 
 use app_units::Au;
-use data::{NUM_THREADS, PerDocumentStyleData};
 use env_logger;
 use euclid::Size2D;
-use gecko_bindings::bindings::{RawGeckoElementBorrowed, RawGeckoNodeBorrowed};
-use gecko_bindings::bindings::{RawServoStyleSetBorrowed, RawServoStyleSetOwned, ServoNodeDataOwned};
-use gecko_bindings::bindings::{RawServoStyleSetBorrowedMut, RawGeckoDocumentBorrowed};
-use gecko_bindings::bindings::{RawServoStyleSheetBorrowed, ServoComputedValuesBorrowed};
-use gecko_bindings::bindings::{RawServoStyleSheetStrong, ServoComputedValuesStrong};
-use gecko_bindings::bindings::{ServoComputedValuesBorrowedOrNull, ServoDeclarationBlock};
-use gecko_bindings::bindings::{ServoDeclarationBlockBorrowed, ServoDeclarationBlockStrong};
-use gecko_bindings::bindings::{ThreadSafePrincipalHolder, ThreadSafeURIHolder, nsHTMLCSSStyleSheet};
-use gecko_bindings::ptr::{GeckoArcPrincipal, GeckoArcURI};
-use gecko_bindings::structs::{SheetParsingMode, nsIAtom};
-use gecko_bindings::structs::ServoElementSnapshot;
-use gecko_bindings::structs::nsRestyleHint;
-use gecko_bindings::sugar::ownership::{FFIArcHelpers, HasArcFFI, HasBoxFFI};
-use gecko_bindings::sugar::ownership::{HasFFI, HasSimpleFFI, Strong};
-use gecko_string_cache::Atom;
-use snapshot::GeckoElementSnapshot;
 use std::mem::transmute;
 use std::ptr;
 use std::slice;
@@ -32,19 +15,38 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use style::arc_ptr_eq;
 use style::context::{LocalStyleContextCreationInfo, ReflowGoal, SharedStyleContext};
-use style::dom::{TDocument, TElement, TNode};
+use style::dom::{NodeInfo, TDocument, TElement, TNode};
 use style::error_reporting::StdoutErrorReporter;
-use style::gecko_selector_impl::{GeckoSelectorImpl, PseudoElement};
+use style::gecko::data::{NUM_THREADS, PerDocumentStyleData};
+use style::gecko::selector_impl::{GeckoSelectorImpl, PseudoElement};
+use style::gecko::snapshot::GeckoElementSnapshot;
+use style::gecko::traversal::RecalcStyleOnly;
+use style::gecko::wrapper::{DUMMY_BASE_URL, GeckoDeclarationBlock, GeckoDocument};
+use style::gecko::wrapper::{GeckoElement, GeckoNode};
+use style::gecko_bindings::bindings::{RawGeckoElementBorrowed, RawGeckoNodeBorrowed};
+use style::gecko_bindings::bindings::{RawServoStyleSetBorrowed, RawServoStyleSetOwned};
+use style::gecko_bindings::bindings::{RawServoStyleSetBorrowedMut, RawGeckoDocumentBorrowed};
+use style::gecko_bindings::bindings::{RawServoStyleSheetBorrowed, ServoComputedValuesBorrowed};
+use style::gecko_bindings::bindings::{RawServoStyleSheetStrong, ServoComputedValuesStrong};
+use style::gecko_bindings::bindings::{ServoDeclarationBlockBorrowed, ServoDeclarationBlockStrong};
+use style::gecko_bindings::bindings::{ThreadSafePrincipalHolder, ThreadSafeURIHolder};
+use style::gecko_bindings::bindings::{nsHTMLCSSStyleSheet, ServoComputedValuesBorrowedOrNull};
+use style::gecko_bindings::ptr::{GeckoArcPrincipal, GeckoArcURI};
+use style::gecko_bindings::structs::{SheetParsingMode, nsIAtom};
+use style::gecko_bindings::structs::ServoElementSnapshot;
+use style::gecko_bindings::structs::nsRestyleHint;
+use style::gecko_bindings::sugar::ownership::{FFIArcHelpers, HasArcFFI, HasBoxFFI};
+use style::gecko_bindings::sugar::ownership::{HasSimpleFFI, Strong};
 use style::parallel;
 use style::parser::ParserContextExtraData;
-use style::properties::{ComputedValues, PropertyDeclarationBlock, parse_one_declaration};
+use style::properties::{ComputedValues, parse_one_declaration};
 use style::selector_impl::PseudoElementCascadeType;
 use style::sequential;
+use style::string_cache::Atom;
 use style::stylesheets::{Origin, Stylesheet};
 use style::timer::Timer;
-use traversal::RecalcStyleOnly;
 use url::Url;
-use wrapper::{DUMMY_BASE_URL, GeckoDocument, GeckoElement, GeckoNode, NonOpaqueStyleData};
+
 
 /*
  * For Gecko->Servo function calls, we need to redeclare the same signature that was declared in
@@ -121,23 +123,14 @@ pub extern "C" fn Servo_RestyleSubtree(node: RawGeckoNodeBorrowed,
 }
 
 #[no_mangle]
-pub extern "C" fn Servo_RestyleDocument(doc: RawGeckoDocumentBorrowed, raw_data: RawServoStyleSetBorrowedMut) -> () {
-    let document = GeckoDocument(doc);
-    let node = match document.root_node() {
-        Some(x) => x,
-        None => return,
-    };
-    restyle_subtree(node, raw_data);
-}
-
-#[no_mangle]
 pub extern "C" fn Servo_StyleWorkerThreadCount() -> u32 {
     *NUM_THREADS as u32
 }
 
 #[no_mangle]
-pub extern "C" fn Servo_NodeData_Drop(data: ServoNodeDataOwned) -> () {
-    let _ = data.into_box::<NonOpaqueStyleData>();
+pub extern "C" fn Servo_Node_ClearNodeData(node: RawGeckoNodeBorrowed) -> () {
+    let node = GeckoNode(node);
+    node.clear_data();
 }
 
 #[no_mangle]
@@ -345,23 +338,6 @@ pub extern "C" fn Servo_StyleSet_Init() -> RawServoStyleSetOwned {
 pub extern "C" fn Servo_StyleSet_Drop(data: RawServoStyleSetOwned) -> () {
     let _ = data.into_box::<PerDocumentStyleData>();
 }
-
-pub struct GeckoDeclarationBlock {
-    pub declarations: Option<Arc<PropertyDeclarationBlock>>,
-    // XXX The following two fields are made atomic to work around the
-    // ownership system so that they can be changed inside a shared
-    // instance. It wouldn't provide safety as Rust usually promises,
-    // but it is fine as far as we only access them in a single thread.
-    // If we need to access them in different threads, we would need
-    // to redesign how it works with MiscContainer in Gecko side.
-    pub cache: AtomicPtr<nsHTMLCSSStyleSheet>,
-    pub immutable: AtomicBool,
-}
-
-unsafe impl HasFFI for GeckoDeclarationBlock {
-    type FFIType = ServoDeclarationBlock;
-}
-unsafe impl HasArcFFI for GeckoDeclarationBlock {}
 
 #[no_mangle]
 pub extern "C" fn Servo_ParseStyleAttribute(bytes: *const u8, length: u32,

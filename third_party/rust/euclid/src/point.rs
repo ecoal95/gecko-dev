@@ -8,11 +8,11 @@
 // except according to those terms.
 
 use super::UnknownUnit;
+use approxeq::ApproxEq;
 use length::Length;
 use scale_factor::ScaleFactor;
 use size::TypedSize2D;
 use num::*;
-
 use num_traits::{Float, NumCast};
 use std::fmt;
 use std::ops::{Add, Neg, Mul, Sub, Div};
@@ -29,7 +29,7 @@ define_matrix! {
 
 /// Default 2d point type with no unit.
 ///
-/// Point2D provides the same methods as TypedPoint2D.
+/// `Point2D` provides the same methods as `TypedPoint2D`.
 pub type Point2D<T> = TypedPoint2D<T, UnknownUnit>;
 
 impl<T: Copy + Zero, U> TypedPoint2D<T, U> {
@@ -261,6 +261,23 @@ impl<T: NumCast + Copy, U> TypedPoint2D<T, U> {
     }
 }
 
+impl<T: Copy+ApproxEq<T>, U> ApproxEq<TypedPoint2D<T, U>> for TypedPoint2D<T, U> {
+    #[inline]
+    fn approx_epsilon() -> Self {
+        TypedPoint2D::new(T::approx_epsilon(), T::approx_epsilon())
+    }
+
+    #[inline]
+    fn approx_eq(&self, other: &Self) -> bool {
+        self.x.approx_eq(&other.x) && self.y.approx_eq(&other.y)
+    }
+
+    #[inline]
+    fn approx_eq_eps(&self, other: &Self, eps: &Self) -> bool {
+        self.x.approx_eq_eps(&other.x, &eps.x) && self.y.approx_eq_eps(&other.y, &eps.y)
+    }
+}
+
 define_matrix! {
     /// A 3d Point tagged with a unit.
     #[derive(RustcDecodable, RustcEncodable)]
@@ -273,7 +290,7 @@ define_matrix! {
 
 /// Default 3d point type with no unit.
 ///
-/// Point3D provides the same methods as TypedPoint3D.
+/// `Point3D` provides the same methods as `TypedPoint3D`.
 pub type Point3D<T> = TypedPoint3D<T, UnknownUnit>;
 
 impl<T: Copy + Zero, U> TypedPoint3D<T, U> {
@@ -475,6 +492,27 @@ impl<T: NumCast + Copy, U> TypedPoint3D<T, U> {
     }
 }
 
+impl<T: Copy+ApproxEq<T>, U> ApproxEq<TypedPoint3D<T, U>> for TypedPoint3D<T, U> {
+    #[inline]
+    fn approx_epsilon() -> Self {
+        TypedPoint3D::new(T::approx_epsilon(), T::approx_epsilon(), T::approx_epsilon())
+    }
+
+    #[inline]
+    fn approx_eq(&self, other: &Self) -> bool {
+        self.x.approx_eq(&other.x)
+            && self.y.approx_eq(&other.y)
+            && self.z.approx_eq(&other.z)
+    }
+
+    #[inline]
+    fn approx_eq_eps(&self, other: &Self, eps: &Self) -> bool {
+        self.x.approx_eq_eps(&other.x, &eps.x)
+            && self.y.approx_eq_eps(&other.y, &eps.y)
+            && self.z.approx_eq_eps(&other.z, &eps.z)
+    }
+}
+
 define_matrix! {
     /// A 4d Point tagged with a unit.
     #[derive(RustcDecodable, RustcEncodable)]
@@ -488,7 +526,7 @@ define_matrix! {
 
 /// Default 4d point with no unit.
 ///
-/// Point4D provides the same methods as TypedPoint4D.
+/// `Point4D` provides the same methods as `TypedPoint4D`.
 pub type Point4D<T> = TypedPoint4D<T, UnknownUnit>;
 
 impl<T: Copy + Zero, U> TypedPoint4D<T, U> {
@@ -690,6 +728,23 @@ impl<T: NumCast + Copy, U> TypedPoint4D<T, U> {
     /// conversion behavior.
     pub fn to_i64(&self) -> TypedPoint4D<i64, U> {
         self.cast().unwrap()
+    }
+}
+
+impl<T: ApproxEq<T>, U> ApproxEq<T> for TypedPoint4D<T, U> {
+    fn approx_epsilon() -> T {
+        T::approx_epsilon()
+    }
+
+    fn approx_eq_eps(&self, other: &Self, approx_epsilon: &T) -> bool {
+        self.x.approx_eq_eps(&other.x, approx_epsilon)
+        && self.y.approx_eq_eps(&other.y, approx_epsilon)
+        && self.z.approx_eq_eps(&other.z, approx_epsilon)
+        && self.w.approx_eq_eps(&other.w, approx_epsilon)
+    }
+
+    fn approx_eq(&self, other: &Self) -> bool {
+        self.approx_eq_eps(&other, &Self::approx_epsilon())
     }
 }
 

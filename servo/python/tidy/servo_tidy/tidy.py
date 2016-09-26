@@ -69,7 +69,6 @@ WEBIDL_STANDARDS = [
     "//w3c.github.io",
     "//heycam.github.io/webidl",
     "//webbluetoothcg.github.io/web-bluetooth/",
-    "//slightlyoff.github.io/ServiceWorker/spec/service_worker/",
     # Not a URL
     "// This interface is entirely internal to Servo, and should not be" +
     " accessible to\n// web pages."
@@ -483,6 +482,7 @@ def check_rust(file_name, lines):
             (r"\{[A-Za-z0-9_]+\};", "use statement contains braces for single import",
                 lambda match, line: line.startswith('use ')),
             (r"^\s*else {", "else braces should be on the same line", no_filter),
+            (r"[^$ ]\([ \t]", "extra space after (", no_filter),
         ]
 
         for pattern, message, filter_func in regex_rules:

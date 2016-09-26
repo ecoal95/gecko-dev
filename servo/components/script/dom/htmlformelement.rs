@@ -593,7 +593,7 @@ impl HTMLFormElement {
                 "file" | "textarea" => (), // TODO
                 _ => {
                     datum.name = clean_crlf(&datum.name);
-                    datum.value = FormDatumValue::String(clean_crlf( match datum.value {
+                    datum.value = FormDatumValue::String(clean_crlf(match datum.value {
                         FormDatumValue::String(ref s) => s,
                         FormDatumValue::File(_) => unreachable!()
                     }));
@@ -902,7 +902,7 @@ impl Runnable for PlannedNavigation {
     fn handler(self: Box<PlannedNavigation>) {
         if self.generation_id == self.form.root().generation_id.get() {
             let script_chan = self.script_chan.clone();
-            script_chan.send(MainThreadScriptMsg::Navigate(self.pipeline_id, self.load_data)).unwrap();
+            script_chan.send(MainThreadScriptMsg::Navigate(self.pipeline_id, self.load_data, false)).unwrap();
         }
     }
 }

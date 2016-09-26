@@ -95,9 +95,10 @@ use js::jsapi::JS_GetRuntime;
 use msg::constellation_msg::{ALT, CONTROL, SHIFT, SUPER};
 use msg::constellation_msg::{Key, KeyModifiers, KeyState};
 use msg::constellation_msg::{PipelineId, ReferrerPolicy};
-use net_traits::{AsyncResponseTarget, IpcSend, PendingAsyncLoad};
+use net_traits::{AsyncResponseTarget, FetchResponseMsg, IpcSend, PendingAsyncLoad};
 use net_traits::CookieSource::NonHTTP;
 use net_traits::CoreResourceMsg::{GetCookiesForUrl, SetCookiesForUrl};
+use net_traits::request::RequestInit;
 use net_traits::response::HttpsState;
 use num_traits::ToPrimitive;
 use origin::Origin;
@@ -1423,14 +1424,22 @@ impl Document {
         loader.add_blocking_load(load)
     }
 
-    pub fn prepare_async_load(&self, load: LoadType) -> PendingAsyncLoad {
+    pub fn prepare_async_load(&self, load: LoadType, referrer_policy: Option<ReferrerPolicy>) -> PendingAsyncLoad {
         let mut loader = self.loader.borrow_mut();
-        loader.prepare_async_load(load, self)
+        loader.prepare_async_load(load, self, referrer_policy)
     }
 
-    pub fn load_async(&self, load: LoadType, listener: AsyncResponseTarget) {
+    pub fn load_async(&self, load: LoadType, listener: AsyncResponseTarget, referrer_policy: Option<ReferrerPolicy>) {
         let mut loader = self.loader.borrow_mut();
-        loader.load_async(load, listener, self);
+        loader.load_async(load, listener, self, referrer_policy);
+    }
+
+    pub fn fetch_async(&self, load: LoadType,
+                       request: RequestInit,
+                       fetch_target: IpcSender<FetchResponseMsg>,
+                       referrer_policy: Option<ReferrerPolicy>) {
+        let mut loader = self.loader.borrow_mut();
+        loader.fetch_async(load, request, fetch_target, self, referrer_policy);
     }
 
     pub fn finish_load(&self, load: LoadType) {
@@ -1520,7 +1529,7 @@ impl Document {
     }
 
     /// https://html.spec.whatwg.org/multipage/#the-end step 5 and the latter parts of
-    /// https://html.spec.whatwg.org/multipage/#prepare-a-script 15.d and 15.e.
+    /// https://html.spec.whatwg.org/multipage/#prepare-a-script 20.d and 20.e.
     pub fn process_asap_scripts(&self) {
         // Execute the first in-order asap-executed script if it's ready, repeat as required.
         // Re-borrowing the list for each step because it can also be borrowed under execute.
@@ -1725,17 +1734,6 @@ impl Document {
             // Default to DOM standard behaviour
             Origin::opaque_identifier()
         };
-
-        // TODO: we currently default to Some(NoReferrer) instead of None (i.e. unset)
-        // for an important reason. Many of the methods by which a referrer policy is communicated
-        // are currently unimplemented, and so in such cases we may be ignoring the desired policy.
-        // If the default were left unset, then in Step 7 of the Fetch algorithm we adopt
-        // no-referrer-when-downgrade. However, since we are potentially ignoring a stricter
-        // referrer policy, this might be passing too much info. Hence, we default to the
-        // strictest policy, which is no-referrer.
-        // Once other delivery methods are implemented, make the unset case really
-        // unset (i.e. None).
-        let referrer_policy = referrer_policy.or(Some(ReferrerPolicy::NoReferrer));
 
         Document {
             node: Node::new_document_node(),
