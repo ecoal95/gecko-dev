@@ -12,52 +12,12 @@
 all-tests:
     - cppunit
     - crashtest
-    - external-media-tests
-    - firefox-ui-functional-local
-    - firefox-ui-functional-remote
-    - gtest
-    - jittests
-    - jsreftest
-    - marionette
-    - mochitest
-    - mochitest-a11y
-    - mochitest-browser-chrome
-    - mochitest-chrome
-    - mochitest-clipboard
-    - mochitest-devtools-chrome
-    - mochitest-gpu
-    - mochitest-jetpack
-    - mochitest-media
-    - mochitest-webgl
-    - reftest
-    - reftest-no-accel
     - reftest-stylo
-    - web-platform-tests
-    - web-platform-tests-reftests
-    - xpcshell
 
 asan-tests:
     - cppunit
     - crashtest
-    - firefox-ui-functional-local
-    - firefox-ui-functional-remote
-    - gtest
-    - jittests
-    - jsreftest
-    - marionette
-    - mochitest
-    - mochitest-browser-chrome
-    - mochitest-chrome
-    - mochitest-clipboard
-    - mochitest-devtools-chrome
-    - mochitest-gpu
-    - mochitest-jetpack
-    - mochitest-media
-    - mochitest-webgl
-    - reftest
-    - reftest-no-accel
     - reftest-stylo
-    - xpcshell
 
 ccov-code-coverage-tests:
     - mochitest-browser-chrome
