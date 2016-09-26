@@ -32,7 +32,11 @@ class TaskGraph(object):
         # this dictionary may be keyed by label or by taskid, so let's just call it 'key'
         tasks = {}
         for key in self.graph.visit_postorder():
-            task = self.tasks[key]
+            try:
+                task = self.tasks[key]
+            except IndexError:
+                # skip tasks that won't work due to missing builders
+                continue
             implementation = task.__class__.__module__ + ":" + task.__class__.__name__
             task_json = {
                 'label': task.label,
