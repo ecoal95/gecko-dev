@@ -18,9 +18,9 @@ fi
 
 echo "invoking |rm -rf servo && rm -rf third_party/rust| in 3 seconds. Press ctrl-c to abort..."
 sleep 3
-echo "rm -rf servo && rm -rf third-party/rust"
+echo "rm -rf servo && rm -rf third_party/rust"
 rm -rf servo && rm -rf third_party/rust
-mkdir third-party/rust
+mkdir third_party/rust
 
 export SERVO_REV=`git ls-remote https://github.com/servo/servo HEAD | awk '{print $1}'`
 echo "Fetching Servo rev $SERVO_REV..."
