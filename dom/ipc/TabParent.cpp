@@ -49,6 +49,7 @@
 #include "nsFocusManager.h"
 #include "nsFrameLoader.h"
 #include "nsIBaseWindow.h"
+#include "nsIBrowser.h"
 #include "nsIContent.h"
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeOwner.h"
@@ -400,6 +401,17 @@ TabParent::SetOwnerElement(Element* aElement)
     Unused << SendSetUseGlobalHistory(useGlobalHistory);
   }
 
+#if defined(XP_WIN) && defined(ACCESSIBILITY)
+  if (!mIsDestroyed) {
+    uintptr_t newWindowHandle = 0;
+    if (nsCOMPtr<nsIWidget> widget = GetWidget()) {
+      newWindowHandle =
+        reinterpret_cast<uintptr_t>(widget->GetNativeData(NS_NATIVE_WINDOW));
+    }
+    Unused << SendUpdateNativeWindowHandle(newWindowHandle);
+  }
+#endif
+
   AddWindowListeners();
   TryCacheDPIAndScale();
 }
@@ -562,6 +574,15 @@ TabParent::Attach(nsFrameLoader* aFrameLoader)
 }
 
 bool
+TabParent::RecvEnsureLayersConnected()
+{
+  if (RenderFrameParent* frame = GetRenderFrame()) {
+    frame->EnsureLayersConnected();
+  }
+  return true;
+}
+
+bool
 TabParent::Recv__delete__()
 {
   if (XRE_IsParentProcess()) {
@@ -683,6 +704,21 @@ TabParent::RecvSizeShellTo(const uint32_t& aFlags, const int32_t& aWidth, const 
   NS_ENSURE_TRUE(xulWin, true);
   xulWin->SizeShellToWithLimit(width, height, aShellItemWidth, aShellItemHeight);
 
+  return true;
+}
+
+bool
+TabParent::RecvDropLinks(nsTArray<nsString>&& aLinks)
+{
+  nsCOMPtr<nsIBrowser> browser = do_QueryInterface(mFrameElement);
+  if (browser) {
+    UniquePtr<const char16_t*[]> links;
+    links = MakeUnique<const char16_t*[]>(aLinks.Length());
+    for (uint32_t i = 0; i < aLinks.Length(); i++) {
+      links[i] = aLinks[i].get();
+    }
+    browser->DropLinks(aLinks.Length(), links.get());
+  }
   return true;
 }
 
@@ -1646,6 +1682,21 @@ bool TabParent::SendRealTouchEvent(WidgetTouchEvent& event)
   return (event.mMessage == eTouchMove) ?
     PBrowserParent::SendRealTouchMoveEvent(event, guid, blockId, apzResponse) :
     PBrowserParent::SendRealTouchEvent(event, guid, blockId, apzResponse);
+}
+
+bool
+TabParent::SendHandleTap(TapType aType,
+                         const LayoutDevicePoint& aPoint,
+                         Modifiers aModifiers,
+                         const ScrollableLayerGuid& aGuid,
+                         uint64_t aInputBlockId)
+{
+  if (mIsDestroyed) {
+    return false;
+  }
+  LayoutDeviceIntPoint offset = GetChildProcessOffset();
+  return PBrowserParent::SendHandleTap(aType, aPoint + offset, aModifiers, aGuid,
+      aInputBlockId);
 }
 
 bool
@@ -2953,16 +3004,6 @@ private:
     return NS_OK;
   }
 };
-
-/* static */ void
-TabParent::ObserveLayerUpdate(uint64_t aLayersId, uint64_t aEpoch, bool aActive)
-{
-  MOZ_ASSERT(!NS_IsMainThread());
-
-  RefPtr<LayerTreeUpdateRunnable> runnable =
-    new LayerTreeUpdateRunnable(aLayersId, aEpoch, aActive);
-  NS_DispatchToMainThread(runnable);
-}
 
 void
 TabParent::LayerTreeUpdate(uint64_t aEpoch, bool aActive)

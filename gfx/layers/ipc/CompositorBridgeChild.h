@@ -64,6 +64,7 @@ public:
    * Initialize the singleton compositor bridge for a content process.
    */
   static bool InitForContent(Endpoint<PCompositorBridgeChild>&& aEndpoint);
+  static bool ReinitForContent(Endpoint<PCompositorBridgeChild>&& aEndpoint);
 
   static RefPtr<CompositorBridgeChild> CreateRemote(
     const uint64_t& aProcessToken,
@@ -248,6 +249,10 @@ private:
 
   virtual bool
   RecvRemotePaintIsReady() override;
+
+  bool RecvObserveLayerUpdate(const uint64_t& aLayersId,
+                              const uint64_t& aEpoch,
+                              const bool& aActive) override;
 
   // Class used to store the shared FrameMetrics, mutex, and APZCId  in a hash table
   class SharedFrameMetricsData {

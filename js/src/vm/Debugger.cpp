@@ -1212,7 +1212,7 @@ ToNativeDebuggerObject(JSContext* cx, MutableHandleObject obj)
     Value owner = ndobj->getReservedSlot(JSSLOT_DEBUGOBJECT_OWNER);
     if (owner.isUndefined()) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                             JSMSG_DEBUG_OBJECT_PROTO);
+                             JSMSG_DEBUG_PROTO, "Debugger.Object", "Debugger.Object");
         return nullptr;
     }
 
@@ -1229,7 +1229,7 @@ Debugger::unwrapDebuggeeObject(JSContext* cx, MutableHandleObject obj)
     Value owner = ndobj->getReservedSlot(JSSLOT_DEBUGOBJECT_OWNER);
     if (&owner.toObject() != object) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                             JSMSG_DEBUG_OBJECT_WRONG_OWNER);
+                             JSMSG_DEBUG_WRONG_OWNER, "Debugger.Object");
         return false;
     }
 
@@ -4145,6 +4145,32 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
                 return false;
             }
 
+            Value owner = debuggerSource.toObject()
+                          .as<NativeObject>()
+                          .getReservedSlot(JSSLOT_DEBUGSOURCE_OWNER);
+
+            /*
+             * The given source must have an owner. Otherwise, it's a
+             * Debugger.Source.prototype, which would match no scripts, and is
+             * probably a mistake.
+             */
+            if (!owner.isObject()) {
+                JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
+                                     JSMSG_DEBUG_PROTO, "Debugger.Source", "Debugger.Source");
+                return false;
+            }
+
+            /*
+             * If it does have an owner, it should match the Debugger we're
+             * calling findScripts on. It would work fine even if it didn't,
+             * but mixing Debugger.Sources is probably a sign of confusion.
+             */
+            if (&owner.toObject() != debugger->object) {
+                JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
+                                     JSMSG_DEBUG_WRONG_OWNER, "Debugger.Source");
+                return false;
+            }
+
             hasSource = true;
             source = GetSourceReferent(&debuggerSource.toObject());
         }
@@ -4452,7 +4478,7 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
                 return;
         }
         if (hasSource && !(source.is<ScriptSourceObject*>() &&
-                           source.as<ScriptSourceObject*>() == script->sourceObject()))
+                           source.as<ScriptSourceObject*>()->source() == script->scriptSource()))
         {
             return;
         }
@@ -6784,7 +6810,7 @@ DebuggerSource_check(JSContext* cx, HandleValue thisv, const char* fnname)
 
     if (!GetSourceReferentRawObject(thisobj)) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
-                             "Debugger.Frame", fnname, "prototype object");
+                             "Debugger.Source", fnname, "prototype object");
         return nullptr;
     }
 
@@ -7149,31 +7175,6 @@ DebuggerSource_getSourceMapURL(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-static bool
-DebuggerSource_getCanonicalId(JSContext* cx, unsigned argc, Value* vp)
-{
-    THIS_DEBUGSOURCE_SOURCE(cx, argc, vp, "(get sourceMapURL)", args, obj, sourceObject);
-
-    ScriptSource* ss = sourceObject->source();
-    MOZ_ASSERT(ss);
-
-    static_assert(!mozilla::IsBaseOf<gc::Cell, ScriptSource>::value,
-                  "We rely on ScriptSource* pointers to be stable, and not move in memory. "
-                  "Currently, this holds true because ScriptSource is not managed by the GC. If "
-                  "that changes, it doesn't necessarily mean that it will start moving, but we "
-                  "will need a new assertion here. If we do start moving ScriptSources in memory, "
-                  "then DebuggerSource_getCanonicalId will need to be reworked!");
-    auto id = uintptr_t(ss);
-
-    // IEEE 754 doubles can precisely store integers of up 53 bits. On 32 bit
-    // platforms, pointers trivially fit. On 64 bit platforms, pointers only use
-    // 48 bits so we are still good.
-    MOZ_ASSERT(Value::isNumberRepresentable(id));
-
-    args.rval().set(NumberValue(id));
-    return true;
-}
-
 static const JSPropertySpec DebuggerSource_properties[] = {
     JS_PSG("text", DebuggerSource_getText, 0),
     JS_PSG("url", DebuggerSource_getURL, 0),
@@ -7184,7 +7185,6 @@ static const JSPropertySpec DebuggerSource_properties[] = {
     JS_PSG("introductionType", DebuggerSource_getIntroductionType, 0),
     JS_PSG("elementAttributeName", DebuggerSource_getElementProperty, 0),
     JS_PSGS("sourceMapURL", DebuggerSource_getSourceMapURL, DebuggerSource_setSourceMapURL, 0),
-    JS_PSG("canonicalId", DebuggerSource_getCanonicalId, 0),
     JS_PS_END
 };
 

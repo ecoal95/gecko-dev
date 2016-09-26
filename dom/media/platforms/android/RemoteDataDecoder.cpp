@@ -382,8 +382,9 @@ private:
       aFormat->GetInteger(NS_LITERAL_STRING("channel-count"), &mOutputChannels);
       AudioConfig::ChannelLayout layout(mOutputChannels);
       if (!layout.IsValid()) {
-        mDecoderCallback->Error(MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR,
-                                                 __func__));
+        mDecoderCallback->Error(MediaResult(
+          NS_ERROR_DOM_MEDIA_FATAL_ERR,
+          RESULT_DETAIL("Invalid channel layout:%d", mOutputChannels)));
         return;
       }
       aFormat->GetInteger(NS_LITERAL_STRING("sample-rate"), &mOutputSampleRate);
@@ -441,7 +442,7 @@ RemoteDataDecoder::Drain()
   NS_ENSURE_SUCCESS_VOID(rv);
   bufferInfo->Set(0, 0, -1, MediaCodec::BUFFER_FLAG_END_OF_STREAM);
 
-  mJavaDecoder->Input(nullptr, bufferInfo);
+  mJavaDecoder->Input(nullptr, bufferInfo, nullptr);
 }
 
 void
@@ -482,7 +483,7 @@ RemoteDataDecoder::Input(MediaRawData* aSample)
   }
   bufferInfo->Set(0, aSample->Size(), aSample->mTime, 0);
 
-  mJavaDecoder->Input(bytes, bufferInfo);
+  mJavaDecoder->Input(bytes, bufferInfo, GetCryptoInfoFromSample(aSample));
 }
 
 } // mozilla

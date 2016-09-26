@@ -174,6 +174,12 @@ public:
   // Seeks to the decoder to aTarget asynchronously.
   RefPtr<MediaDecoder::SeekPromise> InvokeSeek(SeekTarget aTarget);
 
+  void DispatchSetPlaybackRate(double aPlaybackRate)
+  {
+    OwnerThread()->DispatchStateChange(NewRunnableMethod<double>(
+      this, &MediaDecoderStateMachine::SetPlaybackRate, aPlaybackRate));
+  }
+
   // Set/Unset dormant state.
   void DispatchSetDormant(bool aDormant);
 
@@ -292,11 +298,6 @@ private:
   // the decode monitor held.
   void UpdatePlaybackPosition(int64_t aTime);
 
-  // Causes the state machine to switch to buffering state, and to
-  // immediately stop playback and buffer downloaded data. Called on
-  // the state machine thread.
-  void StartBuffering();
-
   bool CanPlayThrough();
 
   MediaStatistics GetStatistics();
@@ -372,7 +373,7 @@ protected:
   void AudioAudibleChanged(bool aAudible);
 
   void VolumeChanged();
-  void LogicalPlaybackRateChanged();
+  void SetPlaybackRate(double aPlaybackRate);
   void PreservesPitchChanged();
 
   MediaQueue<MediaData>& AudioQueue() { return mAudioQueue; }
@@ -386,11 +387,13 @@ protected:
   // decode more.
   bool NeedToDecodeVideo();
 
-  // Returns true if we've got less than aAudioUsecs microseconds of decoded
-  // and playable data. The decoder monitor must be held.
-  //
+  // True if we are low in decoded audio/video data.
   // May not be invoked when mReader->UseBufferingHeuristics() is false.
-  bool HasLowDecodedData(int64_t aAudioUsecs);
+  bool HasLowDecodedData();
+
+  bool HasLowDecodedAudio();
+
+  bool HasLowDecodedVideo();
 
   bool OutOfDecodedAudio();
 
@@ -401,19 +404,15 @@ protected:
   }
 
 
-  // Returns true if we're running low on data which is not yet decoded.
-  // The decoder monitor must be held.
-  bool HasLowUndecodedData();
+  // Returns true if we're running low on buffered data.
+  bool HasLowBufferedData();
 
-  // Returns true if we have less than aUsecs of undecoded data available.
-  bool HasLowUndecodedData(int64_t aUsecs);
+  // Returns true if we have less than aUsecs of buffered data available.
+  bool HasLowBufferedData(int64_t aUsecs);
 
   // Returns true when there's decoded audio waiting to play.
   // The decoder monitor must be held.
   bool HasFutureAudio();
-
-  // Returns true if we recently exited "quick buffering" mode.
-  bool JustExitedQuickBuffering();
 
   // Recomputes mNextFrameStatus, possibly dispatching notifications to interested
   // parties.
@@ -474,9 +473,6 @@ protected:
 
   // The entry action of DECODER_STATE_DECODING_FIRSTFRAME.
   void DecodeFirstFrame();
-
-  // The entry action of DECODER_STATE_DECODING.
-  void StartDecoding();
 
   // Moves the decoder into the shutdown state, and dispatches an error
   // event to the media element. This begins shutting down the decoder.
@@ -550,12 +546,6 @@ protected:
 
   // Performs one "cycle" of the state machine.
   void RunStateMachine();
-  // Perform one cycle of the DECODING state.
-  void StepDecoding();
-  // Perform one cycle of the BUFFERING state.
-  void StepBuffering();
-  // Perform one cycle of the COMPLETED state.
-  void StepCompleted();
 
   bool IsStateMachineScheduled() const;
 
@@ -608,11 +598,6 @@ private:
   Watchable<State> mState;
 
   UniquePtr<StateObject> mStateObj;
-
-  // Time that buffering started. Used for buffering timeout and only
-  // accessed on the state machine thread. This is null while we're not
-  // buffering.
-  TimeStamp mBufferingStart;
 
   media::TimeUnit Duration() const { MOZ_ASSERT(OnTaskQueue()); return mDuration.Ref().ref(); }
 
@@ -682,9 +667,6 @@ private:
   // Playback rate. 1.0 : normal speed, 0.5 : two times slower.
   double mPlaybackRate;
 
-  // Time at which we started decoding. Synchronised via decoder monitor.
-  TimeStamp mDecodeStartTime;
-
   // The maximum number of second we spend buffering when we are short on
   // unbuffered data.
   uint32_t mBufferingWait;
@@ -712,10 +694,6 @@ private:
   // Note that we don't ever reset this threshold, it only ever grows as
   // we detect that the decode can't keep up with rendering.
   int64_t mAmpleAudioThresholdUsecs;
-
-  // If we're quick buffering, we'll remain in buffering mode while we have less than
-  // QUICK_BUFFERING_LOW_DATA_USECS of decoded data available.
-  int64_t mQuickBufferingLowDataThresholdUsecs;
 
   // At the start of decoding we want to "preroll" the decode until we've
   // got a few frames decoded before we consider whether decode is falling
@@ -819,13 +797,6 @@ private:
   // simplified.
   bool mNotifyMetadataBeforeFirstFrame;
 
-  // If this is true while we're in buffering mode, we can exit early,
-  // as it's likely we may be able to playback. This happens when we enter
-  // buffering mode soon after the decode starts, because the decode-ahead
-  // ran fast enough to exhaust all data while the download is starting up.
-  // Synchronised via decoder monitor.
-  bool mQuickBuffering;
-
   // True if we should not decode/preroll unnecessary samples, unless we're
   // played. "Prerolling" in this context refers to when we decode and
   // buffer decoded samples in advance of when they're needed for playback.
@@ -863,8 +834,6 @@ private:
   // start time is known which happens when the first frames are decoded or we
   // are playing an MSE stream (the start time is always assumed 0).
   bool mSentFirstFrameLoadedEvent;
-
-  bool mSentPlaybackEndedEvent;
 
   // True if video decoding is suspended.
   bool mVideoDecodeSuspended;
@@ -924,11 +893,6 @@ private:
 
   // Volume of playback. 0.0 = muted. 1.0 = full volume.
   Mirror<double> mVolume;
-
-  // TODO: The separation between mPlaybackRate and mLogicalPlaybackRate is a
-  // kludge to preserve existing fragile logic while converting this setup to
-  // state-mirroring. Some hero should clean this up.
-  Mirror<double> mLogicalPlaybackRate;
 
   // Pitch preservation for the playback rate.
   Mirror<bool> mPreservesPitch;

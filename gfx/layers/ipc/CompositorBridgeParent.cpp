@@ -1660,7 +1660,9 @@ CompositorBridgeParent::FlushApzRepaints(const LayerTransactionParent* aLayerTre
     // use the compositor's root layer tree id.
     layersId = mRootLayerTreeID;
   }
-  mApzcTreeManager->FlushApzRepaints(layersId);
+  APZThreadUtils::RunOnControllerThread(NS_NewRunnableFunction([=] () {
+    mApzcTreeManager->FlushApzRepaints(layersId);
+  }));
 }
 
 void
@@ -1671,29 +1673,6 @@ CompositorBridgeParent::GetAPZTestData(const LayerTransactionParent* aLayerTree,
   *aOutData = sIndirectLayerTrees[mRootLayerTreeID].mApzTestData;
 }
 
-class NotifyAPZConfirmedTargetTask : public Runnable
-{
-public:
-  explicit NotifyAPZConfirmedTargetTask(const RefPtr<APZCTreeManager>& aAPZCTM,
-                                        const uint64_t& aInputBlockId,
-                                        const nsTArray<ScrollableLayerGuid>& aTargets)
-   : mAPZCTM(aAPZCTM),
-     mInputBlockId(aInputBlockId),
-     mTargets(aTargets)
-  {
-  }
-
-  NS_IMETHOD Run() override {
-    mAPZCTM->SetTargetAPZC(mInputBlockId, mTargets);
-    return NS_OK;
-  }
-
-private:
-  RefPtr<APZCTreeManager> mAPZCTM;
-  uint64_t mInputBlockId;
-  nsTArray<ScrollableLayerGuid> mTargets;
-};
-
 void
 CompositorBridgeParent::SetConfirmedTargetAPZC(const LayerTransactionParent* aLayerTree,
                                          const uint64_t& aInputBlockId,
@@ -1702,8 +1681,13 @@ CompositorBridgeParent::SetConfirmedTargetAPZC(const LayerTransactionParent* aLa
   if (!mApzcTreeManager) {
     return;
   }
-  RefPtr<Runnable> task =
-    new NotifyAPZConfirmedTargetTask(mApzcTreeManager, aInputBlockId, aTargets);
+  // Need to specifically bind this since it's overloaded.
+  void (APZCTreeManager::*setTargetApzcFunc)
+        (uint64_t, const nsTArray<ScrollableLayerGuid>&) =
+        &APZCTreeManager::SetTargetAPZC;
+  RefPtr<Runnable> task = NewRunnableMethod
+        <uint64_t, StoreCopyPassByConstLRef<nsTArray<ScrollableLayerGuid>>>
+        (mApzcTreeManager.get(), setTargetApzcFunc, aInputBlockId, aTargets);
   APZThreadUtils::RunOnControllerThread(task.forget());
 
 }
@@ -1879,6 +1863,20 @@ CompositorBridgeParent::RecvNotifyChildCreated(const uint64_t& child)
 {
   MonitorAutoLock lock(*sIndirectLayerTreesLock);
   NotifyChildCreated(child);
+  return true;
+}
+
+bool
+CompositorBridgeParent::RecvNotifyChildRecreated(const uint64_t& aChild)
+{
+  MonitorAutoLock lock(*sIndirectLayerTreesLock);
+
+  if (sIndirectLayerTrees.find(aChild) != sIndirectLayerTrees.end()) {
+    // Invalid to register the same layer tree twice.
+    return false;
+  }
+
+  NotifyChildCreated(aChild);
   return true;
 }
 
@@ -2105,6 +2103,7 @@ public:
   virtual bool RecvPause() override { return true; }
   virtual bool RecvResume() override { return true; }
   virtual bool RecvNotifyChildCreated(const uint64_t& child) override;
+  virtual bool RecvNotifyChildRecreated(const uint64_t& child) override { return false; }
   virtual bool RecvAdoptChild(const uint64_t& child) override { return false; }
   virtual bool RecvMakeSnapshot(const SurfaceDescriptor& aInSnapshot,
                                 const gfx::IntRect& aRect) override
@@ -2439,6 +2438,48 @@ CompositorBridgeParent::GetIndirectShadowTree(uint64_t aId)
   return &cit->second;
 }
 
+static CompositorBridgeParent::LayerTreeState*
+GetStateForRoot(uint64_t aContentLayersId, const MonitorAutoLock& aProofOfLock)
+{
+  CompositorBridgeParent::LayerTreeState* state = nullptr;
+  LayerTreeMap::iterator itr = sIndirectLayerTrees.find(aContentLayersId);
+  if (sIndirectLayerTrees.end() != itr) {
+    state = &itr->second;
+  }
+
+  // |state| is the state for the content process, but we want the APZCTMParent
+  // for the parent process owning that content process. So we have to jump to
+  // the LayerTreeState for the root layer tree id for that layer tree, and use
+  // the mApzcTreeManagerParent from that. This should also work with nested
+  // content processes, because RootLayerTreeId() will bypass any intermediate
+  // processes' ids and go straight to the root.
+  if (state) {
+    uint64_t rootLayersId = state->mParent->RootLayerTreeId();
+    itr = sIndirectLayerTrees.find(rootLayersId);
+    state = (sIndirectLayerTrees.end() != itr) ? &itr->second : nullptr;
+  }
+
+  return state;
+}
+
+/* static */ APZCTreeManagerParent*
+CompositorBridgeParent::GetApzcTreeManagerParentForRoot(uint64_t aContentLayersId)
+{
+  MonitorAutoLock lock(*sIndirectLayerTreesLock);
+  CompositorBridgeParent::LayerTreeState* state =
+      GetStateForRoot(aContentLayersId, lock);
+  return state ? state->mApzcTreeManagerParent : nullptr;
+}
+
+/* static */ GeckoContentController*
+CompositorBridgeParent::GetGeckoContentControllerForRoot(uint64_t aContentLayersId)
+{
+  MonitorAutoLock lock(*sIndirectLayerTreesLock);
+  CompositorBridgeParent::LayerTreeState* state =
+      GetStateForRoot(aContentLayersId, lock);
+  return state ? state->mController.get() : nullptr;
+}
+
 PTextureParent*
 CompositorBridgeParent::AllocPTextureParent(const SurfaceDescriptor& aSharedData,
                                             const LayersBackend& aLayersBackend,
@@ -2671,7 +2712,9 @@ CrossProcessCompositorBridgeParent::ShadowLayersUpdated(
   }
 
   if (aLayerTree->ShouldParentObserveEpoch()) {
-    dom::TabParent::ObserveLayerUpdate(id, aLayerTree->GetChildEpoch(), true);
+    // Note that we send this through the window compositor, since this needs
+    // to reach the widget owning the tab.
+    Unused << state->mParent->SendObserveLayerUpdate(id, aLayerTree->GetChildEpoch(), true);
   }
 
   aLayerTree->SetPendingTransactionId(aTransactionId);
@@ -2900,7 +2943,13 @@ CrossProcessCompositorBridgeParent::NotifyClearCachedResources(LayerTransactionP
   uint64_t id = aLayerTree->GetId();
   MOZ_ASSERT(id != 0);
 
-  dom::TabParent::ObserveLayerUpdate(id, aLayerTree->GetChildEpoch(), false);
+  const CompositorBridgeParent::LayerTreeState* state =
+    CompositorBridgeParent::GetIndirectShadowTree(id);
+  if (state && state->mParent) {
+    // Note that we send this through the window compositor, since this needs
+    // to reach the widget owning the tab.
+    Unused << state->mParent->SendObserveLayerUpdate(id, aLayerTree->GetChildEpoch(), false);
+  }
 }
 
 bool

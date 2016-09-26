@@ -243,6 +243,9 @@ public:
    */
   static already_AddRefed<TabChild> FindTabChild(const TabId& aTabId);
 
+  // Return a list of all active TabChildren.
+  static nsTArray<RefPtr<TabChild>> GetAll();
+
 public:
   /**
    * Create a new TabChild object.
@@ -558,6 +561,7 @@ public:
 
   void ClearCachedResources();
   void InvalidateLayers();
+  void ReinitRendering();
   void CompositorUpdated(const TextureFactoryIdentifier& aNewIdentifier);
 
   static inline TabChild* GetFrom(nsIDOMWindow* aWindow)
@@ -589,6 +593,8 @@ public:
 
   virtual bool RecvPrint(const uint64_t& aOuterWindowID,
                          const PrintData& aPrintData) override;
+
+  virtual bool RecvUpdateNativeWindowHandle(const uintptr_t& aNewHandle) override;
 
   /**
    * Native widget remoting protocol for use with windowed plugins with e10s.
@@ -624,12 +630,11 @@ public:
                                  bool aPreventDefault) const;
   void SetTargetAPZC(uint64_t aInputBlockId,
                     const nsTArray<ScrollableLayerGuid>& aTargets) const;
-  void HandleTap(layers::GeckoContentController::TapType aType,
-                 const LayoutDevicePoint& aPoint,
-                 const Modifiers& aModifiers,
-                 const mozilla::layers::ScrollableLayerGuid& aGuid,
-                 const uint64_t& aInputBlockId,
-                 bool aCallTakeFocusForClickFromTap);
+  bool RecvHandleTap(const layers::GeckoContentController::TapType& aType,
+                     const LayoutDevicePoint& aPoint,
+                     const Modifiers& aModifiers,
+                     const ScrollableLayerGuid& aGuid,
+                     const uint64_t& aInputBlockId) override;
   void SetAllowedTouchBehavior(uint64_t aInputBlockId,
                                const nsTArray<TouchBehaviorFlags>& aFlags) const;
 
@@ -650,6 +655,10 @@ public:
 
   // Request that the docshell be marked as active.
   void ForcePaint(uint64_t aLayerObserverEpoch);
+
+#if defined(XP_WIN) && defined(ACCESSIBILITY)
+  uintptr_t GetNativeWindowHandle() const { return mNativeWindowHandle; }
+#endif
 
 protected:
   virtual ~TabChild();
@@ -788,6 +797,11 @@ private:
 
   // The most recently seen layer observer epoch in RecvSetDocShellIsActive.
   uint64_t mLayerObserverEpoch;
+
+#if defined(XP_WIN) && defined(ACCESSIBILITY)
+  // The handle associated with the native window that contains this tab
+  uintptr_t mNativeWindowHandle;
+#endif // defined(XP_WIN)
 
   DISALLOW_EVIL_CONSTRUCTORS(TabChild);
 };

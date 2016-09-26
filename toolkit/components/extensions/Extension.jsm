@@ -95,6 +95,8 @@ var {
   flushJarCache,
 } = ExtensionUtils;
 
+XPCOMUtils.defineLazyGetter(this, "console", ExtensionUtils.getConsole);
+
 const LOGGER_ID_BASE = "addons.webextension.";
 const UUID_MAP_PREF = "extensions.webextensions.uuids";
 const LEAVE_STORAGE_PREF = "extensions.webextensions.keepStorageOnUninstall";
@@ -167,7 +169,7 @@ var Management = new class extends SchemaAPIManager {
       super.registerSchemaAPI(namespace, "addon_parent", getAPI);
     }
   }
-};
+}();
 
 // An extension page is an execution context for any extension content
 // that runs in the chrome process. It's used for background pages
@@ -698,10 +700,9 @@ GlobalManager = {
         return context.extension.hasPermission(permission);
       },
 
-      shouldInject(namespace, name, restrictions) {
+      shouldInject(namespace, name, allowedContexts) {
         // Do not generate content script APIs, unless explicitly allowed.
-        if (context.envType === "content_parent" &&
-            (!restrictions || !restrictions.includes("content"))) {
+        if (context.envType === "content_parent" && !allowedContexts.includes("content")) {
           return false;
         }
         return findPathInObject(apis, namespace) !== null;

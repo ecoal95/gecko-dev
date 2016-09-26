@@ -1170,21 +1170,54 @@ ContentChild::AllocPGMPServiceChild(mozilla::ipc::Transport* aTransport,
 }
 
 bool
-ContentChild::RecvInitCompositor(Endpoint<PCompositorBridgeChild>&& aEndpoint)
+ContentChild::RecvInitRendering(Endpoint<PCompositorBridgeChild>&& aCompositor,
+                                Endpoint<PImageBridgeChild>&& aImageBridge,
+                                Endpoint<PVRManagerChild>&& aVRBridge)
 {
-  return CompositorBridgeChild::InitForContent(Move(aEndpoint));
+  if (!CompositorBridgeChild::InitForContent(Move(aCompositor))) {
+    return false;
+  }
+  if (!ImageBridgeChild::InitForContent(Move(aImageBridge))) {
+    return false;
+  }
+  if (!gfx::VRManagerChild::InitForContent(Move(aVRBridge))) {
+    return false;
+  }
+  return true;
 }
 
 bool
-ContentChild::RecvInitImageBridge(Endpoint<PImageBridgeChild>&& aEndpoint)
+ContentChild::RecvReinitRendering(Endpoint<PCompositorBridgeChild>&& aCompositor,
+                                  Endpoint<PImageBridgeChild>&& aImageBridge,
+                                  Endpoint<PVRManagerChild>&& aVRBridge)
 {
-  return ImageBridgeChild::InitForContent(Move(aEndpoint));
-}
+  nsTArray<RefPtr<TabChild>> tabs = TabChild::GetAll();
 
-bool
-ContentChild::RecvInitVRManager(Endpoint<PVRManagerChild>&& aEndpoint)
-{
-  return gfx::VRManagerChild::InitForContent(Move(aEndpoint));
+  // Zap all the old layer managers we have lying around.
+  for (const auto& tabChild : tabs) {
+    if (tabChild->LayersId()) {
+      tabChild->InvalidateLayers();
+    }
+  }
+
+  // Re-establish singleton bridges to the compositor.
+  if (!CompositorBridgeChild::ReinitForContent(Move(aCompositor))) {
+    return false;
+  }
+  if (!ImageBridgeChild::ReinitForContent(Move(aImageBridge))) {
+    return false;
+  }
+  if (!gfx::VRManagerChild::ReinitForContent(Move(aVRBridge))) {
+    return false;
+  }
+
+  // Establish new PLayerTransactions.
+  for (const auto& tabChild : tabs) {
+    if (tabChild->LayersId()) {
+      tabChild->ReinitRendering();
+    }
+  }
+  return true;
 }
 
 PSharedBufferManagerChild*
@@ -1542,16 +1575,21 @@ ContentChild::GetAvailableDictionaries(InfallibleTArray<nsString>& aDictionaries
 }
 
 PFileDescriptorSetChild*
+ContentChild::SendPFileDescriptorSetConstructor(const FileDescriptor& aFD)
+{
+  return PContentChild::SendPFileDescriptorSetConstructor(aFD);
+}
+
+PFileDescriptorSetChild*
 ContentChild::AllocPFileDescriptorSetChild(const FileDescriptor& aFD)
 {
-  return new FileDescriptorSetChild(aFD);
+  return nsIContentChild::AllocPFileDescriptorSetChild(aFD);
 }
 
 bool
 ContentChild::DeallocPFileDescriptorSetChild(PFileDescriptorSetChild* aActor)
 {
-  delete static_cast<FileDescriptorSetChild*>(aActor);
-  return true;
+  return nsIContentChild::DeallocPFileDescriptorSetChild(aActor);
 }
 
 bool
@@ -1850,16 +1888,21 @@ ContentChild::DeallocPPrintingChild(PPrintingChild* printing)
 }
 
 PSendStreamChild*
+ContentChild::SendPSendStreamConstructor(PSendStreamChild* aActor)
+{
+  return PContentChild::SendPSendStreamConstructor(aActor);
+}
+
+PSendStreamChild*
 ContentChild::AllocPSendStreamChild()
 {
-  MOZ_CRASH("PSendStreamChild actors should be manually constructed!");
+  return nsIContentChild::AllocPSendStreamChild();
 }
 
 bool
 ContentChild::DeallocPSendStreamChild(PSendStreamChild* aActor)
 {
-  delete aActor;
-  return true;
+  return nsIContentChild::DeallocPSendStreamChild(aActor);
 }
 
 PScreenManagerChild*

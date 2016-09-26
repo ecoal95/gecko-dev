@@ -77,7 +77,7 @@ __aeabi_uidivmod(int, int);
 static void
 WasmReportOverRecursed()
 {
-    ReportOverRecursed(JSRuntime::innermostWasmActivation()->cx(), JSMSG_WASM_OVERRECURSED);
+    ReportOverRecursed(JSRuntime::innermostWasmActivation()->cx());
 }
 
 static bool
@@ -343,9 +343,9 @@ wasm::AddressOf(SymbolicAddress imm, ExclusiveContext* cx)
       case SymbolicAddress::TruncF:
         return FuncCast<float (float)>(fdlibm::truncf, Args_Float32_Float32);
       case SymbolicAddress::NearbyIntD:
-        return FuncCast<double (double)>(nearbyint, Args_Double_Double);
+        return FuncCast<double (double)>(fdlibm::nearbyint, Args_Double_Double);
       case SymbolicAddress::NearbyIntF:
-        return FuncCast<float (float)>(nearbyintf, Args_Float32_Float32);
+        return FuncCast<float (float)>(fdlibm::nearbyintf, Args_Float32_Float32);
       case SymbolicAddress::ExpD:
         return FuncCast<double (double)>(fdlibm::exp, Args_Double_Double);
       case SymbolicAddress::LogD:
@@ -552,14 +552,12 @@ SigWithId::sizeOfExcludingThis(MallocSizeOf mallocSizeOf) const
 
 Assumptions::Assumptions(JS::BuildIdCharVector&& buildId)
   : cpuId(GetCPUID()),
-    buildId(Move(buildId)),
-    newFormat(false)
+    buildId(Move(buildId))
 {}
 
 Assumptions::Assumptions()
   : cpuId(GetCPUID()),
-    buildId(),
-    newFormat(false)
+    buildId()
 {}
 
 bool
@@ -576,7 +574,6 @@ bool
 Assumptions::clone(const Assumptions& other)
 {
     cpuId = other.cpuId;
-    newFormat = other.newFormat;
     return buildId.appendAll(other.buildId);
 }
 
@@ -585,16 +582,14 @@ Assumptions::operator==(const Assumptions& rhs) const
 {
     return cpuId == rhs.cpuId &&
            buildId.length() == rhs.buildId.length() &&
-           PodEqual(buildId.begin(), rhs.buildId.begin(), buildId.length()) &&
-           newFormat == rhs.newFormat;
+           PodEqual(buildId.begin(), rhs.buildId.begin(), buildId.length());
 }
 
 size_t
 Assumptions::serializedSize() const
 {
     return sizeof(uint32_t) +
-           SerializedPodVectorSize(buildId) +
-           sizeof(bool);
+           SerializedPodVectorSize(buildId);
 }
 
 uint8_t*
@@ -602,7 +597,6 @@ Assumptions::serialize(uint8_t* cursor) const
 {
     cursor = WriteScalar<uint32_t>(cursor, cpuId);
     cursor = SerializePodVector(cursor, buildId);
-    cursor = WriteScalar<bool>(cursor, newFormat);
     return cursor;
 }
 
@@ -610,8 +604,7 @@ const uint8_t*
 Assumptions::deserialize(const uint8_t* cursor)
 {
     (cursor = ReadScalar<uint32_t>(cursor, &cpuId)) &&
-    (cursor = DeserializePodVector(cursor, &buildId)) &&
-    (cursor = ReadScalar<bool>(cursor, &newFormat));
+    (cursor = DeserializePodVector(cursor, &buildId));
     return cursor;
 }
 

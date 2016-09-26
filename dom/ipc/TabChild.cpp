@@ -543,12 +543,15 @@ TabChild::TabChild(nsIContentChild* aManager,
   , mDPI(0)
   , mDefaultScale(0)
   , mIsTransparent(false)
-  , mIPCOpen(true)
+  , mIPCOpen(false)
   , mParentIsActive(false)
   , mDidSetRealShowInfo(false)
   , mDidLoadURLInit(false)
   , mAPZChild(nullptr)
   , mLayerObserverEpoch(0)
+#if defined(XP_WIN) && defined(ACCESSIBILITY)
+  , mNativeWindowHandle(0)
+#endif
 {
   // In the general case having the TabParent tell us if APZ is enabled or not
   // doesn't really work because the TabParent itself may not have a reference
@@ -825,6 +828,8 @@ TabChild::Init()
       });
   mAPZEventState = new APZEventState(mPuppetWidget, Move(callback));
 
+  mIPCOpen = true;
+
   return NS_OK;
 }
 
@@ -945,6 +950,37 @@ TabChild::RemoteSizeShellTo(int32_t aWidth, int32_t aHeight,
   }
 
   bool sent = SendSizeShellTo(flags, aWidth, aHeight, aShellItemWidth, aShellItemHeight);
+
+  return sent ? NS_OK : NS_ERROR_FAILURE;
+}
+
+NS_IMETHODIMP
+TabChild::RemoteDropLinks(uint32_t aLinksCount, nsIDroppedLinkItem** aLinks)
+{
+  nsTArray<nsString> linksArray;
+  nsresult rv = NS_OK;
+  for (uint32_t i = 0; i < aLinksCount; i++) {
+    nsString tmp;
+    rv = aLinks[i]->GetUrl(tmp);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+    linksArray.AppendElement(tmp);
+
+    rv = aLinks[i]->GetName(tmp);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+    linksArray.AppendElement(tmp);
+
+    rv = aLinks[i]->GetType(tmp);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+    linksArray.AppendElement(tmp);
+  }
+
+  bool sent = SendDropLinks(linksArray);
 
   return sent ? NS_OK : NS_ERROR_FAILURE;
 }
@@ -1721,25 +1757,26 @@ TabChild::HandleDoubleTap(const CSSPoint& aPoint, const Modifiers& aModifiers,
   }
 }
 
-void
-TabChild::HandleTap(GeckoContentController::TapType aType,
-                    const LayoutDevicePoint& aPoint, const Modifiers& aModifiers,
-                    const ScrollableLayerGuid& aGuid, const uint64_t& aInputBlockId,
-                    bool aCallTakeFocusForClickFromTap)
+bool
+TabChild::RecvHandleTap(const GeckoContentController::TapType& aType,
+                        const LayoutDevicePoint& aPoint,
+                        const Modifiers& aModifiers,
+                        const ScrollableLayerGuid& aGuid,
+                        const uint64_t& aInputBlockId)
 {
   nsCOMPtr<nsIPresShell> presShell = GetPresShell();
   if (!presShell) {
-    return;
+    return true;
   }
   if (!presShell->GetPresContext()) {
-    return;
+    return true;
   }
   CSSToLayoutDeviceScale scale(presShell->GetPresContext()->CSSToDevPixelScale());
   CSSPoint point = APZCCallbackHelper::ApplyCallbackTransform(aPoint / scale, aGuid);
 
   switch (aType) {
   case GeckoContentController::TapType::eSingleTap:
-    if (aCallTakeFocusForClickFromTap && mRemoteFrame) {
+    if (mRemoteFrame) {
       mRemoteFrame->SendTakeFocusForClickFromTap();
     }
     if (mGlobal && mTabChildGlobal) {
@@ -1766,6 +1803,7 @@ TabChild::HandleTap(GeckoContentController::TapType aType,
     MOZ_ASSERT(false);
     break;
   }
+  return true;
 }
 
 bool
@@ -2535,6 +2573,17 @@ TabChild::RecvPrint(const uint64_t& aOuterWindowID, const PrintData& aPrintData)
 }
 
 bool
+TabChild::RecvUpdateNativeWindowHandle(const uintptr_t& aNewHandle)
+{
+#if defined(XP_WIN) && defined(ACCESSIBILITY)
+  mNativeWindowHandle = aNewHandle;
+  return true;
+#else
+  return false;
+#endif
+}
+
+bool
 TabChild::RecvDestroy()
 {
   MOZ_ASSERT(mDestroyed == false);
@@ -2647,8 +2696,8 @@ TabChild::RecvSetDocShellIsActive(const bool& aIsActive,
       // updated its epoch). ForcePaintNoOp does that.
       if (IPCOpen()) {
         Unused << SendForcePaintNoOp(aLayerObserverEpoch);
+        return true;
       }
-      return true;
     }
 
     docShell->SetIsActive(aIsActive);
@@ -3058,6 +3107,21 @@ TabChild::DoSendAsyncMessage(JSContext* aCx,
   return NS_OK;
 }
 
+/* static */ nsTArray<RefPtr<TabChild>>
+TabChild::GetAll()
+{
+  nsTArray<RefPtr<TabChild>> list;
+  if (!sTabChildren) {
+    return list;
+  }
+
+  for (auto iter = sTabChildren->Iter(); !iter.Done(); iter.Next()) {
+    list.AppendElement(iter.Data());
+  }
+
+  return list;
+}
+
 TabChild*
 TabChild::GetFrom(nsIPresShell* aPresShell)
 {
@@ -3135,6 +3199,46 @@ TabChild::InvalidateLayers()
 
   RefPtr<LayerManager> lm = mPuppetWidget->GetLayerManager();
   FrameLayerBuilder::InvalidateAllLayers(lm);
+}
+
+void
+TabChild::ReinitRendering()
+{
+  MOZ_ASSERT(mLayersId);
+
+  // Before we establish a new PLayerTransaction, we must connect our layer tree
+  // id, CompositorBridge, and the widget compositor all together again.
+  // Normally this happens in TabParent before TabChild is given rendering
+  // information.
+  //
+  // In this case, we will send a sync message to our TabParent, which in turn
+  // will send a sync message to the Compositor of the widget owning this tab.
+  // This guarantees the correct association is in place before our
+  // PLayerTransaction constructor message arrives on the cross-process
+  // compositor bridge.
+  SendEnsureLayersConnected();
+
+  RefPtr<CompositorBridgeChild> cb = CompositorBridgeChild::Get();
+
+  bool success;
+  nsTArray<LayersBackend> ignored;
+  PLayerTransactionChild* shadowManager =
+    cb->SendPLayerTransactionConstructor(ignored, LayersId(), &mTextureFactoryIdentifier, &success);
+  if (!success) {
+    NS_WARNING("failed to re-allocate layer transaction");
+    return;
+  }
+
+  if (!shadowManager) {
+    NS_WARNING("failed to re-construct LayersChild");
+    return;
+  }
+
+  RefPtr<LayerManager> lm = mPuppetWidget->RecreateLayerManager(shadowManager);
+  ShadowLayerForwarder* lf = lm->AsShadowForwarder();
+  lf->IdentifyTextureHost(mTextureFactoryIdentifier);
+
+  mApzcTreeManager = CompositorBridgeChild::Get()->GetAPZCTreeManager(mLayersId);
 }
 
 void
@@ -3289,6 +3393,12 @@ TabChild::GetOuterRect()
 void
 TabChild::ForcePaint(uint64_t aLayerObserverEpoch)
 {
+  if (!IPCOpen()) {
+    // Don't bother doing anything now. Better to wait until we receive the
+    // message on the PContent channel.
+    return;
+  }
+
   nsAutoScriptBlocker scriptBlocker;
   RecvSetDocShellIsActive(true, false, aLayerObserverEpoch);
 }

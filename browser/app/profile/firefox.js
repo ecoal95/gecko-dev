@@ -377,12 +377,6 @@ pref("browser.search.context.loadInBackground", false);
 // comma seperated list of of engines to hide in the search panel.
 pref("browser.search.hiddenOneOffs", "");
 
-#ifdef XP_WIN
-pref("browser.search.redirectWindowsSearch", true);
-#else
-pref("browser.search.redirectWindowsSearch", false);
-#endif
-
 pref("browser.search.reset.enabled", true);
 
 pref("browser.usedOnWindows10", false);
@@ -1367,7 +1361,11 @@ pref("media.gmp.trial-create.enabled", true);
 
 #ifdef MOZ_ADOBE_EME
 pref("media.gmp-eme-adobe.visible", true);
-pref("media.gmp-eme-adobe.enabled", true);
+// When Adobe EME is enabled in the build system, we don't actually enable
+// the plugin by default, so that it doesn't download and install by default.
+// When Adobe EME is first used, Firefox will prompt the user to enable it,
+// and then download the CDM.
+pref("media.gmp-eme-adobe.enabled", false);
 #endif
 
 #ifdef MOZ_WIDEVINE_EME
@@ -1450,6 +1448,12 @@ pref("dom.ipc.cpow.timeout", 500);
 // Causes access on unsafe CPOWs from browser code to throw by default.
 pref("dom.ipc.cpows.forbid-unsafe-from-browser", true);
 
+// Don't allow add-ons marked as multiprocessCompatible to use CPOWs.
+pref("dom.ipc.cpows.forbid-cpows-in-compat-addons", true);
+
+// ...except for these add-ons:
+pref("dom.ipc.cpows.allow-cpows-in-compat-addons", "{b9db16a4-6edc-47ec-a1f4-b86292ed211d},privateTab@infocatcher,mousegesturessuite@lemon_juice.addons.mozilla.org,firegestures@xuldev.org,treestyletab@piro.sakura.ne.jp,{DDC359D1-844A-42a7-9AA1-88A850A938A8},ich@maltegoetz.de,{AE93811A-5C9A-4d34-8462-F7B864FC4696}");
+
 // Enable e10s hang monitoring (slow script checking and plugin hang
 // detection).
 pref("dom.ipc.processHangMonitor", true);
@@ -1526,3 +1530,9 @@ pref("browser.crashReports.unsubmittedCheck.enabled", true);
 // some number of days.
 pref("browser.crashReports.unsubmittedCheck.chancesUntilSuppress", 4);
 pref("browser.crashReports.unsubmittedCheck.autoSubmit", false);
+
+#ifdef NIGHTLY_BUILD
+// Enable the (fairly costly) client/server validation on nightly only. The other prefs
+// controlling validation are located in /services/sync/services-sync.js
+pref("services.sync.validation.enabled", true);
+#endif

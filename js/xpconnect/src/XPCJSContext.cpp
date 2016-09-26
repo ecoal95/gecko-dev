@@ -602,13 +602,8 @@ bool XPCJSContext::UsefulToMergeZones() const
 
 void XPCJSContext::TraceNativeBlackRoots(JSTracer* trc)
 {
-    // Skip this part if XPConnect is shutting down. We get into
-    // bad locking problems with the thread iteration otherwise.
-    if (!nsXPConnect::XPConnect()->IsShuttingDown()) {
-        // Trace those AutoMarkingPtr lists!
-        if (AutoMarkingPtr* roots = Get()->mAutoRoots)
-            roots->TraceJSAll(trc);
-    }
+    if (AutoMarkingPtr* roots = Get()->mAutoRoots)
+        roots->TraceJSAll(trc);
 
     // XPCJSObjectHolders don't participate in cycle collection, so always
     // trace them here.
@@ -784,76 +779,8 @@ XPCJSContext::FinalizeCallback(JSFreeOp* fop,
             MOZ_ASSERT(!self->mGCIsRunning, "bad state");
             self->mGCIsRunning = true;
 
-            // We use this occasion to mark and sweep NativeInterfaces,
-            // NativeSets, and the WrappedNativeJSClasses...
-
-            // Do the marking...
-            XPCWrappedNativeScope::MarkAllWrappedNativesAndProtos();
-
-            // Mark the sets used in the call contexts. There is a small
-            // chance that a wrapper's set will change *while* a call is
-            // happening which uses that wrapper's old interfface set. So,
-            // we need to do this marking to avoid collecting those sets
-            // that might no longer be otherwise reachable from the wrappers
-            // or the wrapperprotos.
-
-            // Skip this part if XPConnect is shutting down. We get into
-            // bad locking problems with the thread iteration otherwise.
-            if (!nsXPConnect::XPConnect()->IsShuttingDown()) {
-
-                // Mark those AutoMarkingPtr lists!
-                if (AutoMarkingPtr* roots = Get()->mAutoRoots)
-                    roots->MarkAfterJSFinalizeAll();
-
-                XPCCallContext* ccxp = XPCJSContext::Get()->GetCallContext();
-                while (ccxp) {
-                    // Deal with the strictness of callcontext that
-                    // complains if you ask for a set when
-                    // it is in a state where the set could not
-                    // possibly be valid.
-                    if (ccxp->CanGetSet()) {
-                        XPCNativeSet* set = ccxp->GetSet();
-                        if (set)
-                            set->Mark();
-                    }
-                    ccxp = ccxp->GetPrevCallContext();
-                }
-            }
-
-            // Do the sweeping. During a zone GC, only WrappedNativeProtos in
-            // collected zones will be marked. Therefore, some reachable
-            // NativeInterfaces will not be marked, so it is not safe to sweep
-            // them. We still need to unmark them, since the ones pointed to by
-            // WrappedNativeProtos in a zone being collected will be marked.
-            //
-            // Ideally, if NativeInterfaces from different zones were kept
-            // separate, we could sweep only the ones belonging to zones being
-            // collected. Currently, though, NativeInterfaces are shared between
-            // zones. This ought to be fixed.
-            bool doSweep = !isZoneGC;
-
-            if (doSweep) {
-                for (auto i = self->mClassInfo2NativeSetMap->Iter(); !i.Done(); i.Next()) {
-                    auto entry = static_cast<ClassInfo2NativeSetMap::Entry*>(i.Get());
-                    if (!entry->value->IsMarked())
-                        i.Remove();
-                }
-            }
-
-            for (auto i = self->mNativeSetMap->Iter(); !i.Done(); i.Next()) {
-                auto entry = static_cast<NativeSetMap::Entry*>(i.Get());
-                XPCNativeSet* set = entry->key_value;
-                if (set->IsMarked()) {
-                    set->Unmark();
-                } else if (doSweep) {
-                    XPCNativeSet::DestroyInstance(set);
-                    i.Remove();
-                }
-            }
-
-#ifdef DEBUG
-            XPCWrappedNativeScope::ASSERT_NoInterfaceSetsAreMarked();
-#endif
+            if (AutoMarkingPtr* roots = Get()->mAutoRoots)
+                roots->MarkAfterJSFinalizeAll();
 
             // Now we are going to recycle any unused WrappedNativeTearoffs.
             // We do this by iterating all the live callcontexts
@@ -867,29 +794,22 @@ XPCJSContext::FinalizeCallback(JSFreeOp* fop,
             //
             // XXX We may decide to not do this on *every* gc cycle.
 
-            // Skip this part if XPConnect is shutting down. We get into
-            // bad locking problems with the thread iteration otherwise.
-            if (!nsXPConnect::XPConnect()->IsShuttingDown()) {
-                // Do the marking...
-
-                XPCCallContext* ccxp = XPCJSContext::Get()->GetCallContext();
-                while (ccxp) {
-                    // Deal with the strictness of callcontext that
-                    // complains if you ask for a tearoff when
-                    // it is in a state where the tearoff could not
-                    // possibly be valid.
-                    if (ccxp->CanGetTearOff()) {
-                        XPCWrappedNativeTearOff* to =
-                            ccxp->GetTearOff();
-                        if (to)
-                            to->Mark();
-                    }
-                    ccxp = ccxp->GetPrevCallContext();
+            XPCCallContext* ccxp = XPCJSContext::Get()->GetCallContext();
+            while (ccxp) {
+                // Deal with the strictness of callcontext that
+                // complains if you ask for a tearoff when
+                // it is in a state where the tearoff could not
+                // possibly be valid.
+                if (ccxp->CanGetTearOff()) {
+                    XPCWrappedNativeTearOff* to =
+                        ccxp->GetTearOff();
+                    if (to)
+                        to->Mark();
                 }
-
-                // Do the sweeping...
-                XPCWrappedNativeScope::SweepAllWrappedNativeTearOffs();
+                ccxp = ccxp->GetPrevCallContext();
             }
+
+            XPCWrappedNativeScope::SweepAllWrappedNativeTearOffs();
 
             // Now we need to kill the 'Dying' XPCWrappedNativeProtos.
             // We transfered these native objects to this table when their
@@ -2160,27 +2080,19 @@ ReportClassStats(const ClassInfo& classInfo, const nsACString& path,
     if (classInfo.objectsMallocHeapElementsNormal > 0) {
         REPORT_BYTES(path + NS_LITERAL_CSTRING("objects/malloc-heap/elements/normal"),
             KIND_HEAP, classInfo.objectsMallocHeapElementsNormal,
-            "Normal (non-asm.js) indexed elements.");
+            "Normal (non-wasm) indexed elements.");
     }
 
-    // asm.js arrays are heap-allocated on some platforms and
-    // non-heap-allocated on others.  We never put them under sundries,
-    // because (a) in practice they're almost always larger than the sundries
-    // threshold, and (b) we'd need a third category of sundries ("non-heap"),
-    // which would be a pain.
-    size_t mallocHeapElementsAsmJS = classInfo.objectsMallocHeapElementsAsmJS;
-    size_t nonHeapElementsAsmJS    = classInfo.objectsNonHeapElementsAsmJS;
-    MOZ_ASSERT(mallocHeapElementsAsmJS == 0 || nonHeapElementsAsmJS == 0);
-    if (mallocHeapElementsAsmJS > 0) {
+    if (classInfo.objectsMallocHeapElementsAsmJS > 0) {
         REPORT_BYTES(path + NS_LITERAL_CSTRING("objects/malloc-heap/elements/asm.js"),
-            KIND_HEAP, mallocHeapElementsAsmJS,
-            "asm.js array buffer elements on the malloc heap.");
+            KIND_HEAP, classInfo.objectsMallocHeapElementsAsmJS,
+            "asm.js array buffer elements allocated in the malloc heap.");
     }
-    if (nonHeapElementsAsmJS > 0) {
-        REPORT_BYTES(path + NS_LITERAL_CSTRING("objects/non-heap/elements/asm.js"),
-            KIND_NONHEAP, nonHeapElementsAsmJS,
-            "asm.js array buffer elements outside both the malloc heap and "
-            "the GC heap.");
+
+    if (classInfo.objectsMallocHeapMisc > 0) {
+        REPORT_BYTES(path + NS_LITERAL_CSTRING("objects/malloc-heap/misc"),
+            KIND_HEAP, classInfo.objectsMallocHeapMisc,
+            "Miscellaneous object data.");
     }
 
     if (classInfo.objectsNonHeapElementsNormal > 0) {
@@ -2197,16 +2109,31 @@ ReportClassStats(const ClassInfo& classInfo, const nsACString& path,
             "by the buffer's refcount.");
     }
 
-    if (classInfo.objectsNonHeapCodeAsmJS > 0) {
-        REPORT_BYTES(path + NS_LITERAL_CSTRING("objects/non-heap/code/asm.js"),
-            KIND_NONHEAP, classInfo.objectsNonHeapCodeAsmJS,
-            "AOT-compiled asm.js code.");
+    // WebAssembly memories are always non-heap-allocated (mmap). We never put
+    // these under sundries, because (a) in practice they're almost always
+    // larger than the sundries threshold, and (b) we'd need a third category of
+    // sundries ("non-heap"), which would be a pain.
+    if (classInfo.objectsNonHeapElementsWasm > 0) {
+        REPORT_BYTES(path + NS_LITERAL_CSTRING("objects/non-heap/elements/wasm"),
+            KIND_NONHEAP, classInfo.objectsNonHeapElementsWasm,
+            "wasm/asm.js array buffer elements allocated outside both the "
+            "malloc heap and the GC heap.");
     }
 
-    if (classInfo.objectsMallocHeapMisc > 0) {
-        REPORT_BYTES(path + NS_LITERAL_CSTRING("objects/malloc-heap/misc"),
-            KIND_HEAP, classInfo.objectsMallocHeapMisc,
-            "Miscellaneous object data.");
+    if (classInfo.objectsNonHeapCodeWasm > 0) {
+        REPORT_BYTES(path + NS_LITERAL_CSTRING("objects/non-heap/code/wasm"),
+            KIND_NONHEAP, classInfo.objectsNonHeapCodeWasm,
+            "AOT-compiled wasm/asm.js code.");
+    }
+
+    // Although wasm guard pages aren't committed in memory they can be very
+    // large and contribute greatly to vsize and so are worth reporting.
+    if (classInfo.wasmGuardPages > 0) {
+        REPORT_BYTES(NS_LITERAL_CSTRING("wasm-guard-pages"),
+            KIND_OTHER, classInfo.wasmGuardPages,
+            "Guard pages mapped after the end of wasm memories, reserved for "
+            "optimization tricks, but not committed and thus never contributing"
+            " to RSS, only vsize.");
     }
 }
 
@@ -3439,6 +3366,12 @@ XPCJSContext::Initialize()
                                                               : 120 * 1024;  //win32
     // The following two configurations are linux-only. Given the numbers above,
     // we use 50k and 100k trusted buffers on 32-bit and 64-bit respectively.
+#elif defined(ANDROID)
+    // Android appears to have 1MB stacks. Allow the use of 3/4 of that size
+    // (768KB on 32-bit), since otherwise we can crash with a stack overflow
+    // when nearing the 1MB limit.
+    const size_t kStackQuota = kDefaultStackQuota + kDefaultStackQuota / 2;
+    const size_t kTrustedScriptBuffer = sizeof(size_t) * 12800;
 #elif defined(DEBUG)
     // Bug 803182: account for the 4x difference in the size of js::Interpret
     // between optimized and debug builds.

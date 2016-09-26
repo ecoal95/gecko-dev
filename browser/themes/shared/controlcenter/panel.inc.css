@@ -82,7 +82,7 @@
 }
 
 #identity-popup-multiView > .panel-viewcontainer > .panel-viewstack > .panel-subviews {
-  background: var(--panel-arrowcontent-background);
+  background: var(--arrowpanel-background);
   padding: 0;
 }
 
@@ -124,12 +124,8 @@
   width: var(--identity-popup-expander-width);
   border: 0 none;
   -moz-appearance: none;
-  background-image: url("chrome://browser/skin/controlcenter/arrow-subview.svg"),
-                    linear-gradient(rgba(255,255,255,0.3), transparent);
+  background: url("chrome://browser/skin/controlcenter/arrow-subview.svg") center no-repeat;
   background-size: 16px, auto;
-  background-position: center;
-  background-repeat: no-repeat;
-  background-color: transparent;
 }
 
 .identity-popup-expander:-moz-locale-dir(rtl) {
@@ -157,6 +153,8 @@
 
 .identity-popup-expander:hover {
   background-color: var(--arrowpanel-dimmed);
+  background-image: url("chrome://browser/skin/controlcenter/arrow-subview.svg"),
+                    linear-gradient(rgba(255,255,255,0.3), transparent);
 }
 
 .identity-popup-expander:hover:active {
@@ -232,7 +230,7 @@
 
 #identity-popup[connection^=secure] #identity-popup-securityView,
 #identity-popup[connection^=secure] #identity-popup-security-content {
-  background-image: url(chrome://browser/skin/controlcenter/conn-secure.svg);
+  background-image: url(chrome://browser/skin/controlcenter/connection.svg#connection-secure);
 }
 
 /* Use [isbroken] to make sure we don't show a lock on an http page. See Bug 1192162. */
@@ -240,12 +238,12 @@
 #identity-popup[ciphers=weak] #identity-popup-security-content,
 #identity-popup[mixedcontent~=passive-loaded][isbroken] #identity-popup-securityView,
 #identity-popup[mixedcontent~=passive-loaded][isbroken] #identity-popup-security-content {
-  background-image: url(chrome://browser/skin/controlcenter/conn-degraded.svg);
+  background-image: url(chrome://browser/skin/controlcenter/connection.svg#connection-degraded);
 }
 
 #identity-popup[connection=secure-cert-user-overridden] #identity-popup-securityView,
 #identity-popup[connection=secure-cert-user-overridden] #identity-popup-security-content {
-  background-image: url(chrome://browser/skin/identity-mixed-passive-loaded.svg);
+  background-image: url(chrome://browser/skin/connection-mixed-passive-loaded.svg#icon);
 }
 
 #identity-popup[loginforms=insecure] #identity-popup-securityView,
@@ -320,11 +318,11 @@ description#identity-popup-content-verifier,
 /* TRACKING PROTECTION */
 
 #tracking-protection-content {
-  background-image: url("chrome://browser/skin/controlcenter/tracking-protection.svg");
+  background-image: url("chrome://browser/skin/controlcenter/tracking-protection.svg#enabled");
 }
 
 #tracking-protection-content[state="loaded-tracking-content"]  {
-  background-image: url("chrome://browser/skin/controlcenter/tracking-protection-disabled.svg");
+  background-image: url("chrome://browser/skin/controlcenter/tracking-protection.svg#disabled");
 }
 
 #tracking-action-block,
@@ -378,7 +376,6 @@ description#identity-popup-content-verifier,
 }
 
 .identity-popup-permission-icon.in-use {
-  fill: rgb(224, 41, 29);
   animation: 1.5s ease in-use-blink infinite;
 }
 

@@ -82,6 +82,7 @@ def make_task_description(config, tests):
         taskdesc['deadline-after'] = '1 day'
         taskdesc['expires-after'] = test['expires-after']
         taskdesc['routes'] = []
+        taskdesc['run-on-projects'] = test.get('run-on-projects', ['all'])
         taskdesc['scopes'] = []
         taskdesc['extra'] = {
             'chunks': {
@@ -162,7 +163,6 @@ def docker_worker_setup(config, test, taskdesc):
     env = worker['env'] = {
         'MOZHARNESS_CONFIG': ' '.join(mozharness['config']),
         'MOZHARNESS_SCRIPT': mozharness['script'],
-        'MOZHARNESS_URL': {'task-reference': mozharness_url},
         'MOZILLA_BUILD_URL': {'task-reference': installer_url},
         'NEED_PULSEAUDIO': 'true',
         'NEED_WINDOW_MANAGER': 'true',
@@ -198,9 +198,14 @@ def docker_worker_setup(config, test, taskdesc):
         '--chown', '/home/worker/workspace',
     ]
 
+    # If we have a source checkout, run mozharness from it instead of
+    # downloading a zip file with the same content.
     if test['checkout']:
         docker_worker_support_vcs_checkout(config, test, taskdesc)
         command.extend(['--vcs-checkout', '/home/worker/checkouts/gecko'])
+        env['MOZHARNESS_PATH'] = '/home/worker/checkouts/gecko/testing/mozharness'
+    else:
+        env['MOZHARNESS_URL'] = {'task-reference': mozharness_url}
 
     command.extend([
         '--',

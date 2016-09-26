@@ -4,6 +4,7 @@ version = "0.1.0"
 dependencies = [
  "geckoservo 0.0.1",
  "mp4parse_capi 0.5.1",
+ "nsstring 0.1.0",
 ]
 
 [[package]]
@@ -259,6 +260,10 @@ version = "0.5.1"
 dependencies = [
  "mp4parse 0.5.1",
 ]
+
+[[package]]
+name = "nsstring"
+version = "0.1.0"
 
 [[package]]
 name = "num-integer"

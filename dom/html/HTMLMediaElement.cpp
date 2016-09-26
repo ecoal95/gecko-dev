@@ -1637,20 +1637,6 @@ nsresult HTMLMediaElement::LoadResource()
   // Set the media element's CORS mode only when loading a resource
   mCORSMode = AttrValueToCORSMode(GetParsedAttr(nsGkAtoms::crossorigin));
 
-#ifdef MOZ_EME
-  bool isBlob = false;
-  if (mMediaKeys &&
-      Preferences::GetBool("media.eme.mse-only", true) &&
-      // We only want mediaSource URLs, but they are BlobURL, so we have to
-      // check the schema and if they are not MediaStream or real Blob.
-      (NS_FAILED(mLoadingSrc->SchemeIs(BLOBURI_SCHEME, &isBlob)) ||
-       !isBlob ||
-       IsMediaStreamURI(mLoadingSrc) ||
-       IsBlobURI(mLoadingSrc))) {
-    return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
-  }
-#endif
-
   HTMLMediaElement* other = LookupMediaElementURITable(mLoadingSrc);
   if (other && other->mDecoder) {
     // Clone it.
@@ -2826,10 +2812,16 @@ HTMLMediaElement::LookupMediaElementURITable(nsIURI* aURI)
 }
 
 class HTMLMediaElement::ShutdownObserver : public nsIObserver {
+  enum class Phase : int8_t {
+    Init,
+    Subscribed,
+    Unsubscribed
+  };
 public:
   NS_DECL_ISUPPORTS
 
   NS_IMETHOD Observe(nsISupports*, const char* aTopic, const char16_t*) override {
+    MOZ_DIAGNOSTIC_ASSERT(mPhase == Phase::Subscribed);
     MOZ_DIAGNOSTIC_ASSERT(mWeak);
     if (strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0) {
       mWeak->NotifyShutdownEvent();
@@ -2837,14 +2829,18 @@ public:
     return NS_OK;
   }
   void Subscribe(HTMLMediaElement* aPtr) {
+    MOZ_DIAGNOSTIC_ASSERT(mPhase == Phase::Init);
     MOZ_DIAGNOSTIC_ASSERT(!mWeak);
     mWeak = aPtr;
     nsContentUtils::RegisterShutdownObserver(this);
+    mPhase = Phase::Subscribed;
   }
   void Unsubscribe() {
+    MOZ_DIAGNOSTIC_ASSERT(mPhase == Phase::Subscribed);
     MOZ_DIAGNOSTIC_ASSERT(mWeak);
     mWeak = nullptr;
     nsContentUtils::UnregisterShutdownObserver(this);
+    mPhase = Phase::Unsubscribed;
   }
   void AddRefMediaElement() {
     mWeak->AddRef();
@@ -2854,10 +2850,12 @@ public:
   }
 private:
   virtual ~ShutdownObserver() {
+    MOZ_DIAGNOSTIC_ASSERT(mPhase == Phase::Unsubscribed);
     MOZ_DIAGNOSTIC_ASSERT(!mWeak);
   }
   // Guaranteed to be valid by HTMLMediaElement.
   HTMLMediaElement* mWeak = nullptr;
+  Phase mPhase = Phase::Init;
 };
 
 NS_IMPL_ISUPPORTS(HTMLMediaElement::ShutdownObserver, nsIObserver)
@@ -4340,8 +4338,10 @@ void HTMLMediaElement::MetadataLoaded(const MediaInfo* aInfo,
     mDecoder->SetFragmentEndTime(mFragmentEnd);
   }
   if (mIsEncrypted) {
+    // We only support playback of encrypted content via MSE by default.
     if (!mMediaSource && Preferences::GetBool("media.eme.mse-only", true)) {
-      DecodeError(NS_ERROR_DOM_MEDIA_FATAL_ERR);
+      DecodeError(MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR,
+                              "Encrypted content not supported outside of MSE"));
       return;
     }
 
@@ -4467,8 +4467,6 @@ void HTMLMediaElement::Error(uint16_t aErrorCode,
                aErrorCode == MEDIA_ERR_NETWORK ||
                aErrorCode == MEDIA_ERR_ABORTED,
                "Only use MediaError codes!");
-  NS_ASSERTION(mReadyState > HAVE_NOTHING,
-               "Shouldn't be called when readyState is HAVE_NOTHING");
 
   // Since we have multiple paths calling into DecodeError, e.g.
   // MediaKeys::Terminated and EMEH264Decoder::Error. We should take the 1st
@@ -4479,7 +4477,15 @@ void HTMLMediaElement::Error(uint16_t aErrorCode,
   mError = new MediaError(this, aErrorCode, aErrorDetails);
 
   DispatchAsyncEvent(NS_LITERAL_STRING("error"));
-  ChangeNetworkState(nsIDOMHTMLMediaElement::NETWORK_IDLE);
+  if (mReadyState == HAVE_NOTHING && aErrorCode == MEDIA_ERR_ABORTED) {
+    // https://html.spec.whatwg.org/multipage/embedded-content.html#media-data-processing-steps-list
+    // "If the media data fetching process is aborted by the user"
+    DispatchAsyncEvent(NS_LITERAL_STRING("abort"));
+    ChangeNetworkState(nsIDOMHTMLMediaElement::NETWORK_EMPTY);
+    DispatchAsyncEvent(NS_LITERAL_STRING("emptied"));
+  } else {
+    ChangeNetworkState(nsIDOMHTMLMediaElement::NETWORK_IDLE);
+  }
   ChangeDelayLoadStatus(false);
   UpdateAudioChannelPlayingState();
 }
@@ -6110,16 +6116,6 @@ HTMLMediaElement::SetMediaKeys(mozilla::dom::MediaKeys* aMediaKeys,
     return nullptr;
   }
 
-  // We only support EME for MSE content by default.
-  if (mDecoder &&
-      !mMediaSource &&
-      Preferences::GetBool("media.eme.mse-only", true)) {
-    ShutdownDecoder();
-    promise->MaybeReject(NS_ERROR_DOM_NOT_SUPPORTED_ERR,
-                         NS_LITERAL_CSTRING("EME not supported on non-MSE streams"));
-    return promise.forget();
-  }
-
   // 1. If mediaKeys and the mediaKeys attribute are the same object,
   // return a resolved promise.
   if (mMediaKeys == aMediaKeys) {
@@ -6218,18 +6214,25 @@ HTMLMediaElement::SetMediaKeys(mozilla::dom::MediaKeys* aMediaKeys,
 EventHandlerNonNull*
 HTMLMediaElement::GetOnencrypted()
 {
-  EventListenerManager *elm = GetExistingListenerManager();
-  return elm ? elm->GetEventHandler(nsGkAtoms::onencrypted, EmptyString())
-              : nullptr;
+  return EventTarget::GetEventHandler(nsGkAtoms::onencrypted, EmptyString());
 }
 
 void
-HTMLMediaElement::SetOnencrypted(EventHandlerNonNull* handler)
+HTMLMediaElement::SetOnencrypted(EventHandlerNonNull* aCallback)
 {
-  EventListenerManager *elm = GetOrCreateListenerManager();
-  if (elm) {
-    elm->SetEventHandler(nsGkAtoms::onencrypted, EmptyString(), handler);
-  }
+  EventTarget::SetEventHandler(nsGkAtoms::onencrypted, EmptyString(), aCallback);
+}
+
+EventHandlerNonNull*
+HTMLMediaElement::GetOnwaitingforkey()
+{
+  return EventTarget::GetEventHandler(nsGkAtoms::onwaitingforkey, EmptyString());
+}
+
+void
+HTMLMediaElement::SetOnwaitingforkey(EventHandlerNonNull* aCallback)
+{
+  EventTarget::SetEventHandler(nsGkAtoms::onwaitingforkey, EmptyString(), aCallback);
 }
 
 void

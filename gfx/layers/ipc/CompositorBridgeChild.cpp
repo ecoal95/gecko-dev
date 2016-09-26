@@ -32,6 +32,7 @@
 #include "nsXULAppAPI.h"                // for XRE_GetIOMessageLoop, etc
 #include "FrameLayerBuilder.h"
 #include "mozilla/dom/TabChild.h"
+#include "mozilla/dom/TabParent.h"
 #include "mozilla/Unused.h"
 #include "mozilla/DebugOnly.h"
 #if defined(XP_WIN)
@@ -53,7 +54,7 @@ namespace layers {
 
 static StaticRefPtr<CompositorBridgeChild> sCompositorBridge;
 
-Atomic<int32_t> CompositableForwarder::sSerialCounter(0);
+Atomic<int32_t> TextureForwarder::sSerialCounter(0);
 
 CompositorBridgeChild::CompositorBridgeChild(ClientLayerManager *aLayerManager)
   : mLayerManager(aLayerManager)
@@ -194,6 +195,22 @@ CompositorBridgeChild::InitForContent(Endpoint<PCompositorBridgeChild>&& aEndpoi
   // We release this ref in DeferredDestroyCompositor.
   sCompositorBridge = child;
   return true;
+}
+
+/* static */ bool
+CompositorBridgeChild::ReinitForContent(Endpoint<PCompositorBridgeChild>&& aEndpoint)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (RefPtr<CompositorBridgeChild> old = sCompositorBridge.forget()) {
+    // Note that at this point, ActorDestroy may not have been called yet,
+    // meaning mCanSend is still true. In this case we will try to send a
+    // synchronous WillClose message to the parent, and will certainly get
+    // a false result and a MsgDropped processing error. This is okay.
+    old->Destroy();
+  }
+
+  return InitForContent(Move(aEndpoint));
 }
 
 CompositorBridgeParent*
@@ -847,6 +864,22 @@ CompositorBridgeChild::RecvParentAsyncMessages(InfallibleTArray<AsyncParentMessa
         NS_ERROR("unknown AsyncParentMessageData type");
         return false;
     }
+  }
+  return true;
+}
+
+bool
+CompositorBridgeChild::RecvObserveLayerUpdate(const uint64_t& aLayersId,
+                                              const uint64_t& aEpoch,
+                                              const bool& aActive)
+{
+  // This message is sent via the window compositor, not the tab compositor -
+  // however it still has a layers id.
+  MOZ_ASSERT(aLayersId);
+  MOZ_ASSERT(XRE_IsParentProcess());
+
+  if (RefPtr<dom::TabParent> tab = dom::TabParent::GetTabParentFromLayersId(aLayersId)) {
+    tab->LayerTreeUpdate(aEpoch, aActive);
   }
   return true;
 }

@@ -101,6 +101,7 @@ private:
   DECL_MEDIA_PREF("media.gmp.async-shutdown-timeout",         GMPAsyncShutdownTimeout, uint32_t, GMP_DEFAULT_ASYNC_SHUTDOWN_TIMEOUT);
   DECL_MEDIA_PREF("media.eme.enabled",                        EMEEnabled, bool, false);
   DECL_MEDIA_PREF("media.use-blank-decoder",                  PDMUseBlankDecoder, bool, false);
+  DECL_MEDIA_PREF("media.gpu-process-decoder",                PDMUseGPUDecoder, bool, false);
 #ifdef MOZ_GONK_MEDIACODEC
   DECL_MEDIA_PREF("media.gonk.enabled",                       PDMGonkDecoderEnabled, bool, true);
 #endif
@@ -153,6 +154,10 @@ private:
   // Flac
   DECL_MEDIA_PREF("media.ogg.flac.enabled",                   FlacInOgg, bool, false);
   DECL_MEDIA_PREF("media.flac.enabled",                       FlacEnabled, bool, true);
+
+#if defined(MOZ_RUST_MP4PARSE) && !defined(RELEASE_BUILD)
+  DECL_MEDIA_PREF("media.rust.test_mode",                     RustTestMode, bool, false);
+#endif
 
 public:
   // Manage the singleton:

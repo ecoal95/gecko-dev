@@ -93,7 +93,7 @@ PrincipalInfoToPrincipal(const PrincipalInfo& aPrincipalInfo,
     case PrincipalInfo::TExpandedPrincipalInfo: {
       const ExpandedPrincipalInfo& info = aPrincipalInfo.get_ExpandedPrincipalInfo();
 
-      nsTArray< nsCOMPtr<nsIPrincipal> > whitelist;
+      nsTArray<nsCOMPtr<nsIPrincipal>> whitelist;
       nsCOMPtr<nsIPrincipal> wlPrincipal;
 
       for (uint32_t i = 0; i < info.whitelist().Length(); i++) {
@@ -105,7 +105,7 @@ PrincipalInfoToPrincipal(const PrincipalInfo& aPrincipalInfo,
         whitelist.AppendElement(wlPrincipal);
       }
 
-      RefPtr<nsExpandedPrincipal> expandedPrincipal = new nsExpandedPrincipal(whitelist);
+      RefPtr<nsExpandedPrincipal> expandedPrincipal = new nsExpandedPrincipal(whitelist, info.attrs());
       if (!expandedPrincipal) {
         NS_WARNING("could not instantiate expanded principal");
         return nullptr;
@@ -173,7 +173,9 @@ PrincipalToPrincipalInfo(nsIPrincipal* aPrincipal,
       whitelistInfo.AppendElement(info);
     }
 
-    *aPrincipalInfo = ExpandedPrincipalInfo(Move(whitelistInfo));
+    *aPrincipalInfo =
+      ExpandedPrincipalInfo(BasePrincipal::Cast(aPrincipal)->OriginAttributesRef(),
+                            Move(whitelistInfo));
     return NS_OK;
   }
 
@@ -224,6 +226,10 @@ LoadInfoToLoadInfoArgs(nsILoadInfo *aLoadInfo,
   rv = PrincipalToPrincipalInfo(aLoadInfo->TriggeringPrincipal(),
                                 &triggeringPrincipalInfo);
 
+  PrincipalInfo principalToInheritInfo;
+  rv = PrincipalToPrincipalInfo(aLoadInfo->PrincipalToInherit(),
+                                &principalToInheritInfo);
+
   nsTArray<PrincipalInfo> redirectChainIncludingInternalRedirects;
   for (const nsCOMPtr<nsIPrincipal>& principal : aLoadInfo->RedirectChainIncludingInternalRedirects()) {
     rv = PrincipalToPrincipalInfo(principal, redirectChainIncludingInternalRedirects.AppendElement());
@@ -240,6 +246,7 @@ LoadInfoToLoadInfoArgs(nsILoadInfo *aLoadInfo,
     LoadInfoArgs(
       loadingPrincipalInfo,
       triggeringPrincipalInfo,
+      principalToInheritInfo,
       aLoadInfo->GetSecurityFlags(),
       aLoadInfo->InternalContentPolicyType(),
       static_cast<uint32_t>(aLoadInfo->GetTainting()),
@@ -288,6 +295,10 @@ LoadInfoArgsToLoadInfo(const OptionalLoadInfoArgs& aOptionalLoadInfoArgs,
     PrincipalInfoToPrincipal(loadInfoArgs.triggeringPrincipalInfo(), &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  nsCOMPtr<nsIPrincipal> principalToInherit =
+  PrincipalInfoToPrincipal(loadInfoArgs.principalToInheritInfo(), &rv);
+  NS_ENSURE_SUCCESS(rv, rv);
+
   nsTArray<nsCOMPtr<nsIPrincipal>> redirectChainIncludingInternalRedirects;
   for (const PrincipalInfo& principalInfo : loadInfoArgs.redirectChainIncludingInternalRedirects()) {
     nsCOMPtr<nsIPrincipal> redirectedPrincipal =
@@ -307,6 +318,7 @@ LoadInfoArgsToLoadInfo(const OptionalLoadInfoArgs& aOptionalLoadInfoArgs,
   nsCOMPtr<nsILoadInfo> loadInfo =
     new mozilla::LoadInfo(loadingPrincipal,
                           triggeringPrincipal,
+                          principalToInherit,
                           loadInfoArgs.securityFlags(),
                           loadInfoArgs.contentPolicyType(),
                           static_cast<LoadTainting>(loadInfoArgs.tainting()),

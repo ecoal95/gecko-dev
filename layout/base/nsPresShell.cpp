@@ -649,6 +649,33 @@ nsIPresShell::GetVerifyReflowEnable()
 }
 
 void
+PresShell::AddInvalidateHiddenPresShellObserver(nsRefreshDriver *aDriver)
+{
+  if (!mHiddenInvalidationObserverRefreshDriver && !mIsDestroying && !mHaveShutDown) {
+    aDriver->AddPresShellToInvalidateIfHidden(this);
+    mHiddenInvalidationObserverRefreshDriver = aDriver;
+  }
+}
+
+void
+nsIPresShell::InvalidatePresShellIfHidden()
+{
+  if (!IsVisible() && mPresContext) {
+    mPresContext->NotifyInvalidation(0);
+  }
+  mHiddenInvalidationObserverRefreshDriver = nullptr;
+}
+
+void
+nsIPresShell::CancelInvalidatePresShellIfHidden()
+{
+  if (mHiddenInvalidationObserverRefreshDriver) {
+    mHiddenInvalidationObserverRefreshDriver->RemovePresShellToInvalidateIfHidden(this);
+    mHiddenInvalidationObserverRefreshDriver = nullptr;
+  }
+}
+
+void
 nsIPresShell::SetVerifyReflowEnable(bool aEnabled)
 {
   gVerifyReflowEnabled = aEnabled;
@@ -1255,6 +1282,9 @@ PresShell::Destroy()
   // before we destroy the frame manager, since apparently frame destruction
   // sometimes spins the event queue when plug-ins are involved(!).
   rd->RemoveLayoutFlushObserver(this);
+  if (mHiddenInvalidationObserverRefreshDriver) {
+    mHiddenInvalidationObserverRefreshDriver->RemovePresShellToInvalidateIfHidden(this);
+  }
 
   if (rd->PresContext() == GetPresContext()) {
     rd->RevokeViewManagerFlush();
@@ -1512,13 +1542,14 @@ PresShell::GetSelection(RawSelectionType aRawSelectionType,
   if (!aSelection || !mSelection)
     return NS_ERROR_NULL_POINTER;
 
-  *aSelection = mSelection->GetSelection(ToSelectionType(aRawSelectionType));
+  nsCOMPtr<nsISelection> selection =
+    mSelection->GetSelection(ToSelectionType(aRawSelectionType));
 
-  if (!(*aSelection))
+  if (!selection) {
     return NS_ERROR_INVALID_ARG;
+  }
 
-  NS_ADDREF(*aSelection);
-
+  selection.forget(aSelection);
   return NS_OK;
 }
 
@@ -3608,6 +3639,7 @@ public:
   NS_IMETHOD Notify(nsITimer* aTimer) final
   {
     mShell->SetNextPaintCompressed();
+    mShell->AddInvalidateHiddenPresShellObserver(mShell->GetPresContext()->RefreshDriver());
     mShell->ScheduleViewManagerFlush();
     return NS_OK;
   }

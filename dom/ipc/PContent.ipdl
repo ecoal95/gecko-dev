@@ -56,6 +56,7 @@ include protocol PWebBrowserPersistDocument;
 include protocol PWebrtcGlobal;
 include protocol PPresentation;
 include protocol PVRManager;
+include protocol PVideoDecoderManager;
 include protocol PFlyWebPublishedServer;
 include DOMTypes;
 include JavaScriptTypes;
@@ -100,6 +101,8 @@ using mozilla::DataStorageType from "ipc/DataStorageIPCUtils.h";
 using mozilla::DocShellOriginAttributes from "mozilla/ipc/BackgroundUtils.h";
 using struct mozilla::layers::TextureFactoryIdentifier from "mozilla/layers/CompositorTypes.h";
 using struct mozilla::dom::FlyWebPublishOptions from "mozilla/dom/FlyWebPublishOptionsIPCSerializer.h";
+using mozilla::Telemetry::Accumulation from "mozilla/TelemetryComms.h";
+using mozilla::Telemetry::KeyedAccumulation from "mozilla/TelemetryComms.h";
 
 union ChromeRegistryItem
 {
@@ -462,9 +465,18 @@ both:
 
 child:
     // Give the content process its endpoints to the compositor.
-    async InitCompositor(Endpoint<PCompositorBridgeChild> compositor);
-    async InitImageBridge(Endpoint<PImageBridgeChild> bridge);
-    async InitVRManager(Endpoint<PVRManagerChild> endpoint);
+    async InitRendering(
+      Endpoint<PCompositorBridgeChild> compositor,
+      Endpoint<PImageBridgeChild> imageBridge,
+      Endpoint<PVRManagerChild> vr);
+
+    // Re-create the rendering stack using the given endpoints. This is sent
+    // after the compositor process has crashed. The new endpoints may be to a
+    // newly launched GPU process, or the compositor thread of the UI process.
+    async ReinitRendering(
+      Endpoint<PCompositorBridgeChild> compositor,
+      Endpoint<PImageBridgeChild> bridge,
+      Endpoint<PVRManagerChild> vr);
 
     /**
      * Enable system-level sandboxing features, if available.  Can
@@ -776,6 +788,8 @@ parent:
     async PDeviceStorageRequest(DeviceStorageParams params);
 
     sync PCrashReporter(NativeThreadId tid, uint32_t processType);
+
+    sync InitVideoDecoderManager() returns (Endpoint<PVideoDecoderManagerChild> endpoint);
 
     /**
      * Is this token compatible with the provided version?
@@ -1215,6 +1229,12 @@ parent:
                                                 Principal principal);
 
      async UnstoreAndBroadcastBlobURLUnregistration(nsCString url);
+
+    /**
+     * Messages for communicating child Telemetry to the parent process
+     */
+    async AccumulateChildHistogram(Accumulation[] accumulations);
+    async AccumulateChildKeyedHistogram(KeyedAccumulation[] accumulations);
 
 both:
      async AsyncMessage(nsString aMessage, CpowEntry[] aCpows,

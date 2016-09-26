@@ -15,7 +15,10 @@ const {
   MESSAGE_TYPE,
   MESSAGE_LEVEL,
 } = require("../constants");
-const { ConsoleMessage } = require("../types");
+const {
+  ConsoleMessage,
+  NetworkEventMessage,
+} = require("../types");
 
 function prepareMessage(packet, idGenerator) {
   // This packet is already in the expected packet structure. Simply return.
@@ -80,11 +83,11 @@ function transformPacket(packet) {
           break;
       }
 
-      const frame = {
-        source: message.filename || null,
-        line: message.lineNumber || null,
-        column: message.columnNumber || null
-      };
+      const frame = message.filename ? {
+        source: message.filename,
+        line: message.lineNumber,
+        column: message.columnNumber,
+      } : null;
 
       return new ConsoleMessage({
         source: MESSAGE_SOURCE.CONSOLE_API,
@@ -116,30 +119,47 @@ function transformPacket(packet) {
         level = MESSAGE_LEVEL.INFO;
       }
 
-      const frame = {
+      const frame = pageError.sourceName ? {
         source: pageError.sourceName,
         line: pageError.lineNumber,
         column: pageError.columnNumber
-      };
+      } : null;
 
       return new ConsoleMessage({
         source: MESSAGE_SOURCE.JAVASCRIPT,
         type: MESSAGE_TYPE.LOG,
         level,
         messageText: pageError.errorMessage,
+        stacktrace: pageError.stacktrace ? pageError.stacktrace : null,
         frame,
+      });
+    }
+
+    case "networkEvent": {
+      let { networkEvent } = packet;
+
+      return new NetworkEventMessage({
+        actor: networkEvent.actor,
+        isXHR: networkEvent.isXHR,
+        request: networkEvent.request,
+        response: networkEvent.response,
       });
     }
 
     case "evaluationResult":
     default: {
-      let { result } = packet;
+      let {
+        exceptionMessage: messageText,
+        result: parameters
+      } = packet;
 
+      const level = messageText ? MESSAGE_LEVEL.ERROR : MESSAGE_LEVEL.LOG;
       return new ConsoleMessage({
         source: MESSAGE_SOURCE.JAVASCRIPT,
         type: MESSAGE_TYPE.RESULT,
-        level: MESSAGE_LEVEL.LOG,
-        parameters: result,
+        level,
+        messageText,
+        parameters,
       });
     }
   }
@@ -165,6 +185,9 @@ function convertCachedPacket(packet) {
   } else if ("_navPayload" in packet) {
     convertPacket.type = "navigationMessage";
     convertPacket.message = packet;
+  } else if (packet._type === "NetworkEvent") {
+    convertPacket.networkEvent = packet;
+    convertPacket.type = "networkEvent";
   } else {
     throw new Error("Unexpected packet type");
   }

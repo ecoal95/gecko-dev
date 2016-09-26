@@ -973,7 +973,7 @@ struct nsGridContainerFrame::TrackSizingFunctions
     const uint32_t numTracks = mMinSizingFunctions.Length();
     MOZ_ASSERT(numTracks >= 1, "expected at least the repeat() track");
     nscoord maxFill = aSize != NS_UNCONSTRAINEDSIZE ? aSize : aMaxSize;
-    if (maxFill == NS_UNCONSTRAINEDSIZE && aMinSize == NS_UNCONSTRAINEDSIZE) {
+    if (maxFill == NS_UNCONSTRAINEDSIZE && aMinSize == 0) {
       // "Otherwise, the specified track list repeats only once."
       return 1;
     }
@@ -1644,7 +1644,7 @@ struct nsGridContainerFrame::Tracks
 
     bool hasRepeatAuto = aGridTemplate.HasRepeatAuto();
     const nsTArray<nsTArray<nsString>>& lineNameLists(
-        aGridTemplate.mLineNameLists);
+      aGridTemplate.mLineNameLists);
 
     if (!hasRepeatAuto) {
       if (aIndex < lineNameLists.Length()) {
@@ -1656,11 +1656,7 @@ struct nsGridContainerFrame::Tracks
       const uint32_t repeatAutoEnd = (repeatAutoStart + repeatTrackCount);
       const int32_t repeatEndDelta = int32_t(repeatTrackCount - 1);
 
-      if (aIndex < repeatAutoEnd && aIndex >= repeatAutoStart) {
-        lineNames.AppendElements(aGridTemplate.mRepeatAutoLineNameListBefore);
-      } else if (aIndex <= repeatAutoEnd && aIndex > repeatAutoStart) {
-        lineNames.AppendElements(aGridTemplate.mRepeatAutoLineNameListAfter);
-      } else if (aIndex <= repeatAutoStart) {
+      if (aIndex <= repeatAutoStart) {
         if (aIndex < lineNameLists.Length()) {
           lineNames.AppendElements(lineNameLists[aIndex]);
         }
@@ -1670,7 +1666,14 @@ struct nsGridContainerFrame::Tracks
             lineNames.AppendElements(lineNameLists[i]);
           }
         }
-      } else if (aIndex >= repeatAutoEnd) {
+      }
+      if (aIndex <= repeatAutoEnd && aIndex > repeatAutoStart) {
+        lineNames.AppendElements(aGridTemplate.mRepeatAutoLineNameListAfter);
+      }
+      if (aIndex < repeatAutoEnd && aIndex >= repeatAutoStart) {
+        lineNames.AppendElements(aGridTemplate.mRepeatAutoLineNameListBefore);
+      }
+      if (aIndex >= repeatAutoEnd && aIndex > repeatAutoStart) {
         uint32_t i = aIndex - repeatEndDelta;
         if (i < lineNameLists.Length()) {
           lineNames.AppendElements(lineNameLists[i]);
@@ -5686,24 +5689,9 @@ nsGridContainerFrame::Reflow(nsPresContext*           aPresContext,
 
   nscoord consumedBSize = 0;
   if (!prevInFlow) {
-    // ComputedMinSize is zero rather than NS_UNCONSTRAINEDSIZE when indefinite
-    // (unfortunately) so we have to check the style data and parent reflow state
-    // to determine if it's indefinite.
-    LogicalSize computedMinSize(aReflowInput.ComputedMinSize());
-    const ReflowInput* cbState = aReflowInput.mCBReflowInput;
-    if (!stylePos->MinISize(wm).IsCoordPercentCalcUnit() ||
-        (stylePos->MinISize(wm).HasPercent() && cbState &&
-         cbState->ComputedSize(wm).ISize(wm) == NS_UNCONSTRAINEDSIZE)) {
-      computedMinSize.ISize(wm) = NS_UNCONSTRAINEDSIZE;
-    }
-    if (!stylePos->MinBSize(wm).IsCoordPercentCalcUnit() ||
-        (stylePos->MinBSize(wm).HasPercent() && cbState &&
-         cbState->ComputedSize(wm).BSize(wm) == NS_UNCONSTRAINEDSIZE)) {
-      computedMinSize.BSize(wm) = NS_UNCONSTRAINEDSIZE;
-    }
     Grid grid;
-    grid.PlaceGridItems(gridReflowInput, computedMinSize, computedSize,
-                        aReflowInput.ComputedMaxSize());
+    grid.PlaceGridItems(gridReflowInput, aReflowInput.ComputedMinSize(),
+                        computedSize, aReflowInput.ComputedMaxSize());
 
     gridReflowInput.CalculateTrackSizes(grid, computedSize,
                                         nsLayoutUtils::PREF_ISIZE);
@@ -5810,7 +5798,8 @@ nsGridContainerFrame::Reflow(nsPresContext*           aPresContext,
       Move(colTrackPositions),
       Move(colTrackSizes),
       Move(colTrackStates),
-      Move(colRemovedRepeatTracks));
+      Move(colRemovedRepeatTracks),
+      gridReflowInput.mColFunctions.mRepeatAutoStart);
     Properties().Set(GridColTrackInfo(), colInfo);
 
     uint32_t rowTrackCount = gridReflowInput.mRows.mSizes.Length();
@@ -5844,7 +5833,8 @@ nsGridContainerFrame::Reflow(nsPresContext*           aPresContext,
       Move(rowTrackPositions),
       Move(rowTrackSizes),
       Move(rowTrackStates),
-      Move(rowRemovedRepeatTracks));
+      Move(rowRemovedRepeatTracks),
+      gridReflowInput.mRowFunctions.mRepeatAutoStart);
     Properties().Set(GridRowTrackInfo(), rowInfo);
 
     if (prevInFlow) {
@@ -5874,7 +5864,8 @@ nsGridContainerFrame::Reflow(nsPresContext*           aPresContext,
         Move(priorRowInfo->mPositions),
         Move(priorRowInfo->mSizes),
         Move(priorRowInfo->mStates),
-        Move(priorRowInfo->mRemovedRepeatTracks));
+        Move(priorRowInfo->mRemovedRepeatTracks),
+        priorRowInfo->mRepeatFirstTrack);
       prevInFlow->Properties().Set(GridRowTrackInfo(), revisedPriorRowInfo);
     }
 
@@ -5884,39 +5875,45 @@ nsGridContainerFrame::Reflow(nsPresContext*           aPresContext,
     // implicit names from grid areas and assign them to the appropriate lines.
 
     // Generate column lines first.
-    uint32_t capacity = gridReflowInput.mColFunctions.NumRepeatTracks() +
-                        gridReflowInput.mCols.mSizes.Length();
+    uint32_t capacity = gridReflowInput.mCols.mSizes.Length();
+    const nsStyleGridTemplate& gridColTemplate =
+      gridReflowInput.mGridStyle->mGridTemplateColumns;
     nsTArray<nsTArray<nsString>> columnLineNames(capacity);
     for (col = 0; col <= gridReflowInput.mCols.mSizes.Length(); col++) {
       // Offset col by the explicit grid offset, to get the original names.
       nsTArray<nsString> explicitNames =
         gridReflowInput.mCols.GetExplicitLineNamesAtIndex(
-          gridReflowInput.mGridStyle->mGridTemplateColumns,
+          gridColTemplate,
           gridReflowInput.mColFunctions,
           col - gridReflowInput.mColFunctions.mExplicitGridOffset);
 
       columnLineNames.AppendElement(explicitNames);
     }
     ComputedGridLineInfo* columnLineInfo = new ComputedGridLineInfo(
-      Move(columnLineNames));
+      Move(columnLineNames),
+      gridColTemplate.mRepeatAutoLineNameListBefore,
+      gridColTemplate.mRepeatAutoLineNameListAfter);
     Properties().Set(GridColumnLineInfo(), columnLineInfo);
 
     // Generate row lines next.
-    capacity = gridReflowInput.mRowFunctions.NumRepeatTracks() +
-               gridReflowInput.mRows.mSizes.Length();
+    capacity = gridReflowInput.mRows.mSizes.Length();
+    const nsStyleGridTemplate& gridRowTemplate =
+      gridReflowInput.mGridStyle->mGridTemplateRows;
     nsTArray<nsTArray<nsString>> rowLineNames(capacity);
     for (row = 0; row <= gridReflowInput.mRows.mSizes.Length(); row++) {
       // Offset row by the explicit grid offset, to get the original names.
       nsTArray<nsString> explicitNames =
         gridReflowInput.mRows.GetExplicitLineNamesAtIndex(
-          gridReflowInput.mGridStyle->mGridTemplateRows,
+          gridRowTemplate,
           gridReflowInput.mRowFunctions,
           row - gridReflowInput.mRowFunctions.mExplicitGridOffset);
 
       rowLineNames.AppendElement(explicitNames);
     }
     ComputedGridLineInfo* rowLineInfo = new ComputedGridLineInfo(
-      Move(rowLineNames));
+      Move(rowLineNames),
+      gridRowTemplate.mRepeatAutoLineNameListBefore,
+      gridRowTemplate.mRepeatAutoLineNameListAfter);
     Properties().Set(GridRowLineInfo(), rowLineInfo);
 
     // Generate area info for explicit areas. Implicit areas are handled
@@ -5988,9 +5985,51 @@ nsGridContainerFrame::IntrinsicISize(nsRenderingContext* aRenderingContext,
   // http://dev.w3.org/csswg/css-grid/#intrinsic-sizes
   GridReflowInput state(this, *aRenderingContext);
   InitImplicitNamedAreas(state.mGridStyle); // XXX optimize
-  LogicalSize indefinite(state.mWM, NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
+
+  auto GetDefiniteSizes = [] (const nsStyleCoord& aMinCoord,
+                              const nsStyleCoord& aSizeCoord,
+                              const nsStyleCoord& aMaxCoord,
+                              nscoord* aMin,
+                              nscoord* aSize,
+                              nscoord* aMax) {
+    if (aMinCoord.ConvertsToLength()) {
+      *aMin = aMinCoord.ToLength();
+    }
+    if (aMaxCoord.ConvertsToLength()) {
+      *aMax = std::max(*aMin, aMaxCoord.ToLength());
+    }
+    if (aSizeCoord.ConvertsToLength()) {
+      *aSize = Clamp(aSizeCoord.ToLength(), *aMin, *aMax);
+    }
+  };
+  // The min/sz/max sizes are the input to the "repeat-to-fill" algorithm:
+  // https://drafts.csswg.org/css-grid/#auto-repeat
+  // They're only used for auto-repeat so we skip computing them otherwise.
+  LogicalSize min(state.mWM, 0, 0);
+  LogicalSize sz(state.mWM, NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
+  LogicalSize max(state.mWM, NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
+  if (state.mColFunctions.mHasRepeatAuto) {
+    GetDefiniteSizes(state.mGridStyle->MinISize(state.mWM),
+                     state.mGridStyle->ISize(state.mWM),
+                     state.mGridStyle->MaxISize(state.mWM),
+                     &min.ISize(state.mWM),
+                     &sz.ISize(state.mWM),
+                     &max.ISize(state.mWM));
+  }
+  if (state.mRowFunctions.mHasRepeatAuto &&
+      !(state.mGridStyle->mGridAutoFlow & NS_STYLE_GRID_AUTO_FLOW_ROW)) {
+    // Only 'grid-auto-flow:column' can create new implicit columns, so that's
+    // the only case where our block-size can affect the number of columns.
+    GetDefiniteSizes(state.mGridStyle->MinBSize(state.mWM),
+                     state.mGridStyle->BSize(state.mWM),
+                     state.mGridStyle->MaxBSize(state.mWM),
+                     &min.BSize(state.mWM),
+                     &sz.BSize(state.mWM),
+                     &max.BSize(state.mWM));
+  }
+
   Grid grid;
-  grid.PlaceGridItems(state, indefinite, indefinite, indefinite);  // XXX optimize
+  grid.PlaceGridItems(state, min, sz, max);  // XXX optimize
   if (grid.mGridColEnd == 0) {
     return 0;
   }
@@ -6106,9 +6145,16 @@ nsGridContainerFrame::RemoveFrame(ChildListID aListID, nsIFrame* aOldFrame)
   // Note that kPrincipalList doesn't mean aOldFrame must be on that list.
   // It can also be on kOverflowList, in which case it might be a pushed
   // item, and if it's the only pushed item our DID_PUSH_ITEMS bit will lie.
-  mDidPushItemsBitMayLie = mDidPushItemsBitMayLie ||
-                           (aListID == kPrincipalList &&
-                            !aOldFrame->GetPrevInFlow());
+  if (aListID == kPrincipalList && !aOldFrame->GetPrevInFlow()) {
+    // Since the bit may lie, set the mDidPushItemsBitMayLie value to true for
+    // ourself and for all our contiguous previous-in-flow nsGridContainerFrames.
+    nsGridContainerFrame* frameThatMayLie = this;
+    do {
+      frameThatMayLie->mDidPushItemsBitMayLie = true;
+      frameThatMayLie = static_cast<nsGridContainerFrame*>(
+        frameThatMayLie->GetPrevInFlow());
+    } while (frameThatMayLie);
+  }
 #endif
 
   nsContainerFrame::RemoveFrame(aListID, aOldFrame);

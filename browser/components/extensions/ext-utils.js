@@ -138,7 +138,7 @@ class BasePopup {
       this.viewNode.style.maxHeight = "";
 
       if (this.panel) {
-        this.panel.style.removeProperty("--panel-arrowcontent-background");
+        this.panel.style.removeProperty("--arrowpanel-background");
         this.panel.style.removeProperty("--panel-arrow-image-vertical");
       }
 
@@ -245,6 +245,7 @@ class BasePopup {
     this.browser.setAttribute("transparent", "true");
     this.browser.setAttribute("class", "webextension-popup-browser");
     this.browser.setAttribute("webextension-view-type", "popup");
+    this.browser.setAttribute("tooltip", "aHTMLTooltip");
 
     // We only need flex sizing for the sake of the slide-in sub-views of the
     // main menu panel, so that the browser occupies the full width of the view,
@@ -385,7 +386,7 @@ class BasePopup {
         }
       }
 
-      this.panel.style.setProperty("--panel-arrowcontent-background", panelBackground);
+      this.panel.style.setProperty("--arrowpanel-background", panelBackground);
       this.panel.style.setProperty("--panel-arrow-image-vertical", panelArrow);
 
 

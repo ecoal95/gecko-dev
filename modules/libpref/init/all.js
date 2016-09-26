@@ -767,7 +767,13 @@ pref("gfx.font_rendering.opentype_svg.enabled", true);
 // comma separated list of backends to use in order of preference
 // e.g., pref("gfx.canvas.azure.backends", "direct2d,skia,cairo");
 pref("gfx.canvas.azure.backends", "direct2d1.1,skia,cairo");
+
+#ifdef NIGHTLY_BUILD
+pref("gfx.content.azure.backends", "direct2d1.1,skia,cairo");
+#else
 pref("gfx.content.azure.backends", "direct2d1.1,cairo");
+#endif
+
 #else
 #ifdef XP_MACOSX
 pref("gfx.content.azure.backends", "skia");
@@ -779,6 +785,8 @@ pref("gfx.canvas.azure.backends", "skia");
 pref("gfx.content.azure.backends", "skia");
 #endif
 #endif
+
+pref("gfx.canvas.skiagl.dynamic-cache", true);
 
 pref("gfx.text.disable-aa", false);
 
@@ -1292,6 +1300,11 @@ pref("image.animation_mode",                "normal");
 // Same-origin policy for file URIs, "false" is traditional
 pref("security.fileuri.strict_origin_policy", true);
 
+// If this pref is true, prefs in the logging.config branch will be cleared on
+// startup. This is done so that setting a log-file and log-modules at runtime
+// doesn't persist across restarts leading to huge logfile and low disk space.
+pref("logging.config.clear_on_startup", true);
+
 // If there is ever a security firedrill that requires
 // us to block certian ports global, this is the pref
 // to use.  Is is a comma delimited list of port numbers
@@ -1545,6 +1558,7 @@ pref("network.http.spdy.allow-push", true);
 pref("network.http.spdy.push-allowance", 131072);   // 128KB
 pref("network.http.spdy.pull-allowance", 12582912); // 12MB
 pref("network.http.spdy.default-concurrent", 100);
+pref("network.http.spdy.default-hpack-buffer", 65536); // 64k
 
 // alt-svc allows separation of transport routing from
 // the origin host without using a proxy.
@@ -1858,11 +1872,7 @@ pref("network.prefetch-next", true);
 // enables the predictive service
 pref("network.predictor.enabled", true);
 pref("network.predictor.enable-hover-on-ssl", false);
-#ifdef NIGHTLY_BUILD
 pref("network.predictor.enable-prefetch", true);
-#else
-pref("network.predictor.enable-prefetch", false);
-#endif
 pref("network.predictor.page-degradation.day", 0);
 pref("network.predictor.page-degradation.week", 5);
 pref("network.predictor.page-degradation.month", 10);
@@ -1981,6 +1991,8 @@ pref("network.cookie.lifetime.days",        90); // Ignored unless network.cooki
 
 // The PAC file to load.  Ignored unless network.proxy.type is 2.
 pref("network.proxy.autoconfig_url", "");
+// Strip off paths when sending URLs to PAC scripts
+pref("network.proxy.autoconfig_url.include_path", false);
 
 // If we cannot load the PAC file, then try again (doubling from interval_min
 // until we reach interval_max or the PAC file is successfully loaded).
@@ -2812,13 +2824,8 @@ pref("dom.ipc.plugins.unloadTimeoutSecs", 30);
 // Asynchronous plugin initialization is on hold.
 pref("dom.ipc.plugins.asyncInit.enabled", false);
 
-#ifdef RELEASE_BUILD
-// Allow the AsyncDrawing mode to be used for plugins.
-pref("dom.ipc.plugins.asyncdrawing.enabled", false);
-#else
 // Allow the AsyncDrawing mode to be used for plugins.
 pref("dom.ipc.plugins.asyncdrawing.enabled", true);
-#endif
 
 pref("dom.ipc.processCount", 1);
 
@@ -5550,10 +5557,4 @@ pref("media.block-autoplay-until-in-foreground", true);
 #ifdef MOZ_STYLO
 // Is the Servo-backed style system enabled?
 pref("layout.css.servo.enabled", true);
-#endif
-
-#ifdef NIGHTLY_BUILD
-pref("dom.html_fragment_serialisation.appendLF", true);
-#else
-pref("dom.html_fragment_serialisation.appendLF", false);
 #endif

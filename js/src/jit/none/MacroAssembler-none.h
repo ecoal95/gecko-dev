@@ -109,6 +109,8 @@ class Assembler : public AssemblerShared
         LessThan,
         LessThanOrEqual,
         Overflow,
+        CarrySet,
+        CarryClear,
         Signed,
         NotSigned,
         Zero,
@@ -387,6 +389,8 @@ class MacroAssemblerNone : public Assembler
 
     void loadConstantDouble(double, FloatRegister) { MOZ_CRASH(); }
     void loadConstantFloat32(float, FloatRegister) { MOZ_CRASH(); }
+    void loadConstantDouble(wasm::RawF64, FloatRegister) { MOZ_CRASH(); }
+    void loadConstantFloat32(wasm::RawF32, FloatRegister) { MOZ_CRASH(); }
     Condition testInt32Truthy(bool, ValueOperand) { MOZ_CRASH(); }
     Condition testStringTruthy(bool, ValueOperand) { MOZ_CRASH(); }
 

@@ -85,7 +85,7 @@ var apiManager = new class extends SchemaAPIManager {
       super.registerSchemaAPI(namespace, envType, getAPI);
     }
   }
-};
+}();
 
 // Represents a content script.
 function Script(extension, options, deferred = PromiseUtils.defer()) {
@@ -312,6 +312,7 @@ class ExtensionContext extends BaseContext {
         isWebExtensionContentScript: true,
         wantExportHelpers: true,
         wantGlobalProperties: ["XMLHttpRequest", "fetch"],
+        originAttributes: attrs,
       });
 
       Cu.evalInSandbox(`

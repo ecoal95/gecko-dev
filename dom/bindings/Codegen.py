@@ -10255,15 +10255,18 @@ class ClassDestructor(ClassItem):
 
 class ClassMember(ClassItem):
     def __init__(self, name, type, visibility="private", static=False,
-                 body=None):
+                 body=None, hasIgnoreInitCheckFlag=False):
         self.type = type
         self.static = static
         self.body = body
+        self.hasIgnoreInitCheckFlag = hasIgnoreInitCheckFlag;
         ClassItem.__init__(self, name, visibility)
 
     def declare(self, cgClass):
-        return '%s%s %s;\n' % ('static ' if self.static else '', self.type,
-                               self.name)
+        return '%s%s%s %s;\n' % ('static ' if self.static else '',
+                                 'MOZ_INIT_OUTSIDE_CTOR '
+                                 if self.hasIgnoreInitCheckFlag else '',
+                                 self.type, self.name)
 
     def define(self, cgClass):
         if not self.static:
@@ -11243,31 +11246,50 @@ class CGDOMJSProxyHandler_delete(ClassMethod):
 
         namedBody = getDeleterBody("Named", foundVar="found")
         if namedBody is not None:
+            delete += dedent(
+                """
+                // Try named delete only if the named property visibility
+                // algorithm says the property is visible.
+                bool tryNamedDelete = true;
+                { // Scope for expando
+                  JS::Rooted<JSObject*> expando(cx, DOMProxyHandler::GetExpandoObject(proxy));
+                  if (expando) {
+                    bool hasProp;
+                    if (!JS_HasPropertyById(cx, expando, id, &hasProp)) {
+                      return false;
+                    }
+                    tryNamedDelete = !hasProp;
+                  }
+                }
+                """)
+
+            if not self.descriptor.interface.getExtendedAttribute('OverrideBuiltins'):
+                delete += dedent(
+                    """
+                    if (tryNamedDelete) {
+                      bool hasOnProto;
+                      if (!HasPropertyOnPrototype(cx, proxy, id, &hasOnProto)) {
+                        return false;
+                      }
+                      tryNamedDelete = !hasOnProto;
+                    }
+                    """)
+
             # We always return above for an index id in the case when we support
             # indexed properties, so we can just treat the id as a name
             # unconditionally here.
             delete += fill(
                 """
-                bool found = false;
-                bool deleteSucceeded;
-                $*{namedBody}
-                if (found) {
-                  return deleteSucceeded ? opresult.succeed() : opresult.failCantDelete();
+                if (tryNamedDelete) {
+                  bool found = false;
+                  bool deleteSucceeded;
+                  $*{namedBody}
+                  if (found) {
+                    return deleteSucceeded ? opresult.succeed() : opresult.failCantDelete();
+                  }
                 }
                 """,
                 namedBody=namedBody)
-            if not self.descriptor.interface.getExtendedAttribute('OverrideBuiltins'):
-                delete = fill(
-                    """
-                    bool hasOnProto;
-                    if (!HasPropertyOnPrototype(cx, proxy, id, &hasOnProto)) {
-                      return false;
-                    }
-                    if (!hasOnProto) {
-                      $*{delete}
-                    }
-                    """,
-                    delete=delete)
 
         delete += dedent("""
 
@@ -12500,7 +12522,8 @@ class CGDictionary(CGThing):
         members = [ClassMember(self.makeMemberName(m[0].identifier.name),
                                self.getMemberType(m),
                                visibility="public",
-                               body=self.getMemberInitializer(m))
+                               body=self.getMemberInitializer(m),
+                               hasIgnoreInitCheckFlag=True)
                    for m in self.memberInfo]
         if d.parent:
             # We always want to init our parent with our non-initializing

@@ -11,21 +11,24 @@ CONFIGURE_SUBST_FILES += ['adjust_sdk_app_token']
 include('android-services.mozbuild')
 
 geckoview_source_dir = TOPSRCDIR + '/mobile/android/geckoview/src/main/'
+geckoview_thirdparty_source_dir = TOPSRCDIR + '/mobile/android/geckoview/src/thirdparty/'
 thirdparty_source_dir = TOPSRCDIR + '/mobile/android/thirdparty/'
 
 constants_jar = add_java_jar('constants')
-constants_jar.sources = ['java/org/mozilla/gecko/' + x for x in [
-    'adjust/AdjustHelperInterface.java',
-    'adjust/AttributionHelperListener.java',
+constants_jar.sources += [geckoview_source_dir + 'java/org/mozilla/gecko/' + x for x in [
     'annotation/JNITarget.java',
     'annotation/ReflectionTarget.java',
     'annotation/RobocopTarget.java',
     'annotation/WebRTCJNITarget.java',
     'annotation/WrapForJNI.java',
+    'SysInfo.java',
+]]
+constants_jar.sources += ['java/org/mozilla/gecko/' + x for x in [
+    'adjust/AdjustHelperInterface.java',
+    'adjust/AttributionHelperListener.java',
     'db/BrowserContract.java',
     'LocaleManager.java',
     'Locales.java',
-    'SysInfo.java',
 ]]
 constants_jar.generated_sources = [
     'preprocessed/org/mozilla/gecko/AdjustConstants.java',
@@ -210,7 +213,6 @@ gvjar.sources += [geckoview_source_dir + 'java/org/mozilla/gecko/' + x
                   for x in [
     'AlarmReceiver.java',
     'AndroidGamepadManager.java',
-    'ANRReporter.java',
     'BaseGeckoInterface.java',
     'ContextGetter.java',
     'CrashHandler.java',
@@ -223,12 +225,10 @@ gvjar.sources += [geckoview_source_dir + 'java/org/mozilla/gecko/' + x
     'GeckoEditableListener.java',
     'GeckoHalDefines.java',
     'GeckoInputConnection.java',
-    'GeckoJavaSampler.java',
     'GeckoNetworkManager.java',
     'GeckoProfile.java',
     'GeckoProfileDirectories.java',
     'GeckoScreenOrientation.java',
-    'GeckoService.java',
     'GeckoSharedPrefs.java',
     'GeckoSmsManager.java',
     'GeckoThread.java',
@@ -268,13 +268,7 @@ gvjar.sources += [geckoview_source_dir + 'java/org/mozilla/gecko/' + x
     'gfx/ViewTransform.java',
     'InputConnectionListener.java',
     'InputMethods.java',
-    'notifications/AppNotificationClient.java',
-    'notifications/NotificationClient.java',
-    'notifications/NotificationHandler.java',
-    'notifications/NotificationHelper.java',
-    'notifications/NotificationReceiver.java',
-    'notifications/NotificationService.java',
-    'notifications/ServiceNotificationClient.java',
+    'NotificationListener.java',
     'NSSBridge.java',
     'permissions/PermissionBlock.java',
     'permissions/Permissions.java',
@@ -286,13 +280,12 @@ gvjar.sources += [geckoview_source_dir + 'java/org/mozilla/gecko/' + x
     'sqlite/SQLiteBridge.java',
     'sqlite/SQLiteBridgeException.java',
     'TouchEventInterceptor.java',
-    'widget/SwipeDismissListViewTouchListener.java',
 ]]
 
-gvjar.sources += [thirdparty_source_dir + f for f in [
-    'com/googlecode/eyesfree/braille/selfbraille/ISelfBrailleService.java',
-    'com/googlecode/eyesfree/braille/selfbraille/SelfBrailleClient.java',
-    'com/googlecode/eyesfree/braille/selfbraille/WriteData.java',
+gvjar.sources += [geckoview_thirdparty_source_dir + f for f in [
+    'java/com/googlecode/eyesfree/braille/selfbraille/ISelfBrailleService.java',
+    'java/com/googlecode/eyesfree/braille/selfbraille/SelfBrailleClient.java',
+    'java/com/googlecode/eyesfree/braille/selfbraille/WriteData.java',
 ]]
 
 gvjar.extra_jars += [
@@ -300,7 +293,6 @@ gvjar.extra_jars += [
     CONFIG['ANDROID_SUPPORT_V4_AAR_LIB'],
     CONFIG['ANDROID_SUPPORT_V4_AAR_INTERNAL_LIB'],
     'constants.jar',
-    'gecko-R.jar',
     'gecko-mozglue.jar',
     'gecko-util.jar',
 ]
@@ -327,6 +319,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'animation/PropertyAnimator.java',
     'animation/Rotate3DAnimation.java',
     'animation/ViewHelper.java',
+    'ANRReporter.java',
     'BootReceiver.java',
     'BrowserApp.java',
     'BrowserLocaleManager.java',
@@ -430,8 +423,10 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'GeckoActivityStatus.java',
     'GeckoApp.java',
     'GeckoApplication.java',
+    'GeckoJavaSampler.java',
     'GeckoMessageReceiver.java',
     'GeckoProfilesProvider.java',
+    'GeckoService.java',
     'GeckoUpdateReceiver.java',
     'GlobalHistory.java',
     'GuestSession.java',
@@ -555,11 +550,11 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'media/AsyncCodecFactory.java',
     'media/AudioFocusAgent.java',
     'media/Codec.java',
-    'media/CodecManager.java',
     'media/CodecProxy.java',
     'media/FormatParam.java',
     'media/JellyBeanAsyncCodec.java',
     'media/MediaControlService.java',
+    'media/MediaManager.java',
     'media/RemoteManager.java',
     'media/Sample.java',
     'media/VideoPlayer.java',
@@ -575,6 +570,13 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'menu/MenuPanel.java',
     'menu/MenuPopup.java',
     'MotionEventInterceptor.java',
+    'notifications/AppNotificationClient.java',
+    'notifications/NotificationClient.java',
+    'notifications/NotificationHandler.java',
+    'notifications/NotificationHelper.java',
+    'notifications/NotificationReceiver.java',
+    'notifications/NotificationService.java',
+    'notifications/ServiceNotificationClient.java',
     'notifications/WhatsNewReceiver.java',
     'overlays/OverlayConstants.java',
     'overlays/service/OverlayActionService.java',
@@ -748,6 +750,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'widget/SiteLogins.java',
     'widget/SquaredImageView.java',
     'widget/SquaredRelativeLayout.java',
+    'widget/SwipeDismissListViewTouchListener.java',
     'widget/TabThumbnailWrapper.java',
     'widget/ThumbnailView.java',
     'widget/TwoWayView.java',
@@ -1106,5 +1109,5 @@ OBJDIR_PP_FILES.mobile.android.base += [
 gbjar.sources += ['generated/org/mozilla/gecko/' + x for x in [
     'media/ICodec.java',
     'media/ICodecCallbacks.java',
-    'media/ICodecManager.java',
+    'media/IMediaManager.java',
 ]]

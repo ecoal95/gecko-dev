@@ -18,6 +18,7 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/SheetType.h"
 #include "mozilla/StaticPtr.h"
+#include "mozilla/StyleComplexColor.h"
 #include "mozilla/StyleStructContext.h"
 #include "mozilla/UniquePtr.h"
 #include "nsColor.h"
@@ -45,6 +46,11 @@ class nsStyleContext;
 class nsTextFrame;
 class imgIContainer;
 struct nsStyleVisibility;
+
+typedef nsINode RawGeckoNode;
+typedef mozilla::dom::Element RawGeckoElement;
+typedef nsIDocument RawGeckoDocument;
+struct ServoNodeData;
 
 // Includes nsStyleStructID.
 #include "nsStyleStructFwd.h"
@@ -364,6 +370,7 @@ struct nsStyleImage
   }
   imgRequestProxy* GetImageData() const {
     MOZ_ASSERT(mType == eStyleImageType_Image, "Data is not an image!");
+    MOZ_ASSERT(mImage);
     MOZ_ASSERT(mImageTracked,
                "Should be tracking any image we're going to use!");
     return mImage;
@@ -478,6 +485,11 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleColor
   nsStyleColor(const nsStyleColor& aOther);
   ~nsStyleColor() {
     MOZ_COUNT_DTOR(nsStyleColor);
+  }
+
+  nscolor CalcComplexColor(const mozilla::StyleComplexColor& aColor) const {
+    return mozilla::LinearBlendColors(aColor.mColor, mColor,
+                                      aColor.mForegroundRatio);
   }
 
   nsChangeHint CalcDifference(const nsStyleColor& aNewData) const;
@@ -811,7 +823,7 @@ struct nsStyleImageLayers {
   }
 
   nsChangeHint CalcDifference(const nsStyleImageLayers& aNewLayers,
-                              nsChangeHint aPositionChangeHint) const;
+                              nsStyleImageLayers::LayerType aType) const;
 
   bool HasLayerWithImage() const;
 
@@ -2084,9 +2096,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleText
   uint8_t mTextAlignLast;               // [inherited] see nsStyleConsts.h
   bool mTextAlignTrue : 1;              // [inherited] see nsStyleConsts.h
   bool mTextAlignLastTrue : 1;          // [inherited] see nsStyleConsts.h
-  bool mTextEmphasisColorForeground : 1;// [inherited] whether text-emphasis-color is currentColor
-  bool mWebkitTextFillColorForeground : 1;    // [inherited] whether -webkit-text-fill-color is currentColor
-  bool mWebkitTextStrokeColorForeground : 1;  // [inherited] whether -webkit-text-stroke-color is currentColor
   uint8_t mTextTransform;               // [inherited] see nsStyleConsts.h
   uint8_t mWhiteSpace;                  // [inherited] see nsStyleConsts.h
   uint8_t mWordBreak;                   // [inherited] see nsStyleConsts.h
@@ -2101,9 +2110,9 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleText
   uint8_t mTextEmphasisStyle;           // [inherited] see nsStyleConsts.h
   uint8_t mTextRendering;               // [inherited] see nsStyleConsts.h
   int32_t mTabSize;                     // [inherited] see nsStyleConsts.h
-  nscolor mTextEmphasisColor;           // [inherited]
-  nscolor mWebkitTextFillColor;         // [inherited]
-  nscolor mWebkitTextStrokeColor;       // [inherited]
+  mozilla::StyleComplexColor mTextEmphasisColor;      // [inherited]
+  mozilla::StyleComplexColor mWebkitTextFillColor;    // [inherited]
+  mozilla::StyleComplexColor mWebkitTextStrokeColor;  // [inherited]
 
   nsStyleCoord mWordSpacing;            // [inherited] coord, percent, calc
   nsStyleCoord mLetterSpacing;          // [inherited] coord, normal

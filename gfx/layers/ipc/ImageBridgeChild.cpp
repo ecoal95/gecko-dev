@@ -452,7 +452,9 @@ ImageBridgeChild::ShutdownStep1(SynchronousTask* aTask)
     }
   }
 
-  SendWillClose();
+  if (mCanSend) {
+    SendWillClose();
+  }
   MarkShutDown();
 
   // From now on, no message can be sent through the image bridge from the
@@ -858,9 +860,11 @@ ImageBridgeChild::InitForContent(Endpoint<PImageBridgeChild>&& aEndpoint)
 
   gfxPlatform::GetPlatform();
 
-  sImageBridgeChildThread = new ImageBridgeThread();
-  if (!sImageBridgeChildThread->Start()) {
-    return false;
+  if (!sImageBridgeChildThread) {
+    sImageBridgeChildThread = new ImageBridgeThread();
+    if (!sImageBridgeChildThread->Start()) {
+      return false;
+    }
   }
 
   RefPtr<ImageBridgeChild> child = new ImageBridgeChild();
@@ -878,6 +882,20 @@ ImageBridgeChild::InitForContent(Endpoint<PImageBridgeChild>&& aEndpoint)
   }
 
   return true;
+}
+
+bool
+ImageBridgeChild::ReinitForContent(Endpoint<PImageBridgeChild>&& aEndpoint)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  // Note that at this point, ActorDestroy may not have been called yet,
+  // meaning mCanSend is still true. In this case we will try to send a
+  // synchronous WillClose message to the parent, and will certainly get a
+  // false result and a MsgDropped processing error. This is okay.
+  ShutdownSingleton();
+
+  return InitForContent(Move(aEndpoint));
 }
 
 void
@@ -908,7 +926,19 @@ ImageBridgeChild::BindSameProcess(RefPtr<ImageBridgeParent> aParent)
   SendImageBridgeThreadId();
 }
 
-void ImageBridgeChild::ShutDown()
+/* static */ void
+ImageBridgeChild::ShutDown()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  ShutdownSingleton();
+
+  delete sImageBridgeChildThread;
+  sImageBridgeChildThread = nullptr;
+}
+
+/* static */ void
+ImageBridgeChild::ShutdownSingleton()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -918,9 +948,6 @@ void ImageBridgeChild::ShutDown()
     StaticMutexAutoLock lock(sImageBridgeSingletonLock);
     sImageBridgeChildSingleton = nullptr;
   }
-
-  delete sImageBridgeChildThread;
-  sImageBridgeChildThread = nullptr;
 }
 
 void
@@ -1125,7 +1152,9 @@ ImageBridgeChild::AllocUnsafeShmem(size_t aSize,
     return DispatchAllocShmemInternal(aSize, aType, aShmem, true); // true: unsafe
   }
 
-  MOZ_ASSERT(CanSend());
+  if (!CanSend()) {
+    return false;
+  }
   return PImageBridgeChild::AllocUnsafeShmem(aSize, aType, aShmem);
 }
 
@@ -1138,14 +1167,15 @@ ImageBridgeChild::AllocShmem(size_t aSize,
     return DispatchAllocShmemInternal(aSize, aType, aShmem, false); // false: unsafe
   }
 
-  MOZ_ASSERT(CanSend());
+  if (!CanSend()) {
+    return false;
+  }
   return PImageBridgeChild::AllocShmem(aSize, aType, aShmem);
 }
 
 // NewRunnableFunction accepts a limited number of parameters so we need a
 // struct here
 struct AllocShmemParams {
-  RefPtr<ISurfaceAllocator> mAllocator;
   size_t mSize;
   ipc::SharedMemory::SharedMemoryType mType;
   ipc::Shmem* mShmem;
@@ -1158,18 +1188,17 @@ ImageBridgeChild::ProxyAllocShmemNow(SynchronousTask* aTask, AllocShmemParams* a
 {
   AutoCompleteTask complete(aTask);
 
-  MOZ_ASSERT(aParams);
-
-  auto shmAllocator = aParams->mAllocator->AsShmemAllocator();
-  if (aParams->mUnsafe) {
-    aParams->mSuccess = shmAllocator->AllocUnsafeShmem(aParams->mSize,
-                                                       aParams->mType,
-                                                       aParams->mShmem);
-  } else {
-    aParams->mSuccess = shmAllocator->AllocShmem(aParams->mSize,
-                                                 aParams->mType,
-                                                 aParams->mShmem);
+  if (!CanSend()) {
+    return;
   }
+
+  bool ok = false;
+  if (aParams->mUnsafe) {
+    ok = AllocUnsafeShmem(aParams->mSize, aParams->mType, aParams->mShmem);
+  } else {
+    ok = AllocShmem(aParams->mSize, aParams->mType, aParams->mShmem);
+  }
+  aParams->mSuccess = ok;
 }
 
 bool
@@ -1181,7 +1210,7 @@ ImageBridgeChild::DispatchAllocShmemInternal(size_t aSize,
   SynchronousTask task("AllocatorProxy alloc");
 
   AllocShmemParams params = {
-    this, aSize, aType, aShmem, aUnsafe, true
+    aSize, aType, aShmem, aUnsafe, false
   };
 
   RefPtr<Runnable> runnable = WrapRunnable(
@@ -1203,15 +1232,19 @@ ImageBridgeChild::ProxyDeallocShmemNow(SynchronousTask* aTask,
 {
   AutoCompleteTask complete(aTask);
 
-  MOZ_ASSERT(aShmem);
-
-  aAllocator->AsShmemAllocator()->DeallocShmem(*aShmem);
+  if (!CanSend()) {
+    return;
+  }
+  DeallocShmem(*aShmem);
 }
 
 void
 ImageBridgeChild::DeallocShmem(ipc::Shmem& aShmem)
 {
   if (InImageBridgeChildThread()) {
+    if (!CanSend()) {
+      return;
+    }
     PImageBridgeChild::DeallocShmem(aShmem);
     return;
   }

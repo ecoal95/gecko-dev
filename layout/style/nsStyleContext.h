@@ -32,7 +32,7 @@ enum class CSSPseudoElementType : uint8_t;
  * (with a few exceptions, like system color changes), the data in an
  * nsStyleContext are also immutable (with the additional exception of
  * GetUniqueStyleData).  When style data change,
- * nsFrameManager::ReResolveStyleContext creates a new style context.
+ * ElementRestyler::Restyle creates a new style context.
  *
  * Style contexts are reference counted.  References are generally held
  * by:
@@ -178,32 +178,6 @@ public:
                      mozilla::NonOwningStyleContextSource aSource,
                      mozilla::NonOwningStyleContextSource aSourceIfVisited,
                      bool aRelevantLinkVisited);
-  /**
-   * Get the color property that should be used to fill text.
-   */
-  nsCSSPropertyID GetTextFillColorProp() {
-    return StyleText()->mWebkitTextFillColorForeground
-           ? eCSSProperty_color : eCSSProperty__webkit_text_fill_color;
-  }
-
-  /**
-   * Get the color that should be used to fill text: either
-   * the current foreground color, or a separately-specified text fill color.
-   */
-  nscolor GetTextFillColor() {
-    return (GetTextFillColorProp() == eCSSProperty_color)
-           ? StyleColor()->mColor : StyleText()->mWebkitTextFillColor;
-  }
-
-  /**
-   * Get the color that should be used to stroke text: either
-   * the current foreground color, or a separately-specified text stroke color.
-   */
-  nscolor GetTextStrokeColor() {
-    const nsStyleText* textStyle = StyleText();
-    return textStyle->mWebkitTextStrokeColorForeground
-           ? StyleColor()->mColor : textStyle->mWebkitTextStrokeColor;
-  }
 
   // Does this style context or any of its ancestors have text
   // decoration lines?

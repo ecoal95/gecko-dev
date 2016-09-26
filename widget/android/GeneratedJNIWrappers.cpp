@@ -10,18 +10,6 @@
 namespace mozilla {
 namespace java {
 
-const char ANRReporter::name[] =
-        "org/mozilla/gecko/ANRReporter";
-
-constexpr char ANRReporter::GetNativeStack_t::name[];
-constexpr char ANRReporter::GetNativeStack_t::signature[];
-
-constexpr char ANRReporter::ReleaseNativeStack_t::name[];
-constexpr char ANRReporter::ReleaseNativeStack_t::signature[];
-
-constexpr char ANRReporter::RequestNativeStack_t::name[];
-constexpr char ANRReporter::RequestNativeStack_t::signature[];
-
 const char AlarmReceiver::name[] =
         "org/mozilla/gecko/AlarmReceiver";
 
@@ -680,12 +668,12 @@ auto GeckoAppShell::SetURITitle(mozilla::jni::String::Param a0, mozilla::jni::St
     return mozilla::jni::Method<SetURITitle_t>::Call(GeckoAppShell::Context(), nullptr, a0, a1);
 }
 
-constexpr char GeckoAppShell::ShowAlertNotification_t::name[];
-constexpr char GeckoAppShell::ShowAlertNotification_t::signature[];
+constexpr char GeckoAppShell::ShowNotification_t::name[];
+constexpr char GeckoAppShell::ShowNotification_t::signature[];
 
-auto GeckoAppShell::ShowAlertNotification(mozilla::jni::String::Param a0, mozilla::jni::String::Param a1, mozilla::jni::String::Param a2, mozilla::jni::String::Param a3, mozilla::jni::String::Param a4, mozilla::jni::String::Param a5, mozilla::jni::String::Param a6) -> void
+auto GeckoAppShell::ShowNotification(mozilla::jni::String::Param a0, mozilla::jni::String::Param a1, mozilla::jni::String::Param a2, mozilla::jni::String::Param a3, mozilla::jni::String::Param a4, mozilla::jni::String::Param a5, mozilla::jni::String::Param a6) -> void
 {
-    return mozilla::jni::Method<ShowAlertNotification_t>::Call(GeckoAppShell::Context(), nullptr, a0, a1, a2, a3, a4, a5, a6);
+    return mozilla::jni::Method<ShowNotification_t>::Call(GeckoAppShell::Context(), nullptr, a0, a1, a2, a3, a4, a5, a6);
 }
 
 constexpr char GeckoAppShell::SyncNotifyObservers_t::name[];
@@ -828,68 +816,6 @@ auto GeckoEditable::UpdateCompositionRects(mozilla::jni::ObjectArray::Param a0) 
 
 const char GeckoEditableListener::name[] =
         "org/mozilla/gecko/GeckoEditableListener";
-
-const char GeckoJavaSampler::name[] =
-        "org/mozilla/gecko/GeckoJavaSampler";
-
-constexpr char GeckoJavaSampler::GetFrameName_t::name[];
-constexpr char GeckoJavaSampler::GetFrameName_t::signature[];
-
-auto GeckoJavaSampler::GetFrameName(int32_t a0, int32_t a1, int32_t a2) -> mozilla::jni::String::LocalRef
-{
-    return mozilla::jni::Method<GetFrameName_t>::Call(GeckoJavaSampler::Context(), nullptr, a0, a1, a2);
-}
-
-constexpr char GeckoJavaSampler::GetProfilerTime_t::name[];
-constexpr char GeckoJavaSampler::GetProfilerTime_t::signature[];
-
-constexpr char GeckoJavaSampler::GetSampleTime_t::name[];
-constexpr char GeckoJavaSampler::GetSampleTime_t::signature[];
-
-auto GeckoJavaSampler::GetSampleTime(int32_t a0, int32_t a1) -> double
-{
-    return mozilla::jni::Method<GetSampleTime_t>::Call(GeckoJavaSampler::Context(), nullptr, a0, a1);
-}
-
-constexpr char GeckoJavaSampler::GetThreadName_t::name[];
-constexpr char GeckoJavaSampler::GetThreadName_t::signature[];
-
-auto GeckoJavaSampler::GetThreadName(int32_t a0) -> mozilla::jni::String::LocalRef
-{
-    return mozilla::jni::Method<GetThreadName_t>::Call(GeckoJavaSampler::Context(), nullptr, a0);
-}
-
-constexpr char GeckoJavaSampler::Pause_t::name[];
-constexpr char GeckoJavaSampler::Pause_t::signature[];
-
-auto GeckoJavaSampler::Pause() -> void
-{
-    return mozilla::jni::Method<Pause_t>::Call(GeckoJavaSampler::Context(), nullptr);
-}
-
-constexpr char GeckoJavaSampler::Start_t::name[];
-constexpr char GeckoJavaSampler::Start_t::signature[];
-
-auto GeckoJavaSampler::Start(int32_t a0, int32_t a1) -> void
-{
-    return mozilla::jni::Method<Start_t>::Call(GeckoJavaSampler::Context(), nullptr, a0, a1);
-}
-
-constexpr char GeckoJavaSampler::Stop_t::name[];
-constexpr char GeckoJavaSampler::Stop_t::signature[];
-
-auto GeckoJavaSampler::Stop() -> void
-{
-    return mozilla::jni::Method<Stop_t>::Call(GeckoJavaSampler::Context(), nullptr);
-}
-
-constexpr char GeckoJavaSampler::Unpause_t::name[];
-constexpr char GeckoJavaSampler::Unpause_t::signature[];
-
-auto GeckoJavaSampler::Unpause() -> void
-{
-    return mozilla::jni::Method<Unpause_t>::Call(GeckoJavaSampler::Context(), nullptr);
-}
 
 const char GeckoNetworkManager::name[] =
         "org/mozilla/gecko/GeckoNetworkManager";

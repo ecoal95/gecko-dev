@@ -10,6 +10,7 @@
 #include "mozilla/dom/PContentParent.h"
 #include "mozilla/dom/nsIContentParent.h"
 #include "mozilla/gfx/gfxVarReceiver.h"
+#include "mozilla/gfx/GPUProcessListener.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/FileUtils.h"
@@ -92,6 +93,7 @@ class ContentParent final : public PContentParent
                           , public nsIDOMGeoPositionErrorCallback
                           , public gfx::gfxVarReceiver
                           , public mozilla::LinkedListElement<ContentParent>
+                          , public gfx::GPUProcessListener
 {
   typedef mozilla::ipc::GeckoChildProcessHost GeckoChildProcessHost;
   typedef mozilla::ipc::OptionalURIParams OptionalURIParams;
@@ -268,6 +270,8 @@ public:
                                nsresult* aRv,
                                nsTArray<PluginTag>* aPlugins,
                                uint32_t* aNewPluginEpoch) override;
+
+  virtual bool RecvInitVideoDecoderManager(Endpoint<PVideoDecoderManagerChild>* endpoint) override;
 
   virtual bool RecvUngrabPointer(const uint32_t& aTime) override;
 
@@ -574,6 +578,7 @@ protected:
   bool ShouldContinueFromReplyTimeout() override;
 
   void OnVarChanged(const GfxVarUpdate& aVar) override;
+  void OnCompositorUnexpectedShutdown() override;
 
 private:
   static nsDataHashtable<nsStringHashKey, ContentParent*> *sAppContentParents;
@@ -1137,6 +1142,10 @@ private:
 
   virtual bool RecvDeleteGetFilesRequest(const nsID& aID) override;
 
+  virtual bool RecvAccumulateChildHistogram(
+                  InfallibleTArray<Accumulation>&& aAccumulations) override;
+  virtual bool RecvAccumulateChildKeyedHistogram(
+                  InfallibleTArray<KeyedAccumulation>&& aAccumulations) override;
 public:
   void SendGetFilesResponseAndForget(const nsID& aID,
                                      const GetFilesResponseResult& aResult);

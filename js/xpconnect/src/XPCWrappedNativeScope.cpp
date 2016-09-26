@@ -293,9 +293,11 @@ XPCWrappedNativeScope::EnsureContentXBLScope(JSContext* cx)
     // Use an nsExpandedPrincipal to create asymmetric security.
     nsIPrincipal* principal = GetPrincipal();
     MOZ_ASSERT(!nsContentUtils::IsExpandedPrincipal(principal));
-    nsTArray< nsCOMPtr<nsIPrincipal> > principalAsArray(1);
+    nsTArray<nsCOMPtr<nsIPrincipal>> principalAsArray(1);
     principalAsArray.AppendElement(principal);
-    nsCOMPtr<nsIExpandedPrincipal> ep = new nsExpandedPrincipal(principalAsArray);
+    nsCOMPtr<nsIExpandedPrincipal> ep =
+        new nsExpandedPrincipal(principalAsArray,
+                                BasePrincipal::Cast(principal)->OriginAttributesRef());
 
     // Create the sandbox.
     RootedValue v(cx);
@@ -573,42 +575,6 @@ XPCWrappedNativeScope::UpdateWeakPointersAfterGC(XPCJSContext* cx)
         cur = next;
     }
 }
-
-// static
-void
-XPCWrappedNativeScope::MarkAllWrappedNativesAndProtos()
-{
-    for (XPCWrappedNativeScope* cur = gScopes; cur; cur = cur->mNext) {
-        for (auto i = cur->mWrappedNativeMap->Iter(); !i.Done(); i.Next()) {
-            auto entry = static_cast<Native2WrappedNativeMap::Entry*>(i.Get());
-            entry->value->Mark();
-        }
-        // We need to explicitly mark all the protos too because some protos may be
-        // alive in the hashtable but not currently in use by any wrapper
-        for (auto i = cur->mWrappedNativeProtoMap->Iter(); !i.Done(); i.Next()) {
-            auto entry = static_cast<ClassInfo2WrappedNativeProtoMap::Entry*>(i.Get());
-            entry->value->Mark();
-        }
-    }
-}
-
-#ifdef DEBUG
-// static
-void
-XPCWrappedNativeScope::ASSERT_NoInterfaceSetsAreMarked()
-{
-    for (XPCWrappedNativeScope* cur = gScopes; cur; cur = cur->mNext) {
-        for (auto i = cur->mWrappedNativeMap->Iter(); !i.Done(); i.Next()) {
-            auto entry = static_cast<Native2WrappedNativeMap::Entry*>(i.Get());
-            entry->value->ASSERT_SetsNotMarked();
-        }
-        for (auto i = cur->mWrappedNativeProtoMap->Iter(); !i.Done(); i.Next()) {
-            auto entry = static_cast<ClassInfo2WrappedNativeProtoMap::Entry*>(i.Get());
-            entry->value->ASSERT_SetNotMarked();
-        }
-    }
-}
-#endif
 
 // static
 void

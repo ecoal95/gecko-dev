@@ -362,17 +362,17 @@ nsScriptSecurityManager::GetChannelResultPrincipal(nsIChannel* aChannel,
             return NS_OK;
         }
 
-        bool forceInterit = loadInfo->GetForceInheritPrincipal();
-        if (aIgnoreSandboxing && !forceInterit) {
+        bool forceInherit = loadInfo->GetForceInheritPrincipal();
+        if (aIgnoreSandboxing && !forceInherit) {
           // Check if SEC_FORCE_INHERIT_PRINCIPAL was dropped because of
           // sandboxing:
           if (loadInfo->GetLoadingSandboxed() &&
               loadInfo->GetForceInheritPrincipalDropped()) {
-            forceInterit = true;
+            forceInherit = true;
           }
         }
-        if (forceInterit) {
-            NS_ADDREF(*aPrincipal = loadInfo->TriggeringPrincipal());
+        if (forceInherit) {
+            NS_ADDREF(*aPrincipal = loadInfo->PrincipalToInherit());
             return NS_OK;
         }
 
@@ -383,15 +383,15 @@ nsScriptSecurityManager::GetChannelResultPrincipal(nsIChannel* aChannel,
 
             nsCOMPtr<nsIURI> uri;
             nsresult rv = NS_GetFinalChannelURI(aChannel, getter_AddRefs(uri));
-            NS_ENSURE_SUCCESS(rv, rv);
-            nsCOMPtr<nsIPrincipal> triggeringPrincipal = loadInfo->TriggeringPrincipal();
+            NS_ENSURE_SUCCESS(rv, rv); 
+            nsCOMPtr<nsIPrincipal> principalToInherit = loadInfo->PrincipalToInherit();
             bool inheritForAboutBlank = loadInfo->GetAboutBlankInherits();
 
-            if (nsContentUtils::ChannelShouldInheritPrincipal(triggeringPrincipal,
-                                                               uri,
-                                                               inheritForAboutBlank,
-                                                               false)) {
-                triggeringPrincipal.forget(aPrincipal);
+            if (nsContentUtils::ChannelShouldInheritPrincipal(principalToInherit,
+                                                              uri,
+                                                              inheritForAboutBlank,
+                                                              false)) {
+                principalToInherit.forget(aPrincipal);
                 return NS_OK;
             }
         }
@@ -1178,21 +1178,6 @@ nsScriptSecurityManager::CreateNullPrincipal(JS::Handle<JS::Value> aOriginAttrib
   }
   nsCOMPtr<nsIPrincipal> prin = nsNullPrincipal::Create(attrs);
   prin.forget(aPrincipal);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsScriptSecurityManager::CreateExpandedPrincipal(nsIPrincipal** aPrincipalArray, uint32_t aLength,
-                                                 nsIPrincipal** aResult)
-{
-  nsTArray<nsCOMPtr<nsIPrincipal>> principals;
-  principals.SetCapacity(aLength);
-  for (uint32_t i = 0; i < aLength; ++i) {
-    principals.AppendElement(aPrincipalArray[i]);
-  }
-
-  nsCOMPtr<nsIPrincipal> p = new nsExpandedPrincipal(principals);
-  p.forget(aResult);
   return NS_OK;
 }
 

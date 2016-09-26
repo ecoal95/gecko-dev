@@ -510,8 +510,6 @@ public:
    */
   static PTextureChild* CreateIPDLActor();
   static bool DestroyIPDLActor(PTextureChild* actor);
-  // call this if the transaction that was supposed to destroy the actor failed.
-  static bool DestroyFallback(PTextureChild* actor);
 
   /**
    * Get the TextureClient corresponding to the actor passed in parameter.
@@ -582,7 +580,7 @@ public:
    * Should be called only once per TextureClient.
    * The TextureClient must not be locked when calling this method.
    */
-  bool InitIPDLActor(TextureForwarder* aForwarder, LayersBackend aBackendType);
+  bool InitIPDLActor(TextureForwarder* aForwarder);
 
   /**
    * Return a pointer to the IPDLActor.

@@ -456,6 +456,7 @@ class TestEmitterBasic(unittest.TestCase):
         paths = sorted([v[0] for v in o.installs.values()])
         self.assertEqual(paths, expected)
 
+    @unittest.skip('Bug 1304316 - Items in the second set but not the first')
     def test_test_manifest_shared_support_files(self):
         """Support files starting with '!' are given separate treatment, so their
         installation can be resolved when running tests.
@@ -1014,11 +1015,25 @@ class TestEmitterBasic(unittest.TestCase):
              'Cargo.toml for.* has no \\[lib\\] section'):
             self.read_topsrcdir(reader)
 
+    def test_rust_library_no_profile_section(self):
+        '''Test that a RustLibrary Cargo.toml with no [profile] section fails.'''
+        reader = self.reader('rust-library-no-profile-section')
+        with self.assertRaisesRegexp(SandboxValidationError,
+             'Cargo.toml for.* has no \\[profile\\.dev\\] section'):
+            self.read_topsrcdir(reader)
+
     def test_rust_library_invalid_crate_type(self):
         '''Test that a RustLibrary Cargo.toml has a permitted crate-type.'''
         reader = self.reader('rust-library-invalid-crate-type')
         with self.assertRaisesRegexp(SandboxValidationError,
              'crate-type.* is not permitted'):
+            self.read_topsrcdir(reader)
+
+    def test_rust_library_non_abort_panic(self):
+        '''Test that a RustLibrary Cargo.toml has `panic = "abort" set'''
+        reader = self.reader('rust-library-non-abort-panic')
+        with self.assertRaisesRegexp(SandboxValidationError,
+             'does not specify `panic = "abort"`'):
             self.read_topsrcdir(reader)
 
     def test_rust_library_dash_folding(self):

@@ -1,10 +1,13 @@
 {
   "name": "devtools",
-  "version": "0.1",
+  "version": "0.0.1",
   "description": "",
   "main": "",
   "scripts": {
     "build": "webpack"
+  },
+  "babel":  {
+    "presets": [ "es2015" ]
   },
   "author": "",
   "license": "",
