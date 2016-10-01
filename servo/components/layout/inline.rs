@@ -20,13 +20,12 @@ use fragment::SpecificFragmentInfo;
 use gfx::display_list::{OpaqueNode, StackingContext};
 use gfx::font::FontMetrics;
 use gfx::font_context::FontContext;
-use gfx_traits::StackingContextId;
 use gfx_traits::print_tree::PrintTree;
 use layout_debug;
 use model::IntrinsicISizesContribution;
 use range::{Range, RangeIndex};
-use script_layout_interface::restyle_damage::{BUBBLE_ISIZES, REFLOW};
-use script_layout_interface::restyle_damage::{REFLOW_OUT_OF_FLOW, RESOLVE_GENERATED_CONTENT};
+use script_layout_interface::restyle_damage::{BUBBLE_ISIZES, REFLOW, REFLOW_OUT_OF_FLOW};
+use script_layout_interface::restyle_damage::{REPOSITION, RESOLVE_GENERATED_CONTENT};
 use script_layout_interface::wrapper_traits::PseudoElementType;
 use std::{fmt, i32, isize, mem};
 use std::cmp::max;
@@ -1262,13 +1261,16 @@ impl InlineFlow {
     }
 
     pub fn baseline_offset_of_last_line(&self) -> Option<Au> {
-        match self.lines.last() {
-            None => None,
-            Some(ref last_line) => {
-                Some(last_line.bounds.start.b + last_line.bounds.size.block -
-                     last_line.inline_metrics.depth_below_baseline)
+        // Find the last line that doesn't consist entirely of hypothetical boxes.
+        for line in self.lines.iter().rev() {
+            if (line.range.begin().get()..line.range.end().get()).any(|index| {
+                !self.fragments.fragments[index as usize].is_hypothetical()
+            }) {
+                return Some(line.bounds.start.b + line.bounds.size.block -
+                            line.inline_metrics.depth_below_baseline)
             }
         }
+        None
     }
 }
 
@@ -1451,7 +1453,6 @@ impl Flow for InlineFlow {
                                            self.minimum_depth_below_baseline);
         scanner.scan_for_lines(self, layout_context);
 
-
         // Now, go through each line and lay out the fragments inside.
         let line_count = self.lines.len();
         for (line_index, line) in self.lines.iter_mut().enumerate() {
@@ -1481,7 +1482,10 @@ impl Flow for InlineFlow {
                     flow::base(kid).flags.is_float() {
                 continue
             }
-            kid.assign_block_size_for_inorder_child_if_necessary(layout_context, thread_id);
+            let content_box = flow::base(kid).position;
+            kid.assign_block_size_for_inorder_child_if_necessary(layout_context,
+                                                                 thread_id,
+                                                                 content_box);
         }
 
         if self.contains_positioned_fragments() {
@@ -1650,17 +1654,16 @@ impl Flow for InlineFlow {
                 _ => {}
             }
         }
+
+        self.base.restyle_damage.remove(REPOSITION)
     }
 
     fn update_late_computed_inline_position_if_necessary(&mut self, _: Au) {}
 
     fn update_late_computed_block_position_if_necessary(&mut self, _: Au) {}
 
-    fn collect_stacking_contexts(&mut self,
-                                 parent_id: StackingContextId,
-                                 contexts: &mut Vec<Box<StackingContext>>)
-                                 -> StackingContextId {
-        self.collect_stacking_contexts_for_inline(parent_id, contexts)
+    fn collect_stacking_contexts(&mut self, parent: &mut StackingContext) {
+        self.collect_stacking_contexts_for_inline(parent);
     }
 
     fn build_display_list(&mut self, state: &mut DisplayListBuildState) {
