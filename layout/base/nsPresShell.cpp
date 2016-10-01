@@ -21,7 +21,7 @@
 #include "mozilla/Logging.h"
 
 #include "mozilla/ArrayUtils.h"
-#include "mozilla/CSSStyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
@@ -193,8 +193,8 @@
 #include "nsStyleSet.h"
 #include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSetHandleInlines.h"
-#include "mozilla/StyleSheetHandle.h"
-#include "mozilla/StyleSheetHandleInlines.h"
+#include "mozilla/StyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 
 #ifdef ANDROID
 #include "nsIDocShellTreeOwner.h"
@@ -731,6 +731,7 @@ nsIPresShell::FrameSelection()
 static bool sSynthMouseMove = true;
 static uint32_t sNextPresShellId;
 static bool sPointerEventEnabled = true;
+static bool sPointerEventImplicitCapture = false;
 static bool sAccessibleCaretEnabled = false;
 static bool sAccessibleCaretOnTouch = false;
 static bool sBeforeAfterKeyboardEventEnabled = false;
@@ -808,7 +809,13 @@ PresShell::PresShell()
                                  "dom.w3c_pointer_events.enabled", true);
     addedPointerEventEnabled = true;
   }
-
+  static bool addedPointerEventImplicitCapture = false;
+  if (!addedPointerEventImplicitCapture) {
+    Preferences::AddBoolVarCache(&sPointerEventImplicitCapture,
+                                 "dom.w3c_pointer_events.implicit_capture",
+                                 true);
+    addedPointerEventImplicitCapture = true;
+  }
   mPaintingIsFrozen = false;
   mHasCSSBackgroundColor = true;
   mIsLastChromeOnlyEscapeKeyConsumed = false;
@@ -1404,7 +1411,7 @@ PresShell::UpdatePreferenceStyles()
   // (See nsPresContext::GetDocumentColorPreferences for how whether we
   // are a chrome origin image affects some pref styling information.)
   auto cache = nsLayoutStylesheetCache::For(mStyleSet->BackendType());
-  StyleSheetHandle::RefPtr newPrefSheet =
+  RefPtr<StyleSheet> newPrefSheet =
     mPresContext->IsChromeOriginImage() ?
       cache->ChromePreferenceSheet(mPresContext) :
       cache->ContentPreferenceSheet(mPresContext);
@@ -1451,16 +1458,16 @@ PresShell::AddUserSheet(nsISupports* aSheet)
   mStyleSet->BeginUpdate();
 
   nsStyleSheetService* sheetService = nsStyleSheetService::gInstance;
-  nsTArray<StyleSheetHandle::RefPtr>& userSheets = *sheetService->UserStyleSheets();
+  nsTArray<RefPtr<StyleSheet>>& userSheets = *sheetService->UserStyleSheets();
   // Iterate forwards when removing so the searches for RemoveStyleSheet are as
   // short as possible.
-  for (StyleSheetHandle sheet : userSheets) {
+  for (StyleSheet* sheet : userSheets) {
     mStyleSet->RemoveStyleSheet(SheetType::User, sheet);
   }
 
   // Now iterate backwards, so that the order of userSheets will be the same as
   // the order of sheets from it in the style set.
-  for (StyleSheetHandle sheet : Reversed(userSheets)) {
+  for (StyleSheet* sheet : Reversed(userSheets)) {
     mStyleSet->PrependStyleSheet(SheetType::User, sheet);
   }
 
@@ -1497,7 +1504,7 @@ PresShell::AddAuthorSheet(nsISupports* aSheet)
 
   // Document specific "additional" Author sheets should be stronger than the
   // ones added with the StyleSheetService.
-  StyleSheetHandle firstAuthorSheet =
+  StyleSheet* firstAuthorSheet =
     mDocument->GetFirstAdditionalAuthorSheet();
   if (firstAuthorSheet) {
     mStyleSet->InsertStyleSheetBefore(SheetType::Doc, sheet, firstAuthorSheet);
@@ -4530,7 +4537,7 @@ nsIPresShell::RestyleForCSSRuleChanges()
 }
 
 void
-PresShell::RecordStyleSheetChange(StyleSheetHandle aStyleSheet)
+PresShell::RecordStyleSheetChange(StyleSheet* aStyleSheet)
 {
   // too bad we can't check that the update is UPDATE_STYLE
   NS_ASSERTION(mUpdateCount != 0, "must be in an update");
@@ -4554,7 +4561,7 @@ PresShell::RecordStyleSheetChange(StyleSheetHandle aStyleSheet)
 }
 
 void
-PresShell::StyleSheetAdded(StyleSheetHandle aStyleSheet,
+PresShell::StyleSheetAdded(StyleSheet* aStyleSheet,
                            bool aDocumentSheet)
 {
   // We only care when enabled sheets are added
@@ -4566,7 +4573,7 @@ PresShell::StyleSheetAdded(StyleSheetHandle aStyleSheet,
 }
 
 void
-PresShell::StyleSheetRemoved(StyleSheetHandle aStyleSheet,
+PresShell::StyleSheetRemoved(StyleSheet* aStyleSheet,
                              bool aDocumentSheet)
 {
   // We only care when enabled sheets are removed
@@ -4578,7 +4585,7 @@ PresShell::StyleSheetRemoved(StyleSheetHandle aStyleSheet,
 }
 
 void
-PresShell::StyleSheetApplicableStateChanged(StyleSheetHandle aStyleSheet)
+PresShell::StyleSheetApplicableStateChanged(StyleSheet* aStyleSheet)
 {
   if (aStyleSheet->HasRules()) {
     RecordStyleSheetChange(aStyleSheet);
@@ -4586,19 +4593,19 @@ PresShell::StyleSheetApplicableStateChanged(StyleSheetHandle aStyleSheet)
 }
 
 void
-PresShell::StyleRuleChanged(StyleSheetHandle aStyleSheet)
+PresShell::StyleRuleChanged(StyleSheet* aStyleSheet)
 {
   RecordStyleSheetChange(aStyleSheet);
 }
 
 void
-PresShell::StyleRuleAdded(StyleSheetHandle aStyleSheet)
+PresShell::StyleRuleAdded(StyleSheet* aStyleSheet)
 {
   RecordStyleSheetChange(aStyleSheet);
 }
 
 void
-PresShell::StyleRuleRemoved(StyleSheetHandle aStyleSheet)
+PresShell::StyleRuleRemoved(StyleSheet* aStyleSheet)
 {
   RecordStyleSheetChange(aStyleSheet);
 }
@@ -7691,6 +7698,19 @@ PresShell::HandleEvent(nsIFrame* aFrame,
         if (!frameKeeper.IsAlive()) {
           frame = nullptr;
         }
+        // Implicit pointer capture for touch
+        if (sPointerEventImplicitCapture &&
+            pointerEvent->mMessage == ePointerDown &&
+            pointerEvent->inputSource == nsIDOMMouseEvent::MOZ_SOURCE_TOUCH) {
+          nsCOMPtr<nsIContent> targetContent;
+          frame->GetContentForEvent(aEvent, getter_AddRefs(targetContent));
+          while (targetContent && !targetContent->IsElement()) {
+            targetContent = targetContent->GetParent();
+          }
+          if (targetContent) {
+            SetPointerCapturingContent(pointerEvent->pointerId, targetContent);
+          }
+        }
       }
     }
 
@@ -8942,7 +8962,7 @@ PresShell::IsVisible()
 }
 
 nsresult
-PresShell::GetAgentStyleSheets(nsTArray<StyleSheetHandle::RefPtr>& aSheets)
+PresShell::GetAgentStyleSheets(nsTArray<RefPtr<StyleSheet>>& aSheets)
 {
   aSheets.Clear();
   int32_t sheetCount = mStyleSet->SheetCount(SheetType::Agent);
@@ -8952,7 +8972,7 @@ PresShell::GetAgentStyleSheets(nsTArray<StyleSheetHandle::RefPtr>& aSheets)
   }
 
   for (int32_t i = 0; i < sheetCount; ++i) {
-    StyleSheetHandle sheet = mStyleSet->StyleSheetAt(SheetType::Agent, i);
+    StyleSheet* sheet = mStyleSet->StyleSheetAt(SheetType::Agent, i);
     aSheets.AppendElement(sheet);
   }
 
@@ -8960,19 +8980,19 @@ PresShell::GetAgentStyleSheets(nsTArray<StyleSheetHandle::RefPtr>& aSheets)
 }
 
 nsresult
-PresShell::SetAgentStyleSheets(const nsTArray<StyleSheetHandle::RefPtr>& aSheets)
+PresShell::SetAgentStyleSheets(const nsTArray<RefPtr<StyleSheet>>& aSheets)
 {
   return mStyleSet->ReplaceSheets(SheetType::Agent, aSheets);
 }
 
 nsresult
-PresShell::AddOverrideStyleSheet(StyleSheetHandle aSheet)
+PresShell::AddOverrideStyleSheet(StyleSheet* aSheet)
 {
   return mStyleSet->PrependStyleSheet(SheetType::Override, aSheet);
 }
 
 nsresult
-PresShell::RemoveOverrideStyleSheet(StyleSheetHandle aSheet)
+PresShell::RemoveOverrideStyleSheet(StyleSheet* aSheet)
 {
   return mStyleSet->RemoveStyleSheet(SheetType::Override, aSheet);
 }

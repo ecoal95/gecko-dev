@@ -105,6 +105,12 @@ protected:
                       const SerializedLoadContext& aSerialized,
                       const HttpChannelCreationArgs& aOpenArgs) override;
   virtual bool DeallocPHttpChannelParent(PHttpChannelParent*) override;
+
+  virtual PAltDataOutputStreamParent* AllocPAltDataOutputStreamParent(
+    const nsCString& type, PHttpChannelParent* channel) override;
+  virtual bool DeallocPAltDataOutputStreamParent(
+    PAltDataOutputStreamParent* aActor) override;
+
   virtual bool DeallocPCookieServiceParent(PCookieServiceParent*) override;
   virtual PWyciwygChannelParent* AllocPWyciwygChannelParent() override;
   virtual bool DeallocPWyciwygChannelParent(PWyciwygChannelParent*) override;
@@ -234,11 +240,6 @@ protected:
 private:
   RefPtr<OfflineObserver> mObserver;
 };
-
-/**
- * Reference to the PNecko Parent protocol.
- */
-extern PNeckoParent *gNeckoParent;
 
 } // namespace net
 } // namespace mozilla

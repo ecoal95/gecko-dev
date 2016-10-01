@@ -374,6 +374,10 @@ gfxWindowsPlatform::InitAcceleration()
   if (!mDWriteFactory && GetDefaultContentBackend() == BackendType::SKIA) {
     InitDWriteSupport();
   }
+
+  // CanUseHardwareVideoDecoding depends on DeviceManagerDx state,
+  // so update the cached value now.
+  UpdateCanUseHardwareVideoDecoding();
 }
 
 bool
@@ -2030,7 +2034,7 @@ gfxWindowsPlatform::ImportGPUDeviceData(const mozilla::gfx::GPUDeviceData& aData
 
   // CanUseHardwareVideoDecoding depends on d3d11 state, so update
   // the cached value now.
-  UpdateCanUseHardareVideoDecoding();
+  UpdateCanUseHardwareVideoDecoding();
 
   // For completeness (and messaging in about:support). Content recomputes this
   // on its own, and we won't use ANGLE in the UI process if we're using a GPU

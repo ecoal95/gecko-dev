@@ -15,6 +15,8 @@
 #include "mozilla/net/WebSocketChannelParent.h"
 #include "mozilla/net/WebSocketEventListenerParent.h"
 #include "mozilla/net/DataChannelParent.h"
+#include "mozilla/net/AltDataOutputStreamParent.h"
+#include "mozilla/Unused.h"
 #ifdef NECKO_PROTOCOL_rtsp
 #include "mozilla/net/RtspControllerParent.h"
 #include "mozilla/net/RtspChannelParent.h"
@@ -63,8 +65,6 @@ using IPC::SerializedLoadContext;
 namespace mozilla {
 namespace net {
 
-PNeckoParent *gNeckoParent = nullptr;
-
 // C++ file contents
 NeckoParent::NeckoParent()
 {
@@ -75,7 +75,6 @@ NeckoParent::NeckoParent()
     do_GetService("@mozilla.org/network/protocol;1?name=http");
 
   mObserver = new OfflineObserver(this);
-  gNeckoParent = this;
 
   // only register once--we will have multiple NeckoParents if there are
   // multiple child processes.
@@ -89,7 +88,6 @@ NeckoParent::NeckoParent()
 
 NeckoParent::~NeckoParent()
 {
-  gNeckoParent = nullptr;
   if (mObserver) {
     mObserver->RemoveObserver();
   }
@@ -255,6 +253,30 @@ NeckoParent::RecvPHttpChannelConstructor(
 {
   HttpChannelParent* p = static_cast<HttpChannelParent*>(aActor);
   return p->Init(aOpenArgs);
+}
+
+PAltDataOutputStreamParent*
+NeckoParent::AllocPAltDataOutputStreamParent(
+        const nsCString& type,
+        PHttpChannelParent* channel)
+{
+  HttpChannelParent* chan = static_cast<HttpChannelParent*>(channel);
+  nsCOMPtr<nsIOutputStream> stream;
+  nsresult rv = chan->OpenAlternativeOutputStream(type, getter_AddRefs(stream));
+  AltDataOutputStreamParent* parent = new AltDataOutputStreamParent(stream);
+  parent->AddRef();
+  // If the return value was not NS_OK, the error code will be sent
+  // asynchronously to the child, after receiving the first message.
+  parent->SetError(rv);
+  return parent;
+}
+
+bool
+NeckoParent::DeallocPAltDataOutputStreamParent(PAltDataOutputStreamParent* aActor)
+{
+  AltDataOutputStreamParent* parent = static_cast<AltDataOutputStreamParent*>(aActor);
+  parent->Release();
+  return true;
 }
 
 PFTPChannelParent*

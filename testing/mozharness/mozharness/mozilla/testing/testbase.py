@@ -199,8 +199,8 @@ class TestingMixin(VirtualenvMixin, BuildbotMixin, ResourceMonitoringMixin,
                 if symbols_url:
                     self._urlopen(symbols_url, timeout=120)
                     self.symbols_url = symbols_url
-            except (urllib2.URLError, socket.error, socket.timeout):
-                self.exception("Can't figure out symbols_url from installer_url: %s!" % self.installer_url, level=WARNING)
+            except (urllib2.HTTPError, urllib2.URLError, socket.error, socket.timeout):
+                self.warning("Can't figure out symbols_url from installer_url: %s!" % self.installer_url)
 
         # If no symbols URL can be determined let minidump_stackwalk query the symbols.
         # As of now this only works for Nightly and release builds.

@@ -109,7 +109,7 @@
 #include "mozilla/css/ImageLoader.h"
 #include "mozilla/layers/APZCTreeManager.h" // for layers::ZoomToRectBehavior
 #include "mozilla/dom/Promise.h"
-#include "mozilla/CSSStyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 
 #ifdef XP_WIN
 #undef GetClassName
@@ -3496,6 +3496,19 @@ nsDOMWindowUtils::GetIsHandlingUserInput(bool* aHandlingUserInput)
 {
   *aHandlingUserInput = EventStateManager::IsHandlingUserInput();
 
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::GetMillisSinceLastUserInput(double* aMillisSinceLastUserInput)
+{
+  TimeStamp lastInput = EventStateManager::LatestUserInputStart();
+  if (lastInput.IsNull()) {
+    *aMillisSinceLastUserInput = 0;
+    return NS_OK;
+  }
+
+  *aMillisSinceLastUserInput = (TimeStamp::Now() - lastInput).ToMilliseconds();
   return NS_OK;
 }
 

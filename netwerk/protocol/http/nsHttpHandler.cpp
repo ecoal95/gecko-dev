@@ -62,6 +62,8 @@
 #include "mozilla/Unused.h"
 #include "mozilla/BasePrincipal.h"
 
+#include "mozilla/dom/ContentParent.h"
+
 #if defined(XP_UNIX)
 #include <sys/utsname.h>
 #endif
@@ -2224,8 +2226,14 @@ nsHttpHandler::SpeculativeConnectInternal(nsIURI *aURI,
         // feature
         obsService->NotifyObservers(nullptr, "speculative-connect-request",
                                     nullptr);
-        if (!IsNeckoChild() && gNeckoParent) {
-            Unused << gNeckoParent->SendSpeculativeConnectRequest();
+        if (!IsNeckoChild()) {
+            for (auto* cp : dom::ContentParent::AllProcesses(dom::ContentParent::eLive)) {
+                PNeckoParent* neckoParent = SingleManagedOrNull(cp->ManagedPNeckoParent());
+                if (!neckoParent) {
+                    continue;
+                }
+                Unused << neckoParent->SendSpeculativeConnectRequest();
+            }
         }
     }
 
@@ -2240,7 +2248,8 @@ nsHttpHandler::SpeculativeConnectInternal(nsIURI *aURI,
         flags |= nsISocketProvider::NO_PERMANENT_STORAGE;
     nsCOMPtr<nsIURI> clone;
     if (NS_SUCCEEDED(sss->IsSecureURI(nsISiteSecurityService::HEADER_HSTS,
-                                      aURI, flags, &isStsHost)) && isStsHost) {
+                                      aURI, flags, nullptr, &isStsHost)) &&
+                                      isStsHost) {
         if (NS_SUCCEEDED(NS_GetSecureUpgradedURI(aURI,
                                                  getter_AddRefs(clone)))) {
             aURI = clone.get();

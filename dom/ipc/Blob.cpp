@@ -1307,6 +1307,12 @@ RemoteInputStream::Deserialize(const InputStreamParams& /* aParams */,
   MOZ_CRASH("RemoteInputStream should never be deserialized");
 }
 
+Maybe<uint64_t>
+RemoteInputStream::ExpectedSerializedLength()
+{
+  return Nothing();
+}
+
 nsIInputStream*
 RemoteInputStream::BlockAndGetInternalStream()
 {
@@ -3574,10 +3580,7 @@ BlobChild::SetMysteryBlobInfo(const nsString& aContentType, uint64_t aLength)
   MOZ_ASSERT(mBlobImpl);
   MOZ_ASSERT(mRemoteBlobImpl);
 
-  nsString voidString;
-  voidString.SetIsVoid(true);
-
-  mBlobImpl->SetLazyData(voidString, aContentType, aLength, INT64_MAX);
+  mBlobImpl->SetLazyData(NullString(), aContentType, aLength, INT64_MAX);
 
   NormalBlobConstructorParams params(aContentType,
                                      aLength,
@@ -4400,10 +4403,7 @@ BlobParent::RecvResolveMystery(const ResolveMysteryParams& aParams)
         return false;
       }
 
-      nsString voidString;
-      voidString.SetIsVoid(true);
-
-      mBlobImpl->SetLazyData(voidString,
+      mBlobImpl->SetLazyData(NullString(),
                              params.contentType(),
                              params.length(),
                              INT64_MAX);

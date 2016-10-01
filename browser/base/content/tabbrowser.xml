@@ -1500,6 +1500,7 @@
             var aNoReferrer;
             var aUserContextId;
             var aRelatedBrowser;
+            var aOriginPrincipal;
             if (arguments.length == 2 &&
                 typeof arguments[1] == "object" &&
                 !(arguments[1] instanceof Ci.nsIURI)) {
@@ -1518,6 +1519,7 @@
               aNoReferrer           = params.noReferrer;
               aUserContextId        = params.userContextId;
               aRelatedBrowser       = params.relatedBrowser;
+              aOriginPrincipal      = params.originPrincipal;
             }
 
             var bgLoad = (aLoadInBackground != null) ? aLoadInBackground :
@@ -1537,6 +1539,7 @@
                                   forceNotRemote: aForceNotRemote,
                                   noReferrer: aNoReferrer,
                                   userContextId: aUserContextId,
+                                  originPrincipal: aOriginPrincipal,
                                   relatedBrowser: aRelatedBrowser });
             if (!bgLoad)
               this.selectedTab = tab;
@@ -2043,6 +2046,7 @@
             var aUserContextId;
             var aEventDetail;
             var aRelatedBrowser;
+            var aOriginPrincipal;
             if (arguments.length == 2 &&
                 typeof arguments[1] == "object" &&
                 !(arguments[1] instanceof Ci.nsIURI)) {
@@ -2062,6 +2066,7 @@
               aUserContextId        = params.userContextId;
               aEventDetail          = params.eventDetail;
               aRelatedBrowser       = params.relatedBrowser;
+              aOriginPrincipal      = params.originPrincipal;
             }
 
             // if we're adding tabs, we're past interrupt mode, ditch the owner
@@ -2140,6 +2145,10 @@
             var detail = aEventDetail || {};
             var evt = new CustomEvent("TabOpen", { bubbles: true, detail });
             t.dispatchEvent(evt);
+
+            if (!usingPreloadedContent && aOriginPrincipal) {
+              b.createAboutBlankContentViewer(aOriginPrincipal);
+            }
 
             // If we didn't swap docShells with a preloaded browser
             // then let's just continue loading the page normally.
@@ -3040,6 +3049,9 @@
         </getter>
         <setter>
           <![CDATA[
+          if (gNavToolbox.collapsed) {
+            return this.mTabBox.selectedTab;
+          }
           // Update the tab
           this.mTabBox.selectedTab = val;
           return val;
@@ -3669,7 +3681,11 @@
             assert: function(cond) {
               if (!cond) {
                 dump("Assertion failure\n" + Error().stack);
-                throw new Error("Assertion failure");
+
+                // Don't break a user's browser if an assertion fails.
+                if (this.tabbrowser.AppConstants.DEBUG) {
+                  throw new Error("Assertion failure");
+                }
               }
             },
 
@@ -5976,7 +5992,8 @@
           return;
 
         if (event.target.localName == "tab") {
-          this.tabbrowser.removeTab(event.target, {animate: true, byMouse: true});
+          this.tabbrowser.removeTab(event.target, {animate: true,
+                byMouse: event.mozInputSource == MouseEvent.MOZ_SOURCE_MOUSE});
         } else if (event.originalTarget.localName == "box") {
           // The user middleclicked an open space on the tabstrip. This could
           // be because they intend to open a new tab, but it could also be
@@ -6398,7 +6415,8 @@
       <handler event="click" button="0"><![CDATA[
         var bindingParent = document.getBindingParent(this);
         var tabContainer = bindingParent.parentNode;
-        tabContainer.tabbrowser.removeTab(bindingParent, {animate: true, byMouse: true});
+        tabContainer.tabbrowser.removeTab(bindingParent, {animate: true,
+                byMouse: event.mozInputSource == MouseEvent.MOZ_SOURCE_MOUSE});
         // This enables double-click protection for the tab container
         // (see tabbrowser-tabs 'click' handler).
         tabContainer._blockDblClick = true;

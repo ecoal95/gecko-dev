@@ -2098,13 +2098,15 @@ static mozilla::Atomic<bool> sLayersAccelerationPrefsInitialized(false);
 void VideoDecodingFailedChangedCallback(const char* aPref, void*)
 {
   sLayersHardwareVideoDecodingFailed = Preferences::GetBool(aPref, false);
-  gfxPlatform::GetPlatform()->UpdateCanUseHardareVideoDecoding();
+  gfxPlatform::GetPlatform()->UpdateCanUseHardwareVideoDecoding();
 }
 
 void
-gfxPlatform::UpdateCanUseHardareVideoDecoding()
+gfxPlatform::UpdateCanUseHardwareVideoDecoding()
 {
-  gfxVars::SetCanUseHardwareVideoDecoding(CanUseHardwareVideoDecoding());
+  if (XRE_IsParentProcess()) {
+    gfxVars::SetCanUseHardwareVideoDecoding(CanUseHardwareVideoDecoding());
+  }
 }
 
 void
@@ -2176,7 +2178,7 @@ gfxPlatform::InitAcceleration()
 
     if (gpuProc.IsEnabled()) {
       GPUProcessManager* gpu = GPUProcessManager::Get();
-      gpu->EnableGPUProcess();
+      gpu->LaunchGPUProcess();
     }
   }
 }

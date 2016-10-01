@@ -253,6 +253,9 @@ public:
   MediaEventSource<MediaResult>&
   OnPlaybackErrorEvent() { return mOnPlaybackErrorEvent; }
 
+  MediaEventSource<DecoderDoctorEvent>&
+  OnDecoderDoctorEvent() { return mOnDecoderDoctorEvent; }
+
   size_t SizeOfVideoQueue() const;
 
   size_t SizeOfAudioQueue() const;
@@ -330,8 +333,6 @@ private:
   // request is discarded.
   void ScheduleStateMachineIn(int64_t aMicroseconds);
 
-  // Discard audio/video data that are already played by MSG.
-  void DiscardStreamData();
   bool HaveEnoughDecodedAudio();
   bool HaveEnoughDecodedVideo();
 
@@ -561,7 +562,7 @@ private:
   void OnMediaSinkVideoComplete();
 
   // Rejected by the MediaSink to signal errors for audio/video.
-  void OnMediaSinkAudioError();
+  void OnMediaSinkAudioError(nsresult aResult);
   void OnMediaSinkVideoError();
 
   // Return true if the video decoder's decode speed can not catch up the
@@ -864,16 +865,16 @@ private:
   MediaEventProducer<MediaEventType> mOnPlaybackEvent;
   MediaEventProducer<MediaResult> mOnPlaybackErrorEvent;
 
+  MediaEventProducer<DecoderDoctorEvent> mOnDecoderDoctorEvent;
+
   // True if audio is offloading.
   // Playback will not start when audio is offloading.
   bool mAudioOffloading;
 
-#ifdef MOZ_EME
   void OnCDMProxyReady(RefPtr<CDMProxy> aProxy);
   void OnCDMProxyNotReady();
   RefPtr<CDMProxy> mCDMProxy;
   MozPromiseRequestHolder<MediaDecoder::CDMProxyPromise> mCDMProxyPromise;
-#endif
 
 private:
   // The buffered range. Mirrored from the decoder thread.
