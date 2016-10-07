@@ -351,6 +351,8 @@ class BuildOptionParser(object):
         'debug': 'builds/releng_sub_%s_configs/%s_debug.py',
         'asan-and-debug': 'builds/releng_sub_%s_configs/%s_asan_and_debug.py',
         'asan-tc-and-debug': 'builds/releng_sub_%s_configs/%s_asan_tc_and_debug.py',
+        'nostylo-and-debug': 'builds/releng_sub_%s_configs/%s_nostylo_and_debug.py',
+        'nostylo': 'builds/releng_sub_%s_configs/%s_nostylo.py',
         'stat-and-debug': 'builds/releng_sub_%s_configs/%s_stat_and_debug.py',
         'mulet': 'builds/releng_sub_%s_configs/%s_mulet.py',
         'code-coverage': 'builds/releng_sub_%s_configs/%s_code_coverage.py',

@@ -18,6 +18,13 @@ linux64/opt:
     build-platform: linux64/opt
     test-set: all-tests
 
+linux64-nostylo/debug:
+    build-platform: linux64-nostylo/debug
+    test-set: all-nostylo-tests
+linux64-nostylo/opt:
+    build-platform: linux64-nostylo/opt
+    test-set: all-nostylo-tests
+
 # TODO: use 'pgo' and 'asan' labels here, instead of -pgo/opt
 linux64-pgo/opt:
     build-platform: linux64-pgo/opt

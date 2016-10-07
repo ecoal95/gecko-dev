@@ -31,6 +31,8 @@ JOB_NAME_WHITELIST = set([
     'linux64-artifact-opt',
     'linux64-asan-debug',
     'linux64-asan-opt',
+    'linux64-nostylo-opt',
+    'linux64-nostylo-debug',
     'linux64-ccov-opt',
     'linux64-debug',
     'linux64-jsdcov-opt',

@@ -202,6 +202,56 @@ linux64-asan/debug:
         tooltool-downloads: public
         need-xvfb: true
 
+linux64-nostylo/opt:
+    description: "Linux64 Opt No Stylo"
+    index:
+        product: firefox
+        job-name: linux64-nostylo-opt
+    treeherder:
+        platform: linux64/nostylo
+        symbol: tc(Bo)
+        tier: 2
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
+    worker:
+        implementation: docker-worker
+        max-run-time: 36000
+    run:
+        using: mozharness
+        actions: [get-secrets build check-test generate-build-stats update]
+        config:
+            - builds/releng_base_linux_64_builds.py
+            - balrog/production.py
+        script: "mozharness/scripts/fx_desktop_build.py"
+        secrets: true
+        custom-build-variant-cfg: nostylo
+        tooltool-downloads: public
+        need-xvfb: true
+
+linux64-nostylo/debug:
+    description: "Linux64 Debug No Stylo"
+    index:
+        product: firefox
+        job-name: linux64-nostylo-debug
+    treeherder:
+        platform: linux64/nostylo
+        symbol: tc(Bd)
+        tier: 2
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
+    worker:
+        implementation: docker-worker
+        max-run-time: 36000
+    run:
+        using: mozharness
+        actions: [get-secrets build check-test generate-build-stats update]
+        config:
+            - builds/releng_base_linux_64_builds.py
+            - balrog/production.py
+        script: "mozharness/scripts/fx_desktop_build.py"
+        secrets: true
+        custom-build-variant-cfg: nostylo-and-debug
+        tooltool-downloads: public
+        need-xvfb: true
+
 linux64-jsdcov/opt:
     description: "Linux64-JSDCov Opt"
     index:
