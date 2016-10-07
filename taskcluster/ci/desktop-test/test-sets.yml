@@ -18,6 +18,27 @@ all-nostylo-tests:
     - cppunit
     - crashtest
     - reftest
+    - external-media-tests
+    - firefox-ui-functional-local
+    - firefox-ui-functional-remote
+    - gtest
+    - jittests
+    - jsreftest
+    - marionette
+    - mochitest
+    - mochitest-a11y
+    - mochitest-browser-chrome
+    - mochitest-chrome
+    - mochitest-clipboard
+    - mochitest-devtools-chrome
+    - mochitest-gpu
+    - mochitest-jetpack
+    - mochitest-media
+    - mochitest-webgl
+    - reftest-no-accel
+    - web-platform-tests
+    - web-platform-tests-reftests
+    - xpcshell
 
 asan-tests:
     - cppunit
