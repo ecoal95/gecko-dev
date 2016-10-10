@@ -16,13 +16,13 @@
 use app_units::Au;
 use block::BlockFlow;
 use context::LayoutContext;
-use data::{HAS_NEWLY_CONSTRUCTED_FLOW, PrivateLayoutData};
+use data::{HAS_NEWLY_CONSTRUCTED_FLOW, PersistentLayoutData};
 use flex::FlexFlow;
 use floats::FloatKind;
 use flow::{self, AbsoluteDescendants, IS_ABSOLUTELY_POSITIONED, ImmutableFlowUtils};
 use flow::{CAN_BE_FRAGMENTED, MutableFlowUtils, MutableOwnedFlowUtils};
 use flow_ref::{self, FlowRef};
-use fragment::{CanvasFragmentInfo, ImageFragmentInfo, InlineAbsoluteFragmentInfo};
+use fragment::{CanvasFragmentInfo, ImageFragmentInfo, InlineAbsoluteFragmentInfo, SvgFragmentInfo};
 use fragment::{Fragment, GeneratedContentInfo, IframeFragmentInfo};
 use fragment::{InlineAbsoluteHypotheticalFragmentInfo, TableColumnFragmentInfo};
 use fragment::{InlineBlockFragmentInfo, SpecificFragmentInfo, UnscannedTextFragmentInfo};
@@ -218,8 +218,8 @@ impl InlineFragmentsAccumulator {
             enclosing_node: Some(InlineFragmentNodeInfo {
                 address: node.opaque(),
                 pseudo: node.get_pseudo_element_type().strip(),
-                style: node.style(style_context).clone(),
-                selected_style: node.selected_style(style_context).clone(),
+                style: node.style(style_context),
+                selected_style: node.selected_style(style_context),
                 flags: InlineFragmentNodeFlags::empty(),
             }),
             bidi_control_chars: None,
@@ -335,6 +335,10 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
                 let data = node.canvas_data().unwrap();
                 SpecificFragmentInfo::Canvas(box CanvasFragmentInfo::new(node, data, self.style_context()))
             }
+            Some(LayoutNodeType::Element(LayoutElementType::SVGSVGElement)) => {
+                let data = node.svg_data().unwrap();
+                SpecificFragmentInfo::Svg(box SvgFragmentInfo::new(node, data, self.style_context()))
+            }
             _ => {
                 // This includes pseudo-elements.
                 SpecificFragmentInfo::Generic
@@ -355,12 +359,12 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
 
         let style_context = self.style_context();
         if child.is_table_cell() {
-            let mut style = child_node.style(style_context).clone();
+            let mut style = child_node.style(style_context);
             properties::modify_style_for_anonymous_table_object(&mut style, display::T::table_row);
             let fragment = Fragment::from_opaque_node_and_style(child_node.opaque(),
                                                                 PseudoElementType::Normal,
                                                                 style,
-                                                                child_node.selected_style(style_context).clone(),
+                                                                child_node.selected_style(style_context),
                                                                 child_node.restyle_damage(),
                                                                 SpecificFragmentInfo::TableRow);
             let mut new_child: FlowRef = Arc::new(TableRowFlow::from_fragment(fragment));
@@ -369,12 +373,12 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
             *child = new_child
         }
         if child.is_table_row() || child.is_table_rowgroup() {
-            let mut style = child_node.style(style_context).clone();
+            let mut style = child_node.style(style_context);
             properties::modify_style_for_anonymous_table_object(&mut style, display::T::table);
             let fragment = Fragment::from_opaque_node_and_style(child_node.opaque(),
                                                                 PseudoElementType::Normal,
                                                                 style,
-                                                                child_node.selected_style(style_context).clone(),
+                                                                child_node.selected_style(style_context),
                                                                 child_node.restyle_damage(),
                                                                 SpecificFragmentInfo::Table);
             let mut new_child: FlowRef = Arc::new(TableFlow::from_fragment(fragment));
@@ -383,13 +387,13 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
             *child = new_child
         }
         if child.is_table() {
-            let mut style = child_node.style(style_context).clone();
+            let mut style = child_node.style(style_context);
             properties::modify_style_for_anonymous_table_object(&mut style, display::T::table);
             let fragment =
                 Fragment::from_opaque_node_and_style(child_node.opaque(),
                                                      PseudoElementType::Normal,
                                                      style,
-                                                     child_node.selected_style(style_context).clone(),
+                                                     child_node.selected_style(style_context),
                                                      child_node.restyle_damage(),
                                                      SpecificFragmentInfo::TableWrapper);
             let mut new_child: FlowRef = Arc::new(TableWrapperFlow::from_fragment(fragment, None));
@@ -477,7 +481,7 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
             let (ascent, descent) =
                 inline_flow.compute_minimum_ascent_and_descent(&mut self.layout_context
                                                                         .font_context(),
-                                                               &**node.style(self.style_context()));
+                                                               &node.style(self.style_context()));
             inline_flow.minimum_block_size_above_baseline = ascent;
             inline_flow.minimum_depth_below_baseline = descent;
         }
@@ -589,7 +593,7 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
                 let fragment = Fragment::from_opaque_node_and_style(whitespace_node,
                                                                     whitespace_pseudo,
                                                                     whitespace_style,
-                                                                    node.selected_style(style_context).clone(),
+                                                                    node.selected_style(style_context),
                                                                     whitespace_damage,
                                                                     fragment_info);
                 inline_fragment_accumulator.fragments.fragments.push_back(fragment);
@@ -692,7 +696,7 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
                 }
             }
 
-            let mut style = node.style(self.style_context()).clone();
+            let mut style = node.style(self.style_context());
             if node_is_input_or_text_area {
                 style = self.style_context().stylist.
                     precomputed_values_for_pseudo(&PseudoElement::ServoInputText, Some(&style)).unwrap();
@@ -732,7 +736,7 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
                         node.opaque(),
                         node.get_pseudo_element_type().strip(),
                         style,
-                        selected_style.clone(),
+                        selected_style,
                         node.restyle_damage(),
                         specific_fragment_info))
             }
@@ -806,7 +810,7 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
                                                       -> ConstructionResult {
         let mut opt_inline_block_splits: LinkedList<InlineBlockSplit> = LinkedList::new();
         let mut fragment_accumulator = InlineFragmentsAccumulator::from_inline_node(node, self.style_context());
-        fragment_accumulator.bidi_control_chars = bidi_control_chars(&*node.style(self.style_context()));
+        fragment_accumulator.bidi_control_chars = bidi_control_chars(&node.style(self.style_context()));
 
         let mut abs_descendants = AbsoluteDescendants::new();
 
@@ -882,7 +886,7 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
                         Fragment::from_opaque_node_and_style(whitespace_node,
                                                              whitespace_pseudo,
                                                              whitespace_style,
-                                                             node.selected_style(self.style_context()).clone(),
+                                                             node.selected_style(self.style_context()),
                                                              whitespace_damage,
                                                              fragment_info);
                     fragment_accumulator.fragments.fragments.push_back(fragment)
@@ -905,7 +909,7 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
             let fragment = Fragment::from_opaque_node_and_style(node.opaque(),
                                                                 node.get_pseudo_element_type().strip(),
                                                                 modified_style,
-                                                                node.selected_style(self.style_context()).clone(),
+                                                                node.selected_style(self.style_context()),
                                                                 node.restyle_damage(),
                                                                 info);
             fragment_accumulator.fragments.fragments.push_back(fragment)
@@ -949,13 +953,13 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
             return ConstructionResult::ConstructionItem(ConstructionItem::Whitespace(
                 node.opaque(),
                 node.get_pseudo_element_type().strip(),
-                node.style(self.style_context()).clone(),
+                node.style(self.style_context()),
                 node.restyle_damage()))
         }
 
         // Modify the style as necessary. (See the comment in
         // `properties::modify_style_for_replaced_content()`.)
-        let mut style = node.style(self.style_context()).clone();
+        let mut style = node.style(self.style_context());
         match node.get_pseudo_element_type() {
             PseudoElementType::Before(_) |
             PseudoElementType::After(_) => {}
@@ -993,14 +997,14 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
         };
 
         let style_context = self.style_context();
-        let mut modified_style = (*node.style(self.style_context())).clone();
+        let mut modified_style = node.style(self.style_context());
         properties::modify_style_for_outer_inline_block_fragment(&mut modified_style);
         let fragment_info = SpecificFragmentInfo::InlineBlock(InlineBlockFragmentInfo::new(
                 block_flow));
         let fragment = Fragment::from_opaque_node_and_style(node.opaque(),
                                                             node.get_pseudo_element_type().strip(),
                                                             modified_style,
-                                                            node.selected_style(style_context).clone(),
+                                                            node.selected_style(style_context),
                                                             node.restyle_damage(),
                                                             fragment_info);
 
@@ -1030,12 +1034,12 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
         let fragment_info = SpecificFragmentInfo::InlineAbsoluteHypothetical(
             InlineAbsoluteHypotheticalFragmentInfo::new(block_flow));
         let style_context = self.style_context();
-        let mut style = node.style(style_context).clone();
+        let mut style = node.style(style_context);
         properties::modify_style_for_inline_absolute_hypothetical_fragment(&mut style);
         let fragment = Fragment::from_opaque_node_and_style(node.opaque(),
                                                             PseudoElementType::Normal,
                                                             style,
-                                                            node.selected_style(style_context).clone(),
+                                                            node.selected_style(style_context),
                                                             node.restyle_damage(),
                                                             fragment_info);
 
@@ -1412,9 +1416,9 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
 
         let mut set_has_newly_constructed_flow_flag = false;
         let result = {
-            let mut style = node.style(self.style_context()).clone();
+            let mut style = node.style(self.style_context());
             let mut data = node.mutate_layout_data().unwrap();
-            let damage = data.restyle_damage;
+            let damage = data.base.restyle_damage;
 
             match *node.construction_result_mut(&mut *data) {
                 ConstructionResult::None => true,
@@ -1679,7 +1683,7 @@ trait NodeUtils {
     /// Returns true if this node doesn't render its kids and false otherwise.
     fn is_replaced_content(&self) -> bool;
 
-    fn construction_result_mut(self, layout_data: &mut PrivateLayoutData) -> &mut ConstructionResult;
+    fn construction_result_mut(self, layout_data: &mut PersistentLayoutData) -> &mut ConstructionResult;
 
     /// Sets the construction result of a flow.
     fn set_flow_construction_result(self, result: ConstructionResult);
@@ -1701,14 +1705,15 @@ impl<ConcreteThreadSafeLayoutNode> NodeUtils for ConcreteThreadSafeLayoutNode
             Some(LayoutNodeType::Document) |
             Some(LayoutNodeType::Element(LayoutElementType::HTMLImageElement)) |
             Some(LayoutNodeType::Element(LayoutElementType::HTMLIFrameElement)) |
-            Some(LayoutNodeType::Element(LayoutElementType::HTMLCanvasElement)) => true,
+            Some(LayoutNodeType::Element(LayoutElementType::HTMLCanvasElement)) |
+            Some(LayoutNodeType::Element(LayoutElementType::SVGSVGElement)) => true,
             Some(LayoutNodeType::Element(LayoutElementType::HTMLObjectElement)) => self.has_object_data(),
             Some(LayoutNodeType::Element(_)) => false,
             None => self.get_pseudo_element_type().is_replaced_content(),
         }
     }
 
-    fn construction_result_mut(self, data: &mut PrivateLayoutData) -> &mut ConstructionResult {
+    fn construction_result_mut(self, data: &mut PersistentLayoutData) -> &mut ConstructionResult {
         match self.get_pseudo_element_type() {
             PseudoElementType::Before(_) => &mut data.before_flow_construction_result,
             PseudoElementType::After (_) => &mut data.after_flow_construction_result,

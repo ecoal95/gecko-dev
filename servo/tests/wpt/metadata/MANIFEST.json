@@ -30388,6 +30388,10 @@
         "url": "/url/urlsearchparams-delete.html"
       },
       {
+        "path": "url/urlsearchparams-foreach.html",
+        "url": "/url/urlsearchparams-foreach.html"
+      },
+      {
         "path": "url/urlsearchparams-get.html",
         "url": "/url/urlsearchparams-get.html"
       },
@@ -37715,6 +37719,18 @@
     "deleted_reftests": {},
     "items": {
       "reftest": {
+        "html/semantics/document-metadata/the-link-element/stylesheet-empty-href.html": [
+          {
+            "path": "html/semantics/document-metadata/the-link-element/stylesheet-empty-href.html",
+            "references": [
+              [
+                "/html/semantics/document-metadata/the-link-element/stylesheet-empty-href-ref.html",
+                "=="
+              ]
+            ],
+            "url": "/html/semantics/document-metadata/the-link-element/stylesheet-empty-href.html"
+          }
+        ],
         "html/semantics/document-metadata/the-link-element/stylesheet-media.html": [
           {
             "path": "html/semantics/document-metadata/the-link-element/stylesheet-media.html",
@@ -37744,6 +37760,18 @@
       }
     },
     "reftest_nodes": {
+      "html/semantics/document-metadata/the-link-element/stylesheet-empty-href.html": [
+        {
+          "path": "html/semantics/document-metadata/the-link-element/stylesheet-empty-href.html",
+          "references": [
+            [
+              "/html/semantics/document-metadata/the-link-element/stylesheet-empty-href-ref.html",
+              "=="
+            ]
+          ],
+          "url": "/html/semantics/document-metadata/the-link-element/stylesheet-empty-href.html"
+        }
+      ],
       "html/semantics/document-metadata/the-link-element/stylesheet-media.html": [
         {
           "path": "html/semantics/document-metadata/the-link-element/stylesheet-media.html",

@@ -435,9 +435,7 @@ pub enum OutputOptions {
 }
 
 fn args_fail(msg: &str) -> ! {
-    let mut stderr = io::stderr();
-    stderr.write_all(msg.as_bytes()).unwrap();
-    stderr.write_all(b"\n").unwrap();
+    writeln!(io::stderr(), "{}", msg).unwrap();
     process::exit(1)
 }
 
@@ -791,9 +789,9 @@ pub fn from_cmdline_args(args: &[String]) -> ArgumentParsingResult {
         let url = Url::from_file_path(&path).unwrap();
         let mut contents = Vec::new();
         File::open(path)
-            .unwrap_or_else(|err| args_fail(&format!("Couldn’t open {}: {}", filename, err)))
+            .unwrap_or_else(|err| args_fail(&format!("Couldn't open {}: {}", filename, err)))
             .read_to_end(&mut contents)
-            .unwrap_or_else(|err| args_fail(&format!("Couldn’t read {}: {}", filename, err)));
+            .unwrap_or_else(|err| args_fail(&format!("Couldn't read {}: {}", filename, err)));
         (contents, url)
     }).collect();
 

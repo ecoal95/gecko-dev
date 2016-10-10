@@ -17,14 +17,14 @@ use dom::bindings::codegen::Bindings::RequestBinding::RequestMode;
 use dom::bindings::codegen::Bindings::RequestBinding::RequestRedirect;
 use dom::bindings::codegen::Bindings::RequestBinding::RequestType;
 use dom::bindings::error::{Error, Fallible};
-use dom::bindings::global::GlobalRef;
 use dom::bindings::js::{JS, MutNullableHeap, Root};
 use dom::bindings::reflector::{Reflectable, Reflector, reflect_dom_object};
 use dom::bindings::str::{ByteString, DOMString, USVString};
+use dom::globalscope::GlobalScope;
 use dom::headers::{Guard, Headers};
 use dom::promise::Promise;
 use dom::xmlhttprequest::Extractable;
-use hyper;
+use hyper::method::Method as HttpMethod;
 use msg::constellation_msg::ReferrerPolicy as MsgReferrerPolicy;
 use net_traits::request::{Origin, Window};
 use net_traits::request::CacheMode as NetTraitsRequestCache;
@@ -35,10 +35,8 @@ use net_traits::request::Referrer as NetTraitsRequestReferrer;
 use net_traits::request::Request as NetTraitsRequest;
 use net_traits::request::RequestMode as NetTraitsRequestMode;
 use net_traits::request::Type as NetTraitsRequestType;
-use std::cell::Cell;
-use std::mem;
+use std::cell::{Cell, Ref};
 use std::rc::Rc;
-use style::refcell::Ref;
 use url::Url;
 
 #[dom_struct]
@@ -48,10 +46,12 @@ pub struct Request {
     body_used: Cell<bool>,
     headers: MutNullableHeap<JS<Headers>>,
     mime_type: DOMRefCell<Vec<u8>>,
+    #[ignore_heap_size_of = "Rc"]
+    body_promise: DOMRefCell<Option<(Rc<Promise>, BodyType)>>,
 }
 
 impl Request {
-    fn new_inherited(global: GlobalRef,
+    fn new_inherited(global: &GlobalScope,
                      url: Url,
                      is_service_worker_global_scope: bool) -> Request {
         Request {
@@ -63,10 +63,11 @@ impl Request {
             body_used: Cell::new(false),
             headers: Default::default(),
             mime_type: DOMRefCell::new("".to_string().into_bytes()),
+            body_promise: DOMRefCell::new(None),
         }
     }
 
-    pub fn new(global: GlobalRef,
+    pub fn new(global: &GlobalScope,
                url: Url,
                is_service_worker_global_scope: bool) -> Root<Request> {
         reflect_dom_object(box Request::new_inherited(global,
@@ -76,7 +77,7 @@ impl Request {
     }
 
     // https://fetch.spec.whatwg.org/#dom-request
-    pub fn Constructor(global: GlobalRef,
+    pub fn Constructor(global: &GlobalScope,
                        input: RequestInfo,
                        init: &RequestInit)
                        -> Fallible<Root<Request>> {
@@ -129,7 +130,7 @@ impl Request {
 
         // Step 7
         // TODO: `entry settings object` is not implemented yet.
-        let origin = global.get_url().origin();
+        let origin = base_url.origin();
 
         // Step 8
         let mut window = Window::Client;
@@ -304,7 +305,7 @@ impl Request {
         let r = Request::from_net_request(global,
                                           false,
                                           request);
-        r.headers.or_init(|| Headers::for_request(r.global().r()));
+        r.headers.or_init(|| Headers::for_request(&r.global()));
 
         // Step 27
         let mut headers_copy = r.Headers();
@@ -359,9 +360,9 @@ impl Request {
                 let req = r.request.borrow();
                 let req_method = req.method.borrow();
                 match &*req_method {
-                    &hyper::method::Method::Get => return Err(Error::Type(
+                    &HttpMethod::Get => return Err(Error::Type(
                         "Init's body is non-null, and request method is GET".to_string())),
-                    &hyper::method::Method::Head => return Err(Error::Type(
+                    &HttpMethod::Head => return Err(Error::Type(
                         "Init's body is non-null, and request method is HEAD".to_string())),
                     _ => {},
                 }
@@ -411,7 +412,7 @@ impl Request {
 }
 
 impl Request {
-    fn from_net_request(global: GlobalRef,
+    fn from_net_request(global: &GlobalScope,
                         is_service_worker_global_scope: bool,
                         net_request: NetTraitsRequest) -> Root<Request> {
         let r = Request::new(global,
@@ -428,11 +429,7 @@ impl Request {
         let body_used = r.body_used.get();
         let mime_type = r.mime_type.borrow().clone();
         let headers_guard = r.Headers().get_guard();
-        let r_clone = reflect_dom_object(
-            box Request::new_inherited(r.global().r(),
-                                       url,
-                                       is_service_worker_global_scope),
-            r.global().r(), RequestBinding::Wrap);
+        let r_clone = Request::new(&r.global(), url, is_service_worker_global_scope);
         r_clone.request.borrow_mut().pipeline_id.set(req.pipeline_id.get());
         {
             let mut borrowed_r_request = r_clone.request.borrow_mut();
@@ -450,7 +447,7 @@ impl Request {
     }
 }
 
-fn net_request_from_global(global: GlobalRef,
+fn net_request_from_global(global: &GlobalScope,
                            url: Url,
                            is_service_worker_global_scope: bool) -> NetTraitsRequest {
     let origin = Origin::Origin(global.get_url().origin());
@@ -461,15 +458,15 @@ fn net_request_from_global(global: GlobalRef,
                           Some(pipeline_id))
 }
 
-fn normalized_method_to_typed_method(m: &str) -> hyper::method::Method {
+fn normalized_method_to_typed_method(m: &str) -> HttpMethod {
     match m {
-        "DELETE" => hyper::method::Method::Delete,
-        "GET" => hyper::method::Method::Get,
-        "HEAD" => hyper::method::Method::Head,
-        "OPTIONS" => hyper::method::Method::Options,
-        "POST" => hyper::method::Method::Post,
-        "PUT" => hyper::method::Method::Put,
-        a => hyper::method::Method::Extension(a.to_string())
+        "DELETE" => HttpMethod::Delete,
+        "GET" => HttpMethod::Get,
+        "HEAD" => HttpMethod::Head,
+        "OPTIONS" => HttpMethod::Options,
+        "POST" => HttpMethod::Post,
+        "PUT" => HttpMethod::Put,
+        a => HttpMethod::Extension(a.to_string())
     }
 }
 
@@ -512,10 +509,10 @@ fn is_forbidden_method(m: &ByteString) -> bool {
 }
 
 // https://fetch.spec.whatwg.org/#cors-safelisted-method
-fn is_cors_safelisted_method(m: &hyper::method::Method) -> bool {
-    m == &hyper::method::Method::Get ||
-        m == &hyper::method::Method::Head ||
-        m == &hyper::method::Method::Post
+fn is_cors_safelisted_method(m: &HttpMethod) -> bool {
+    m == &HttpMethod::Get ||
+        m == &HttpMethod::Head ||
+        m == &HttpMethod::Post
 }
 
 // https://url.spec.whatwg.org/#include-credentials
@@ -552,7 +549,7 @@ impl RequestMethods for Request {
 
     // https://fetch.spec.whatwg.org/#dom-request-headers
     fn Headers(&self) -> Root<Headers> {
-        self.headers.or_init(|| Headers::new(self.global().r()))
+        self.headers.or_init(|| Headers::new(&self.global()))
     }
 
     // https://fetch.spec.whatwg.org/#dom-request-type
@@ -663,20 +660,20 @@ impl BodyOperations for Request {
         self.BodyUsed()
     }
 
+    fn set_body_promise(&self, p: &Rc<Promise>, body_type: BodyType) {
+        assert!(self.body_promise.borrow().is_none());
+        self.body_used.set(true);
+        *self.body_promise.borrow_mut() = Some((p.clone(), body_type));
+    }
+
     fn is_locked(&self) -> bool {
         self.locked()
     }
 
     fn take_body(&self) -> Option<Vec<u8>> {
-        let ref mut net_traits_req = *self.request.borrow_mut();
-        let body: Option<Vec<u8>> = mem::replace(&mut *net_traits_req.body.borrow_mut(), None);
-        match body {
-            Some(_) => {
-                self.body_used.set(true);
-                body
-            },
-            _ => None,
-        }
+        let request = self.request.borrow_mut();
+        let body = request.body.borrow_mut().take();
+        Some(body.unwrap_or(vec![]))
     }
 
     fn get_mime_type(&self) -> Ref<Vec<u8>> {

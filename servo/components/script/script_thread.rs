@@ -27,7 +27,6 @@ use dom::bindings::codegen::Bindings::DocumentBinding::{DocumentMethods, Documen
 use dom::bindings::codegen::Bindings::LocationBinding::LocationMethods;
 use dom::bindings::codegen::Bindings::WindowBinding::WindowMethods;
 use dom::bindings::conversions::{ConversionResult, FromJSValConvertible, StringificationBehavior};
-use dom::bindings::global::{GlobalRef, GlobalRoot};
 use dom::bindings::inheritance::Castable;
 use dom::bindings::js::{JS, MutNullableHeap, Root, RootCollection};
 use dom::bindings::js::{RootCollectionPtr, RootedReference};
@@ -37,16 +36,17 @@ use dom::bindings::str::DOMString;
 use dom::bindings::trace::JSTraceable;
 use dom::bindings::utils::WRAP_CALLBACKS;
 use dom::browsingcontext::BrowsingContext;
-use dom::document::{Document, DocumentProgressHandler, DocumentSource, FocusType, IsHTMLDocument};
+use dom::document::{Document, DocumentProgressHandler, DocumentSource, FocusType, IsHTMLDocument, TouchEventResult};
 use dom::element::Element;
 use dom::event::{Event, EventBubbles, EventCancelable};
+use dom::globalscope::GlobalScope;
 use dom::htmlanchorelement::HTMLAnchorElement;
 use dom::node::{Node, NodeDamage, window_from_node};
 use dom::serviceworker::TrustedServiceWorkerAddress;
 use dom::serviceworkerregistration::ServiceWorkerRegistration;
 use dom::servohtmlparser::ParserContext;
 use dom::uievent::UIEvent;
-use dom::window::{ReflowReason, ScriptHelpers, Window};
+use dom::window::{ReflowReason, Window};
 use dom::worker::TrustedWorkerAddress;
 use euclid::Rect;
 use euclid::point::Point2D;
@@ -169,7 +169,7 @@ impl InProgressLoad {
 
 /// Encapsulated state required to create cancellable runnables from non-script threads.
 pub struct RunnableWrapper {
-    pub cancelled: Arc<AtomicBool>,
+    pub cancelled: Option<Arc<AtomicBool>>,
 }
 
 impl RunnableWrapper {
@@ -183,7 +183,7 @@ impl RunnableWrapper {
 
 /// A runnable that can be discarded by toggling a shared flag.
 pub struct CancellableRunnable<T: Runnable + Send> {
-    cancelled: Arc<AtomicBool>,
+    cancelled: Option<Arc<AtomicBool>>,
     inner: Box<T>,
 }
 
@@ -191,7 +191,9 @@ impl<T: Runnable + Send> Runnable for CancellableRunnable<T> {
     fn name(&self) -> &'static str { self.inner.name() }
 
     fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::SeqCst)
+        self.cancelled.as_ref()
+            .map(|cancelled| cancelled.load(Ordering::SeqCst))
+            .unwrap_or(false)
     }
 
     fn main_thread_handler(self: Box<CancellableRunnable<T>>, script_thread: &ScriptThread) {
@@ -649,7 +651,7 @@ impl ScriptThread {
                 let window = context.active_window();
                 let resize_event = window.steal_resize_event();
                 match resize_event {
-                    Some(size) => resizes.push((window.pipeline_id(), size)),
+                    Some(size) => resizes.push((window.upcast::<GlobalScope>().pipeline_id(), size)),
                     None => ()
                 }
             }
@@ -984,8 +986,7 @@ impl ScriptThread {
                     Some(browsing_context) => browsing_context.active_window(),
                     None => return warn!("Message sent to closed pipeline {}.", id),
                 };
-                let global_ref = GlobalRef::Window(window.r());
-                devtools::handle_evaluate_js(&global_ref, s, reply)
+                devtools::handle_evaluate_js(window.upcast(), s, reply)
             },
             DevtoolScriptControlMsg::GetRootNode(id, reply) =>
                 devtools::handle_get_root_node(&context, id, reply),
@@ -1004,8 +1005,7 @@ impl ScriptThread {
                     Some(browsing_context) => browsing_context.active_window(),
                     None => return warn!("Message sent to closed pipeline {}.", id),
                 };
-                let global_ref = GlobalRef::Window(window.r());
-                devtools::handle_wants_live_notifications(&global_ref, to_send)
+                devtools::handle_wants_live_notifications(window.upcast(), to_send)
             },
             DevtoolScriptControlMsg::SetTimelineMarkers(_pipeline_id, marker_types, reply) =>
                 devtools::handle_set_timeline_markers(&context, marker_types, reply),
@@ -1191,7 +1191,7 @@ impl ScriptThread {
 
         // https://html.spec.whatwg.org/multipage/#the-end step 7
         let handler = box DocumentProgressHandler::new(Trusted::new(doc));
-        self.dom_manipulation_task_source.queue(handler, GlobalRef::Window(doc.window())).unwrap();
+        self.dom_manipulation_task_source.queue(handler, doc.window().upcast()).unwrap();
 
         if let Some(fragment) = doc.url().fragment() {
             self.check_and_scroll_fragment(fragment, pipeline, doc);
@@ -1245,9 +1245,9 @@ impl ScriptThread {
             if let Some(ref inner_context) = root_context.find(id) {
                 let window = inner_context.active_window();
                 if visible {
-                    window.speed_up_timers();
+                    window.upcast::<GlobalScope>().speed_up_timers();
                 } else {
-                    window.slow_down_timers();
+                    window.upcast::<GlobalScope>().slow_down_timers();
                 }
                 return true;
             }
@@ -1292,7 +1292,7 @@ impl ScriptThread {
         if let Some(root_context) = self.browsing_context.get() {
             if let Some(ref inner_context) = root_context.find(id) {
                 let window = inner_context.active_window();
-                window.freeze();
+                window.upcast::<GlobalScope>().suspend();
                 return;
             }
         }
@@ -1449,10 +1449,9 @@ impl ScriptThread {
             None => return
         };
         if let Some(context) = self.root_browsing_context().find(pipeline_id) {
-            let window = context.active_window();
-            let global_ref = GlobalRef::Window(window.r());
             let script_url = maybe_registration.get_installed().get_script_url();
-            let scope_things = ServiceWorkerRegistration::create_scope_things(global_ref, script_url);
+            let scope_things = ServiceWorkerRegistration::create_scope_things(
+                context.active_window().upcast(), script_url);
             let _ = self.constellation_chan.send(ConstellationMsg::RegisterServiceWorker(scope_things, scope));
         } else {
             warn!("Registration failed for {}", scope);
@@ -1501,7 +1500,7 @@ impl ScriptThread {
         // If root is being exited, shut down all contexts
         let context = self.root_browsing_context();
         let window = context.active_window();
-        if window.pipeline_id() == id {
+        if window.upcast::<GlobalScope>().pipeline_id() == id {
             debug!("shutting down layout for root context {:?}", id);
             shut_down_layout(&context);
             let _ = self.constellation_chan.send(ConstellationMsg::PipelineExited(id));
@@ -1655,8 +1654,6 @@ impl ScriptThread {
             }
         }
 
-        let mut using_new_context = true;
-
         let (browsing_context, context_to_remove) = if !self.root_browsing_context_exists() {
             // Create a new context tree entry. This will become the root context.
             let new_context = BrowsingContext::new(&window, frame_element, incomplete.pipeline_id);
@@ -1675,7 +1672,6 @@ impl ScriptThread {
             parent_context.push_child_context(&*new_context);
             (new_context, ContextToRemove::Child(incomplete.pipeline_id))
         } else {
-            using_new_context = false;
             (self.root_browsing_context(), ContextToRemove::None)
         };
 
@@ -1741,11 +1737,7 @@ impl ScriptThread {
                                      loader,
                                      referrer,
                                      referrer_policy);
-        if using_new_context {
-            browsing_context.init(&document);
-        } else {
-            browsing_context.push_history(&document);
-        }
+        browsing_context.set_active_document(&document);
         document.set_ready_state(DocumentReadyState::Loading);
 
         self.constellation_chan
@@ -1775,7 +1767,8 @@ impl ScriptThread {
             unsafe {
                 let _ac = JSAutoCompartment::new(self.get_cx(), window.reflector().get_jsobject().get());
                 rooted!(in(self.get_cx()) let mut jsval = UndefinedValue());
-                window.evaluate_js_on_global_with_result(&script_source, jsval.handle_mut());
+                window.upcast::<GlobalScope>().evaluate_js_on_global_with_result(
+                    &script_source, jsval.handle_mut());
                 let strval = DOMString::from_jsval(self.get_cx(),
                                                    jsval.handle(),
                                                    StringificationBehavior::Empty);
@@ -1813,7 +1806,7 @@ impl ScriptThread {
         }
 
         if incomplete.is_frozen {
-            window.freeze();
+            window.upcast::<GlobalScope>().suspend();
         }
 
         if !incomplete.is_visible {
@@ -1941,9 +1934,9 @@ impl ScriptThread {
                 }
             }
             TouchEvent(event_type, identifier, point) => {
-                let handled = self.handle_touch_event(pipeline_id, event_type, identifier, point);
-                match event_type {
-                    TouchEventType::Down => {
+                let touch_result = self.handle_touch_event(pipeline_id, event_type, identifier, point);
+                match (event_type, touch_result) {
+                    (TouchEventType::Down, TouchEventResult::Processed(handled)) => {
                         let result = if handled {
                             // TODO: Wait to see if preventDefault is called on the first touchmove event.
                             EventResult::DefaultAllowed
@@ -1994,10 +1987,13 @@ impl ScriptThread {
                           event_type: TouchEventType,
                           identifier: TouchId,
                           point: Point2D<f32>)
-                          -> bool {
+                          -> TouchEventResult {
         let document = match self.root_browsing_context().find(pipeline_id) {
             Some(browsing_context) => browsing_context.active_document(),
-            None => { warn!("Message sent to closed pipeline {}.", pipeline_id); return true },
+            None => {
+                warn!("Message sent to closed pipeline {}.", pipeline_id);
+                return TouchEventResult::Processed(true)
+            },
         };
         document.handle_touch_event(self.js_runtime.rt(), event_type, identifier, point)
     }
@@ -2159,7 +2155,7 @@ impl ScriptThread {
         };
 
         let window = context.active_window();
-        if window.live_devtools_updates() {
+        if window.upcast::<GlobalScope>().live_devtools_updates() {
             let css_error = CSSError {
                 filename: filename,
                 line: line,
@@ -2179,23 +2175,26 @@ impl ScriptThread {
         }
     }
 
-    pub fn enqueue_promise_job(job: EnqueuedPromiseCallback, global: GlobalRef) {
+    pub fn enqueue_promise_job(job: EnqueuedPromiseCallback, global: &GlobalScope) {
         SCRIPT_THREAD_ROOT.with(|root| {
             let script_thread = unsafe { &*root.get().unwrap() };
             script_thread.promise_job_queue.enqueue(job, global);
         });
     }
 
-    pub fn flush_promise_jobs(global: GlobalRef) {
+    pub fn flush_promise_jobs(global: &GlobalScope) {
         SCRIPT_THREAD_ROOT.with(|root| {
             let script_thread = unsafe { &*root.get().unwrap() };
-            let _ = script_thread.dom_manipulation_task_source.queue(box FlushPromiseJobs, global);
+            let _ = script_thread.dom_manipulation_task_source.queue(
+                box FlushPromiseJobs, global);
         })
     }
 
     fn do_flush_promise_jobs(&self) {
         self.promise_job_queue.flush_promise_jobs(|id| {
-            self.find_child_context(id).map(|context| GlobalRoot::Window(context.active_window()))
+            self.find_child_context(id).map(|context| {
+                Root::upcast(context.active_window())
+            })
         });
     }
 }
@@ -2237,7 +2236,7 @@ fn shut_down_layout(context_tree: &BrowsingContext) {
         window.clear_js_runtime();
 
         // Sever the connection between the global and the DOM tree
-        context.clear_session_history();
+        context.unset_active_document();
     }
 
     // Destroy the layout thread. If there were node leaks, layout will now crash safely.

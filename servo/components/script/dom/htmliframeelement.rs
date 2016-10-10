@@ -18,7 +18,6 @@ use dom::bindings::codegen::Bindings::HTMLIFrameElementBinding::HTMLIFrameElemen
 use dom::bindings::codegen::Bindings::WindowBinding::WindowMethods;
 use dom::bindings::conversions::ToJSValConvertible;
 use dom::bindings::error::{Error, ErrorResult, Fallible};
-use dom::bindings::global::GlobalRef;
 use dom::bindings::inheritance::Castable;
 use dom::bindings::js::{JS, LayoutJS, MutNullableHeap, Root};
 use dom::bindings::reflector::Reflectable;
@@ -30,6 +29,7 @@ use dom::domtokenlist::DOMTokenList;
 use dom::element::{AttributeMutation, Element, RawLayoutElementHelpers};
 use dom::event::Event;
 use dom::eventtarget::EventTarget;
+use dom::globalscope::GlobalScope;
 use dom::htmlelement::HTMLElement;
 use dom::node::{Node, NodeDamage, UnbindContext, document_from_node, window_from_node};
 use dom::urlhelper::UrlHelper;
@@ -38,7 +38,7 @@ use dom::window::{ReflowReason, Window};
 use ipc_channel::ipc;
 use js::jsapi::{JSAutoCompartment, JSContext, MutableHandleValue};
 use js::jsval::{NullValue, UndefinedValue};
-use msg::constellation_msg::{FrameType, LoadData, PipelineId, TraversalDirection};
+use msg::constellation_msg::{FrameType, FrameId, LoadData, PipelineId, TraversalDirection};
 use net_traits::response::HttpsState;
 use script_layout_interface::message::ReflowQueryType;
 use script_traits::{IFrameLoadInfo, MozBrowserEvent, ScriptMsg as ConstellationMsg};
@@ -67,6 +67,7 @@ bitflags! {
 #[dom_struct]
 pub struct HTMLIFrameElement {
     htmlelement: HTMLElement,
+    frame_id: FrameId,
     pipeline_id: Cell<Option<PipelineId>>,
     sandbox: MutNullableHeap<JS<DOMTokenList>>,
     sandbox_allowance: Cell<Option<SandboxAllowance>>,
@@ -126,9 +127,11 @@ impl HTMLIFrameElement {
         let private_iframe = self.privatebrowsing();
         let frame_type = if self.Mozbrowser() { FrameType::MozBrowserIFrame } else { FrameType::IFrame };
 
+        let global_scope = window.upcast::<GlobalScope>();
         let load_info = IFrameLoadInfo {
             load_data: load_data,
-            parent_pipeline_id: window.pipeline_id(),
+            parent_pipeline_id: global_scope.pipeline_id(),
+            frame_id: self.frame_id,
             old_pipeline_id: old_pipeline_id,
             new_pipeline_id: new_pipeline_id,
             sandbox: sandboxed,
@@ -136,7 +139,8 @@ impl HTMLIFrameElement {
             frame_type: frame_type,
             replace: replace,
         };
-        window.constellation_chan()
+        global_scope
+              .constellation_chan()
               .send(ConstellationMsg::ScriptLoadedURLInIFrame(load_info))
               .unwrap();
 
@@ -179,6 +183,7 @@ impl HTMLIFrameElement {
                      document: &Document) -> HTMLIFrameElement {
         HTMLIFrameElement {
             htmlelement: HTMLElement::new_inherited(local_name, prefix, document),
+            frame_id: FrameId::new(),
             pipeline_id: Cell::new(None),
             sandbox: Default::default(),
             sandbox_allowance: Cell::new(None),
@@ -217,7 +222,7 @@ impl HTMLIFrameElement {
             let window = window_from_node(self);
             let window = window.r();
             let msg = ConstellationMsg::SetVisible(pipeline_id, visible);
-            window.constellation_chan().send(msg).unwrap();
+            window.upcast::<GlobalScope>().constellation_chan().send(msg).unwrap();
         }
     }
 
@@ -316,7 +321,7 @@ pub fn build_mozbrowser_custom_event(window: &Window, event: MozBrowserEvent) ->
     rooted!(in(cx) let mut detail = UndefinedValue());
     let event_name = Atom::from(event.name());
     unsafe { build_mozbrowser_event_detail(event, cx, detail.handle_mut()); }
-    CustomEvent::new(GlobalRef::Window(window),
+    CustomEvent::new(window.upcast(),
                      event_name,
                      true,
                      true,
@@ -408,7 +413,7 @@ pub fn Navigate(iframe: &HTMLIFrameElement, direction: TraversalDirection) -> Er
         if iframe.upcast::<Node>().is_in_doc() {
             let window = window_from_node(iframe);
             let msg = ConstellationMsg::TraverseHistory(iframe.pipeline_id(), direction);
-            window.constellation_chan().send(msg).unwrap();
+            window.upcast::<GlobalScope>().constellation_chan().send(msg).unwrap();
         }
 
         Ok(())
@@ -642,7 +647,7 @@ impl VirtualMethods for HTMLIFrameElement {
                 (Some(sender), Some(receiver))
             };
             let msg = ConstellationMsg::RemoveIFrame(pipeline_id, sender);
-            window.constellation_chan().send(msg).unwrap();
+            window.upcast::<GlobalScope>().constellation_chan().send(msg).unwrap();
             if let Some(receiver) = receiver {
                 receiver.recv().unwrap()
             }

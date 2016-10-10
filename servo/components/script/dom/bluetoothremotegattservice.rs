@@ -7,7 +7,6 @@ use dom::bindings::codegen::Bindings::BluetoothRemoteGATTServiceBinding;
 use dom::bindings::codegen::Bindings::BluetoothRemoteGATTServiceBinding::BluetoothRemoteGATTServiceMethods;
 use dom::bindings::error::Error::{self, Security};
 use dom::bindings::error::Fallible;
-use dom::bindings::global::GlobalRef;
 use dom::bindings::js::{JS, MutHeap, Root};
 use dom::bindings::reflector::{Reflectable, Reflector, reflect_dom_object};
 use dom::bindings::str::DOMString;
@@ -16,6 +15,7 @@ use dom::bluetoothcharacteristicproperties::BluetoothCharacteristicProperties;
 use dom::bluetoothdevice::BluetoothDevice;
 use dom::bluetoothremotegattcharacteristic::BluetoothRemoteGATTCharacteristic;
 use dom::bluetoothuuid::{BluetoothCharacteristicUUID, BluetoothServiceUUID, BluetoothUUID};
+use dom::globalscope::GlobalScope;
 use dom::promise::Promise;
 use ipc_channel::ipc::{self, IpcSender};
 use net_traits::bluetooth_thread::BluetoothMethodMsg;
@@ -46,7 +46,7 @@ impl BluetoothRemoteGATTService {
         }
     }
 
-    pub fn new(global: GlobalRef,
+    pub fn new(global: &GlobalScope,
                device: &BluetoothDevice,
                uuid: DOMString,
                isPrimary: bool,
@@ -61,9 +61,7 @@ impl BluetoothRemoteGATTService {
     }
 
     fn get_bluetooth_thread(&self) -> IpcSender<BluetoothMethodMsg> {
-        let global_root = self.global();
-        let global_ref = global_root.r();
-        global_ref.as_window().bluetooth_thread()
+        self.global().as_window().bluetooth_thread()
     }
 
     fn get_instance_id(&self) -> String {
@@ -74,7 +72,7 @@ impl BluetoothRemoteGATTService {
     fn get_characteristic(&self,
                           characteristic: BluetoothCharacteristicUUID)
                           -> Fallible<Root<BluetoothRemoteGATTCharacteristic>> {
-        let uuid = try!(BluetoothUUID::GetCharacteristic(self.global().r(), characteristic)).to_string();
+        let uuid = try!(BluetoothUUID::characteristic(characteristic)).to_string();
         if uuid_is_blacklisted(uuid.as_ref(), Blacklist::All) {
             return Err(Security)
         }
@@ -84,7 +82,8 @@ impl BluetoothRemoteGATTService {
         let characteristic = receiver.recv().unwrap();
         match characteristic {
             Ok(characteristic) => {
-                let properties = BluetoothCharacteristicProperties::new(self.global().r(),
+                let global = self.global();
+                let properties = BluetoothCharacteristicProperties::new(&global,
                                                                         characteristic.broadcast,
                                                                         characteristic.read,
                                                                         characteristic.write_without_response,
@@ -94,7 +93,7 @@ impl BluetoothRemoteGATTService {
                                                                         characteristic.authenticated_signed_writes,
                                                                         characteristic.reliable_write,
                                                                         characteristic.writable_auxiliaries);
-                Ok(BluetoothRemoteGATTCharacteristic::new(self.global().r(),
+                Ok(BluetoothRemoteGATTCharacteristic::new(&global,
                                                           self,
                                                           DOMString::from(characteristic.uuid),
                                                           &properties,
@@ -112,7 +111,7 @@ impl BluetoothRemoteGATTService {
                            -> Fallible<Vec<Root<BluetoothRemoteGATTCharacteristic>>> {
         let mut uuid: Option<String> = None;
         if let Some(c) = characteristic {
-            uuid = Some(try!(BluetoothUUID::GetCharacteristic(self.global().r(), c)).to_string());
+            uuid = Some(try!(BluetoothUUID::characteristic(c)).to_string());
             if let Some(ref uuid) = uuid {
                 if uuid_is_blacklisted(uuid.as_ref(), Blacklist::All) {
                     return Err(Security)
@@ -127,7 +126,8 @@ impl BluetoothRemoteGATTService {
         match characteristics_vec {
             Ok(characteristic_vec) => {
                 for characteristic in characteristic_vec {
-                    let properties = BluetoothCharacteristicProperties::new(self.global().r(),
+                    let global = self.global();
+                    let properties = BluetoothCharacteristicProperties::new(&global,
                                                                             characteristic.broadcast,
                                                                             characteristic.read,
                                                                             characteristic.write_without_response,
@@ -137,7 +137,7 @@ impl BluetoothRemoteGATTService {
                                                                             characteristic.authenticated_signed_writes,
                                                                             characteristic.reliable_write,
                                                                             characteristic.writable_auxiliaries);
-                    characteristics.push(BluetoothRemoteGATTCharacteristic::new(self.global().r(),
+                    characteristics.push(BluetoothRemoteGATTCharacteristic::new(&global,
                                                                                 self,
                                                                                 DOMString::from(characteristic.uuid),
                                                                                 &properties,
@@ -155,7 +155,7 @@ impl BluetoothRemoteGATTService {
     fn get_included_service(&self,
                            service: BluetoothServiceUUID)
                            -> Fallible<Root<BluetoothRemoteGATTService>> {
-        let uuid = try!(BluetoothUUID::GetService(self.global().r(), service)).to_string();
+        let uuid = try!(BluetoothUUID::service(service)).to_string();
         if uuid_is_blacklisted(uuid.as_ref(), Blacklist::All) {
             return Err(Security)
         }
@@ -167,7 +167,7 @@ impl BluetoothRemoteGATTService {
         let service = receiver.recv().unwrap();
         match service {
             Ok(service) => {
-                Ok(BluetoothRemoteGATTService::new(self.global().r(),
+                Ok(BluetoothRemoteGATTService::new(&self.global(),
                                                    &self.device.get(),
                                                    DOMString::from(service.uuid),
                                                    service.is_primary,
@@ -185,7 +185,7 @@ impl BluetoothRemoteGATTService {
                              -> Fallible<Vec<Root<BluetoothRemoteGATTService>>> {
         let mut uuid: Option<String> = None;
         if let Some(s) = service {
-            uuid = Some(try!(BluetoothUUID::GetService(self.global().r(), s)).to_string());
+            uuid = Some(try!(BluetoothUUID::service(s)).to_string());
             if let Some(ref uuid) = uuid {
                 if uuid_is_blacklisted(uuid.as_ref(), Blacklist::All) {
                     return Err(Security)
@@ -201,7 +201,7 @@ impl BluetoothRemoteGATTService {
         match services_vec {
             Ok(service_vec) => {
                 Ok(service_vec.into_iter()
-                              .map(|service| BluetoothRemoteGATTService::new(self.global().r(),
+                              .map(|service| BluetoothRemoteGATTService::new(&self.global(),
                                                                              &self.device.get(),
                                                                              DOMString::from(service.uuid),
                                                                              service.is_primary,
@@ -236,7 +236,7 @@ impl BluetoothRemoteGATTServiceMethods for BluetoothRemoteGATTService {
     fn GetCharacteristic(&self,
                          characteristic: BluetoothCharacteristicUUID)
                          -> Rc<Promise> {
-        result_to_promise(self.global().r(), self.get_characteristic(characteristic))
+        result_to_promise(&self.global(), self.get_characteristic(characteristic))
     }
 
     #[allow(unrooted_must_root)]
@@ -244,7 +244,7 @@ impl BluetoothRemoteGATTServiceMethods for BluetoothRemoteGATTService {
     fn GetCharacteristics(&self,
                           characteristic: Option<BluetoothCharacteristicUUID>)
                           -> Rc<Promise> {
-        result_to_promise(self.global().r(), self.get_characteristics(characteristic))
+        result_to_promise(&self.global(), self.get_characteristics(characteristic))
     }
 
     #[allow(unrooted_must_root)]
@@ -252,7 +252,7 @@ impl BluetoothRemoteGATTServiceMethods for BluetoothRemoteGATTService {
     fn GetIncludedService(&self,
                           service: BluetoothServiceUUID)
                           -> Rc<Promise> {
-        result_to_promise(self.global().r(), self.get_included_service(service))
+        result_to_promise(&self.global(), self.get_included_service(service))
     }
 
     #[allow(unrooted_must_root)]
@@ -260,6 +260,6 @@ impl BluetoothRemoteGATTServiceMethods for BluetoothRemoteGATTService {
     fn GetIncludedServices(&self,
                           service: Option<BluetoothServiceUUID>)
                           -> Rc<Promise> {
-        result_to_promise(self.global().r(), self.get_included_services(service))
+        result_to_promise(&self.global(), self.get_included_services(service))
     }
 }

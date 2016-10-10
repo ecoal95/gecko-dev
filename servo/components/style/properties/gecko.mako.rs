@@ -27,6 +27,7 @@ use gecko_bindings::bindings::{Gecko_FontFamilyList_Clear, Gecko_InitializeImage
 use gecko_bindings::bindings::ServoComputedValuesBorrowedOrNull;
 use gecko_bindings::structs;
 use gecko_bindings::sugar::ns_style_coord::{CoordDataValue, CoordData, CoordDataMut};
+use gecko_bindings::sugar::ownership::HasArcFFI;
 use gecko::values::{StyleCoordHelpers, GeckoStyleCoordConvertible, convert_nscolor_to_rgba};
 use gecko::values::convert_rgba_to_nscolor;
 use gecko::values::round_border_to_device_pixels;
@@ -197,26 +198,30 @@ pub struct ${style_struct.gecko_struct_name} {
 <%!
 def get_gecko_property(ffi_name, self_param = "self"):
     if "mBorderColor" in ffi_name:
-        return ffi_name.replace("mBorderColor", "unsafe { *%s.gecko.__bindgen_anon_1.mBorderColor.as_ref() }" % self_param) 
+        return ffi_name.replace("mBorderColor",
+                                "unsafe { *%s.gecko.__bindgen_anon_1.mBorderColor.as_ref() }"
+                                % self_param)
     return "%s.gecko.%s" % (self_param, ffi_name)
 
 def set_gecko_property(ffi_name, expr):
     if ffi_name == "__LIST_STYLE_TYPE__":
         return "unsafe { Gecko_SetListStyleType(&mut self.gecko, %s as u32); }" % expr
     if "mBorderColor" in ffi_name:
-        ffi_name = ffi_name.replace("mBorderColor", "*self.gecko.__bindgen_anon_1.mBorderColor.as_mut()")
+        ffi_name = ffi_name.replace("mBorderColor",
+                                    "*self.gecko.__bindgen_anon_1.mBorderColor.as_mut()")
         return "unsafe { %s = %s };" % (ffi_name, expr)
     return "self.gecko.%s = %s;" % (ffi_name, expr)
 %>
 
-<%def name="impl_keyword_setter(ident, gecko_ffi_name, keyword)">
+<%def name="impl_keyword_setter(ident, gecko_ffi_name, keyword, cast_type='u8')">
     #[allow(non_snake_case)]
     pub fn set_${ident}(&mut self, v: longhands::${ident}::computed_value::T) {
         use properties::longhands::${ident}::computed_value::T as Keyword;
         // FIXME(bholley): Align binary representations and ditch |match| for cast + static_asserts
         let result = match v {
             % for value in keyword.values_for('gecko'):
-            Keyword::${to_rust_ident(value)} => structs::${keyword.gecko_constant(value)} ${keyword.maybe_cast("u8")},
+                Keyword::${to_rust_ident(value)} =>
+                    structs::${keyword.gecko_constant(value)} ${keyword.maybe_cast(cast_type)},
             % endfor
         };
         ${set_gecko_property(gecko_ffi_name, "result")}
@@ -247,6 +252,7 @@ def set_gecko_property(ffi_name, expr):
             use cssparser::Color;
             let result = match v {
                 Color::RGBA(rgba) => convert_rgba_to_nscolor(&rgba),
+                // FIXME #13547
                 Color::CurrentColor => 0,
             };
         % endif
@@ -274,8 +280,8 @@ def set_gecko_property(ffi_name, expr):
     }
 </%def>
 
-<%def name="impl_keyword(ident, gecko_ffi_name, keyword, need_clone)">
-<%call expr="impl_keyword_setter(ident, gecko_ffi_name, keyword)"></%call>
+<%def name="impl_keyword(ident, gecko_ffi_name, keyword, need_clone, **kwargs)">
+<%call expr="impl_keyword_setter(ident, gecko_ffi_name, keyword, **kwargs)"></%call>
 <%call expr="impl_simple_copy(ident, gecko_ffi_name)"></%call>
 %if need_clone:
 <%call expr="impl_keyword_clone(ident, gecko_ffi_name, keyword)"></%call>
@@ -443,7 +449,7 @@ impl Debug for ${style_struct.gecko_struct_name} {
     # These are currently being shuffled to a different style struct on the gecko side.
     force_stub += ["backface-visibility", "transform-box", "transform-style"]
     # These live in an nsFont member in Gecko. Should be straightforward to do manually.
-    force_stub += ["font-kerning", "font-stretch", "font-variant"]
+    force_stub += ["font-kerning", "font-variant"]
     # These have unusual representations in gecko.
     force_stub += ["list-style-type", "text-overflow"]
     # In a nsTArray, have to be done manually, but probably not too much work
@@ -735,7 +741,7 @@ fn static_assert() {
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="Font"
-    skip_longhands="font-family font-style font-size font-weight"
+    skip_longhands="font-family font-stretch font-style font-size font-weight"
     skip_additionals="*">
 
     pub fn set_font_family(&mut self, v: longhands::font_family::computed_value::T) {
@@ -785,6 +791,14 @@ fn static_assert() {
     pub fn clone_font_size(&self) -> longhands::font_size::computed_value::T {
         Au(self.gecko.mSize)
     }
+
+    <% stretch_keyword = Keyword("font-stretch",
+                                 "normal ultra-condensed extra-condensed condensed " +
+                                 "semi-condensed semi-expanded expanded " +
+                                 "extra-expanded ultra-expanded",
+                                 gecko_constant_prefix='NS_FONT_STRETCH') %>
+
+    ${impl_keyword('font_stretch', 'mFont.stretch', stretch_keyword, need_clone=False, cast_type='i16')}
 
     pub fn set_font_weight(&mut self, v: longhands::font_weight::computed_value::T) {
         self.gecko.mFont.weight = v as u16;
@@ -1161,55 +1175,137 @@ fn static_assert() {
                                   images: longhands::${shorthand}_image::computed_value::T) {
         use gecko_bindings::structs::nsStyleImage;
         use gecko_bindings::structs::nsStyleImageLayers_LayerType as LayerType;
-        use gecko_bindings::structs::{NS_STYLE_GRADIENT_SHAPE_LINEAR, NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER};
+        use gecko_bindings::structs::{NS_STYLE_GRADIENT_SHAPE_LINEAR, NS_STYLE_GRADIENT_SHAPE_CIRCULAR};
+        use gecko_bindings::structs::{NS_STYLE_GRADIENT_SHAPE_ELLIPTICAL, NS_STYLE_GRADIENT_SIZE_CLOSEST_CORNER};
+        use gecko_bindings::structs::{NS_STYLE_GRADIENT_SIZE_CLOSEST_SIDE, NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER};
+        use gecko_bindings::structs::{NS_STYLE_GRADIENT_SIZE_FARTHEST_SIDE, NS_STYLE_GRADIENT_SIZE_EXPLICIT_SIZE};
         use gecko_bindings::structs::nsStyleCoord;
-        use values::computed::{Image, LinearGradient};
+        use values::computed::{Image, Gradient, GradientKind, GradientShape, Length, LengthOrKeyword};
+        use values::computed::{LengthOrPercentage, LengthOrPercentageOrKeyword};
         use values::specified::AngleOrCorner;
-        use values::specified::{HorizontalDirection, VerticalDirection};
+        use values::specified::{HorizontalDirection, SizeKeyword, VerticalDirection};
         use cssparser::Color as CSSColor;
 
-        fn set_linear_gradient(gradient: LinearGradient, geckoimage: &mut nsStyleImage) {
+        fn set_gradient(gradient: Gradient, geckoimage: &mut nsStyleImage) {
             let stop_count = gradient.stops.len();
             if stop_count >= ::std::u32::MAX as usize {
                 warn!("stylo: Prevented overflow due to too many gradient stops");
                 return;
             }
 
-            let gecko_gradient = unsafe {
-                Gecko_CreateGradient(NS_STYLE_GRADIENT_SHAPE_LINEAR as u8,
-                                     NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER as u8,
-                                     /* repeating = */ false,
-                                     /* legacy_syntax = */ false,
-                                     stop_count as u32)
-            };
+            let gecko_gradient = match gradient.gradient_kind {
+                GradientKind::Linear(angle_or_corner) => {
+                    let gecko_gradient = unsafe {
+                        Gecko_CreateGradient(NS_STYLE_GRADIENT_SHAPE_LINEAR as u8,
+                                             NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER as u8,
+                                             gradient.repeating,
+                                             /* legacy_syntax = */ false,
+                                             stop_count as u32)
+                    };
 
-            match gradient.angle_or_corner {
-                AngleOrCorner::Angle(angle) => {
+                    match angle_or_corner {
+                        AngleOrCorner::Angle(angle) => {
+                            unsafe {
+                                (*gecko_gradient).mAngle.set(angle);
+                                (*gecko_gradient).mBgPosX.set_value(CoordDataValue::None);
+                                (*gecko_gradient).mBgPosY.set_value(CoordDataValue::None);
+                            }
+                        },
+                        AngleOrCorner::Corner(horiz, vert) => {
+                            let percent_x = match horiz {
+                                HorizontalDirection::Left => 0.0,
+                                HorizontalDirection::Right => 1.0,
+                            };
+                            let percent_y = match vert {
+                                VerticalDirection::Top => 0.0,
+                                VerticalDirection::Bottom => 1.0,
+                            };
+
+                            unsafe {
+                                (*gecko_gradient).mAngle.set_value(CoordDataValue::None);
+                                (*gecko_gradient).mBgPosX
+                                                 .set_value(CoordDataValue::Percent(percent_x));
+                                (*gecko_gradient).mBgPosY
+                                                 .set_value(CoordDataValue::Percent(percent_y));
+                            }
+                        }
+                    }
+                    gecko_gradient
+                },
+                GradientKind::Radial(shape, position) => {
+                    let (gecko_shape, gecko_size) = match shape {
+                        GradientShape::Circle(ref length) => {
+                            let size = match *length {
+                                LengthOrKeyword::Keyword(keyword) => {
+                                    match keyword {
+                                        SizeKeyword::ClosestSide => NS_STYLE_GRADIENT_SIZE_CLOSEST_SIDE,
+                                        SizeKeyword::FarthestSide => NS_STYLE_GRADIENT_SIZE_FARTHEST_SIDE,
+                                        SizeKeyword::ClosestCorner => NS_STYLE_GRADIENT_SIZE_CLOSEST_CORNER,
+                                        SizeKeyword::FarthestCorner => NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER,
+                                    }
+                                },
+                                _ => NS_STYLE_GRADIENT_SIZE_EXPLICIT_SIZE,
+                            };
+                            (NS_STYLE_GRADIENT_SHAPE_CIRCULAR as u8, size as u8)
+                        },
+                        GradientShape::Ellipse(ref length) => {
+                            let size = match *length {
+                                LengthOrPercentageOrKeyword::Keyword(keyword) => {
+                                    match keyword {
+                                        SizeKeyword::ClosestSide => NS_STYLE_GRADIENT_SIZE_CLOSEST_SIDE,
+                                        SizeKeyword::FarthestSide => NS_STYLE_GRADIENT_SIZE_FARTHEST_SIDE,
+                                        SizeKeyword::ClosestCorner => NS_STYLE_GRADIENT_SIZE_CLOSEST_CORNER,
+                                        SizeKeyword::FarthestCorner => NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER,
+                                    }
+                                },
+                                _ => NS_STYLE_GRADIENT_SIZE_EXPLICIT_SIZE,
+                            };
+                            (NS_STYLE_GRADIENT_SHAPE_ELLIPTICAL as u8, size as u8)
+                        }
+                    };
+
+                    let gecko_gradient = unsafe {
+                        Gecko_CreateGradient(gecko_shape,
+                                             gecko_size,
+                                             gradient.repeating,
+                                             /* legacy_syntax = */ false,
+                                             stop_count as u32)
+                    };
+
+                    // Clear mAngle and mBgPos fields
                     unsafe {
-                        (*gecko_gradient).mAngle.set(angle);
+                        (*gecko_gradient).mAngle.set_value(CoordDataValue::None);
                         (*gecko_gradient).mBgPosX.set_value(CoordDataValue::None);
                         (*gecko_gradient).mBgPosY.set_value(CoordDataValue::None);
                     }
-                }
-                AngleOrCorner::Corner(horiz, vert) => {
-                    let percent_x = match horiz {
-                        HorizontalDirection::Left => 0.0,
-                        HorizontalDirection::Right => 1.0,
-                    };
-                    let percent_y = match vert {
-                        VerticalDirection::Top => 0.0,
-                        VerticalDirection::Bottom => 1.0,
-                    };
 
-                    unsafe {
-                        (*gecko_gradient).mAngle.set_value(CoordDataValue::None);
-                        (*gecko_gradient).mBgPosX
-                                         .set_value(CoordDataValue::Percent(percent_x));
-                        (*gecko_gradient).mBgPosY
-                                         .set_value(CoordDataValue::Percent(percent_y));
+                    // Setting radius values depending shape
+                    match shape {
+                        GradientShape::Circle(length) => {
+                            if let LengthOrKeyword::Length(len) = length {
+                                unsafe {
+                                    (*gecko_gradient).mRadiusX.set_value(CoordDataValue::Coord(len.0));
+                                    (*gecko_gradient).mRadiusY.set_value(CoordDataValue::Coord(len.0));
+                                }
+                            }
+                        },
+                        GradientShape::Ellipse(length) => {
+                            if let LengthOrPercentageOrKeyword::LengthOrPercentage(first_len, second_len) = length {
+                                unsafe {
+                                    (*gecko_gradient).mRadiusX.set(first_len);
+                                    (*gecko_gradient).mRadiusY.set(second_len);
+                                }
+                            }
+                        },
                     }
-                }
-            }
+                    unsafe {
+                        (*gecko_gradient).mBgPosX.set(position.horizontal);
+                        (*gecko_gradient).mBgPosY.set(position.vertical);
+                    }
+
+                    gecko_gradient
+                },
+            };
 
             let mut coord: nsStyleCoord = nsStyleCoord::null();
             for (index, stop) in gradient.stops.iter().enumerate() {
@@ -1263,8 +1359,8 @@ fn static_assert() {
             % if shorthand == "background":
                 if let Some(image) = image.0 {
                     match image {
-                        Image::LinearGradient(gradient) => {
-                            set_linear_gradient(gradient, &mut geckoimage.mImage)
+                        Image::Gradient(gradient) => {
+                            set_gradient(gradient, &mut geckoimage.mImage)
                         },
                         Image::Url(..) => {
                             // let utf8_bytes = url.as_bytes();
@@ -1280,8 +1376,8 @@ fn static_assert() {
                 use properties::longhands::mask_image::single_value::computed_value::T;
                 match image {
                     T::Image(image) => match image {
-                        Image::LinearGradient(gradient) => {
-                            set_linear_gradient(gradient, &mut geckoimage.mImage)
+                        Image::Gradient(gradient) => {
+                            set_gradient(gradient, &mut geckoimage.mImage)
                         }
                         _ => () // we need to support image values
                     },
@@ -1423,6 +1519,17 @@ fn static_assert() {
 </%self:impl_trait>
 
 
+<%self:impl_trait style_struct_name="InheritedBox"
+                  skip_longhands="image-rendering">
+
+    <% render_keyword = Keyword("image-rendering",
+                                "auto optimizequality optimizespeed crispedges") %>
+
+    ${impl_keyword('image_rendering', 'mImageRendering', render_keyword, need_clone=False)}
+
+</%self:impl_trait>
+
+
 <%self:impl_trait style_struct_name="InheritedText"
                   skip_longhands="text-align text-shadow line-height letter-spacing word-spacing">
 
@@ -1505,7 +1612,7 @@ fn static_assert() {
 
     pub fn set_letter_spacing(&mut self, v: longhands::letter_spacing::computed_value::T) {
         match v.0 {
-            Some(au) => self.gecko.mLetterSpacing.set_value(CoordDataValue::Coord(au.0)),
+            Some(au) => self.gecko.mLetterSpacing.set(au),
             None => self.gecko.mLetterSpacing.set_value(CoordDataValue::Normal)
         }
     }
@@ -1516,11 +1623,7 @@ fn static_assert() {
         use values::computed::LengthOrPercentage::*;
 
         match v.0 {
-            Some(lop) => match lop {
-                Length(au) => self.gecko.mWordSpacing.set_value(CoordDataValue::Coord(au.0)),
-                Percentage(f) => self.gecko.mWordSpacing.set_value(CoordDataValue::Percent(f)),
-                Calc(l_p) => self.gecko.mWordSpacing.set_value(CoordDataValue::Calc(l_p.into())),
-            },
+            Some(lop) => self.gecko.mWordSpacing.set(lop),
             // https://drafts.csswg.org/css-text-3/#valdef-word-spacing-normal
             None => self.gecko.mWordSpacing.set_value(CoordDataValue::Coord(0)),
         }
@@ -1812,7 +1915,7 @@ clip-path
 
     pub fn set_column_width(&mut self, v: longhands::column_width::computed_value::T) {
         match v.0 {
-            Some(au) => self.gecko.mColumnWidth.set_value(CoordDataValue::Coord(au.0)),
+            Some(au) => self.gecko.mColumnWidth.set(au),
             None => self.gecko.mColumnWidth.set_value(CoordDataValue::Auto),
         }
     }
@@ -1910,9 +2013,9 @@ clip-path
 <%def name="define_ffi_struct_accessor(style_struct)">
 #[no_mangle]
 #[allow(non_snake_case, unused_variables)]
-pub extern "C" fn Servo_GetStyle${style_struct.gecko_name}(computed_values:
+pub unsafe extern "C" fn Servo_GetStyle${style_struct.gecko_name}(computed_values:
         ServoComputedValuesBorrowedOrNull) -> *const ${style_struct.gecko_ffi_name} {
-    computed_values.as_arc::<ComputedValues>().get_${style_struct.name_lower}().get_gecko()
+    ComputedValues::arc_from_borrowed(&computed_values).unwrap().get_${style_struct.name_lower}().get_gecko()
         as *const ${style_struct.gecko_ffi_name}
 }
 </%def>

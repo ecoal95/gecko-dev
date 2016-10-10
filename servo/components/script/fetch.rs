@@ -7,10 +7,10 @@ use dom::bindings::codegen::Bindings::ResponseBinding::ResponseBinding::Response
 use dom::bindings::codegen::Bindings::ResponseBinding::ResponseType as DOMResponseType;
 use dom::bindings::codegen::UnionTypes::RequestOrUSVString;
 use dom::bindings::error::Error;
-use dom::bindings::global::GlobalRef;
 use dom::bindings::js::Root;
 use dom::bindings::refcounted::{Trusted, TrustedPromise};
 use dom::bindings::reflector::Reflectable;
+use dom::globalscope::GlobalScope;
 use dom::headers::Guard;
 use dom::promise::Promise;
 use dom::request::Request;
@@ -24,6 +24,7 @@ use net_traits::CoreResourceMsg::Fetch as NetTraitsFetch;
 use net_traits::request::Request as NetTraitsRequest;
 use net_traits::request::RequestInit as NetTraitsRequestInit;
 use network_listener::{NetworkListener, PreInvoke};
+use std::mem;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use url::Url;
@@ -31,6 +32,7 @@ use url::Url;
 struct FetchContext {
     fetch_promise: Option<TrustedPromise>,
     response_object: Trusted<Response>,
+    body: Vec<u8>,
 }
 
 fn from_referrer_to_referrer_url(request: &NetTraitsRequest) -> Option<Url> {
@@ -64,7 +66,7 @@ fn request_init_from_request(request: NetTraitsRequest) -> NetTraitsRequestInit 
 
 // https://fetch.spec.whatwg.org/#fetch-method
 #[allow(unrooted_must_root)]
-pub fn Fetch(global: GlobalRef, input: RequestOrUSVString, init: &RequestInit) -> Rc<Promise> {
+pub fn Fetch(global: &GlobalScope, input: RequestOrUSVString, init: &RequestInit) -> Rc<Promise> {
     let core_resource_thread = global.core_resource_thread();
 
     // Step 1
@@ -74,7 +76,7 @@ pub fn Fetch(global: GlobalRef, input: RequestOrUSVString, init: &RequestInit) -
     // Step 2
     let request = match Request::Constructor(global, input, init) {
         Err(e) => {
-            promise.reject_error(promise.global().r().get_cx(), e);
+            promise.reject_error(promise.global().get_cx(), e);
             return promise;
         },
         Ok(r) => r.get_request(),
@@ -89,6 +91,7 @@ pub fn Fetch(global: GlobalRef, input: RequestOrUSVString, init: &RequestInit) -
     let fetch_context = Arc::new(Mutex::new(FetchContext {
         fetch_promise: Some(TrustedPromise::new(promise.clone())),
         response_object: Trusted::new(&*response),
+        body: vec![],
     }));
     let listener = NetworkListener {
         context: fetch_context,
@@ -121,13 +124,13 @@ impl FetchResponseListener for FetchContext {
 
         // JSAutoCompartment needs to be manually made.
         // Otherwise, Servo will crash.
-        let promise_cx = promise.global().r().get_cx();
+        let promise_cx = promise.global().get_cx();
         let _ac = JSAutoCompartment::new(promise_cx, promise.reflector().get_jsobject().get());
         match fetch_metadata {
             // Step 4.1
             Err(_) => {
                 promise.reject_error(
-                    promise.global().r().get_cx(),
+                    promise.global().get_cx(),
                     Error::Type("Network error occurred".to_string()));
                 self.fetch_promise = Some(TrustedPromise::new(promise));
                 return;
@@ -154,11 +157,15 @@ impl FetchResponseListener for FetchContext {
     }
 
     fn process_response_chunk(&mut self, mut chunk: Vec<u8>) {
-        // TODO when body is implemented
-        // ... this will append the chunk to Response's body.
+        self.body.append(&mut chunk);
     }
 
-    fn process_response_eof(&mut self, response: Result<(), NetworkError>) {
+    fn process_response_eof(&mut self, _response: Result<(), NetworkError>) {
+        let response = self.response_object.root();
+        let global = response.global();
+        let cx = global.r().get_cx();
+        let _ac = JSAutoCompartment::new(cx, global.r().reflector().get_jsobject().get());
+        response.finish(mem::replace(&mut self.body, vec![]));
         // TODO
         // ... trailerObject is not supported in Servo yet.
     }

@@ -21,7 +21,6 @@ use dom::bindings::codegen::Bindings::TouchBinding::TouchMethods;
 use dom::bindings::codegen::Bindings::WindowBinding::WindowMethods;
 use dom::bindings::codegen::UnionTypes::NodeOrString;
 use dom::bindings::error::{Error, ErrorResult, Fallible};
-use dom::bindings::global::GlobalRef;
 use dom::bindings::inheritance::{Castable, ElementTypeId, HTMLElementTypeId, NodeTypeId};
 use dom::bindings::js::{JS, LayoutJS, MutNullableHeap, Root};
 use dom::bindings::js::RootedReference;
@@ -45,6 +44,7 @@ use dom::eventdispatcher::EventStatus;
 use dom::eventtarget::EventTarget;
 use dom::focusevent::FocusEvent;
 use dom::forcetouchevent::ForceTouchEvent;
+use dom::globalscope::GlobalScope;
 use dom::hashchangeevent::HashChangeEvent;
 use dom::htmlanchorelement::HTMLAnchorElement;
 use dom::htmlappletelement::HTMLAppletElement;
@@ -96,7 +96,7 @@ use js::jsapi::JS_GetRuntime;
 use msg::constellation_msg::{ALT, CONTROL, SHIFT, SUPER};
 use msg::constellation_msg::{Key, KeyModifiers, KeyState};
 use msg::constellation_msg::{PipelineId, ReferrerPolicy};
-use net_traits::{AsyncResponseTarget, FetchResponseMsg, IpcSend, PendingAsyncLoad};
+use net_traits::{AsyncResponseTarget, FetchResponseMsg, IpcSend};
 use net_traits::CookieSource::NonHTTP;
 use net_traits::CoreResourceMsg::{GetCookiesForUrl, SetCookiesForUrl};
 use net_traits::request::RequestInit;
@@ -106,14 +106,14 @@ use origin::Origin;
 use parse::{MutNullableParserField, ParserRef, ParserRoot};
 use script_layout_interface::message::{Msg, ReflowQueryType};
 use script_thread::{MainThreadScriptMsg, Runnable};
-use script_traits::{AnimationState, MouseButton, MouseEventType, MozBrowserEvent};
+use script_traits::{AnimationState, CompositorEvent, MouseButton, MouseEventType, MozBrowserEvent};
 use script_traits::{ScriptMsg as ConstellationMsg, TouchpadPressurePhase};
 use script_traits::{TouchEventType, TouchId};
 use script_traits::UntrustedNodeAddress;
 use std::ascii::AsciiExt;
 use std::borrow::ToOwned;
 use std::boxed::FnBox;
-use std::cell::Cell;
+use std::cell::{Cell, Ref, RefMut};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::default::Default;
@@ -125,7 +125,6 @@ use std::time::{Duration, Instant};
 use string_cache::{Atom, QualName};
 use style::attr::AttrValue;
 use style::context::ReflowGoal;
-use style::refcell::{Ref, RefMut};
 use style::selector_impl::ElementSnapshot;
 use style::str::{split_html_space_chars, str_join};
 use style::stylesheets::Stylesheet;
@@ -133,6 +132,11 @@ use time;
 use url::Url;
 use url::percent_encoding::percent_decode;
 use util::prefs::PREFS;
+
+pub enum TouchEventResult {
+    Processed(bool),
+    Forwarded,
+}
 
 #[derive(JSTraceable, PartialEq, HeapSizeOf)]
 pub enum IsHTMLDocument {
@@ -144,6 +148,14 @@ pub enum IsHTMLDocument {
 enum ParserBlockedByScript {
     Blocked,
     Unblocked,
+}
+
+#[derive(JSTraceable, HeapSizeOf)]
+#[must_root]
+struct StylesheetInDocument {
+    node: JS<Node>,
+    #[ignore_heap_size_of = "Arc"]
+    stylesheet: Arc<Stylesheet>,
 }
 
 // https://dom.spec.whatwg.org/#document
@@ -174,7 +186,7 @@ pub struct Document {
     anchors: MutNullableHeap<JS<HTMLCollection>>,
     applets: MutNullableHeap<JS<HTMLCollection>>,
     /// List of stylesheets associated with nodes in this document. |None| if the list needs to be refreshed.
-    stylesheets: DOMRefCell<Option<Vec<(JS<Node>, Arc<Stylesheet>)>>>,
+    stylesheets: DOMRefCell<Option<Vec<StylesheetInDocument>>>,
     /// Whether the list of stylesheets has changed since the last reflow was triggered.
     stylesheets_changed_since_reflow: Cell<bool>,
     ready_state: Cell<DocumentReadyState>,
@@ -643,8 +655,9 @@ impl Document {
             // Update the focus state for all elements in the focus chain.
             // https://html.spec.whatwg.org/multipage/#focus-chain
             if focus_type == FocusType::Element {
-                let event = ConstellationMsg::Focus(self.window.pipeline_id());
-                self.window.constellation_chan().send(event).unwrap();
+                let global_scope = self.window.upcast::<GlobalScope>();
+                let event = ConstellationMsg::Focus(global_scope.pipeline_id());
+                global_scope.constellation_chan().send(event).unwrap();
             }
         }
     }
@@ -662,8 +675,10 @@ impl Document {
     /// Sends this document's title to the compositor.
     pub fn send_title_to_compositor(&self) {
         let window = self.window();
-        window.constellation_chan()
-              .send(ConstellationMsg::SetTitle(window.pipeline_id(),
+        let global_scope = window.upcast::<GlobalScope>();
+        global_scope
+              .constellation_chan()
+              .send(ConstellationMsg::SetTitle(global_scope.pipeline_id(),
                                                Some(String::from(self.Title()))))
               .unwrap();
     }
@@ -713,10 +728,9 @@ impl Document {
                 let child_origin = Point2D::new(rect.X() as f32, rect.Y() as f32);
                 let child_point = client_point - child_origin;
 
-                let event = ConstellationMsg::ForwardMouseButtonEvent(pipeline_id,
-                                                                      mouse_event_type,
-                                                                      button, child_point);
-                self.window.constellation_chan().send(event).unwrap();
+                let event = CompositorEvent::MouseButtonEvent(mouse_event_type, button, child_point);
+                let event = ConstellationMsg::ForwardEvent(pipeline_id, event);
+                self.window.upcast::<GlobalScope>().constellation_chan().send(event).unwrap();
             }
             return;
         }
@@ -843,14 +857,6 @@ impl Document {
                                           client_point: Point2D<f32>,
                                           pressure: f32,
                                           phase_now: TouchpadPressurePhase) {
-        let phase_before = self.touchpad_pressure_phase.get();
-        self.touchpad_pressure_phase.set(phase_now);
-
-        if phase_before == TouchpadPressurePhase::BeforeClick &&
-           phase_now == TouchpadPressurePhase::BeforeClick {
-            return;
-        }
-
         let node = match self.window.hit_test_query(client_point, false) {
             Some(node_address) => node::from_untrusted_node_address(js_runtime, node_address),
             None => return
@@ -866,6 +872,30 @@ impl Document {
                 }
             },
         };
+
+        // If the target is an iframe, forward the event to the child document.
+        if let Some(iframe) = el.downcast::<HTMLIFrameElement>() {
+            if let Some(pipeline_id) = iframe.pipeline_id() {
+                let rect = iframe.upcast::<Element>().GetBoundingClientRect();
+                let child_origin = Point2D::new(rect.X() as f32, rect.Y() as f32);
+                let child_point = client_point - child_origin;
+
+                let event = CompositorEvent::TouchpadPressureEvent(child_point,
+                                                                   pressure,
+                                                                   phase_now);
+                let event = ConstellationMsg::ForwardEvent(pipeline_id, event);
+                self.window.upcast::<GlobalScope>().constellation_chan().send(event).unwrap();
+            }
+            return;
+        }
+
+        let phase_before = self.touchpad_pressure_phase.get();
+        self.touchpad_pressure_phase.set(phase_now);
+
+        if phase_before == TouchpadPressurePhase::BeforeClick &&
+           phase_now == TouchpadPressurePhase::BeforeClick {
+            return;
+        }
 
         let node = el.upcast::<Node>();
         let target = node.upcast();
@@ -953,8 +983,9 @@ impl Document {
                     let child_origin = Point2D::new(rect.X() as f32, rect.Y() as f32);
                     let child_point = client_point - child_origin;
 
-                    let event = ConstellationMsg::ForwardMouseMoveEvent(pipeline_id, child_point);
-                    self.window.constellation_chan().send(event).unwrap();
+                    let event = CompositorEvent::MouseMoveEvent(Some(child_point));
+                    let event = ConstellationMsg::ForwardEvent(pipeline_id, event);
+                    self.window.upcast::<GlobalScope>().constellation_chan().send(event).unwrap();
                 }
                 return;
             }
@@ -1022,9 +1053,11 @@ impl Document {
     pub fn handle_touch_event(&self,
                               js_runtime: *mut JSRuntime,
                               event_type: TouchEventType,
-                              TouchId(identifier): TouchId,
+                              touch_id: TouchId,
                               point: Point2D<f32>)
-                              -> bool {
+                              -> TouchEventResult {
+        let TouchId(identifier) = touch_id;
+
         let event_name = match event_type {
             TouchEventType::Down => "touchstart",
             TouchEventType::Move => "touchmove",
@@ -1034,7 +1067,7 @@ impl Document {
 
         let node = match self.window.hit_test_query(point, false) {
             Some(node_address) => node::from_untrusted_node_address(js_runtime, node_address),
-            None => return false,
+            None => return TouchEventResult::Processed(false),
         };
         let el = match node.downcast::<Element>() {
             Some(el) => Root::from_ref(el),
@@ -1042,10 +1075,25 @@ impl Document {
                 let parent = node.GetParentNode();
                 match parent.and_then(Root::downcast::<Element>) {
                     Some(parent) => parent,
-                    None => return false,
+                    None => return TouchEventResult::Processed(false),
                 }
             },
         };
+
+        // If the target is an iframe, forward the event to the child document.
+        if let Some(iframe) = el.downcast::<HTMLIFrameElement>() {
+            if let Some(pipeline_id) = iframe.pipeline_id() {
+                let rect = iframe.upcast::<Element>().GetBoundingClientRect();
+                let child_origin = Point2D::new(rect.X() as f32, rect.Y() as f32);
+                let child_point = point - child_origin;
+
+                let event = CompositorEvent::TouchEvent(event_type, touch_id, child_point);
+                let event = ConstellationMsg::ForwardEvent(pipeline_id, event);
+                self.window.upcast::<GlobalScope>().constellation_chan().send(event).unwrap();
+            }
+            return TouchEventResult::Forwarded;
+        }
+
         let target = Root::upcast::<EventTarget>(el);
         let window = &*self.window;
 
@@ -1122,8 +1170,8 @@ impl Document {
                       ReflowReason::MouseEvent);
 
         match result {
-            EventStatus::Canceled => false,
-            EventStatus::NotCanceled => true
+            EventStatus::Canceled => TouchEventResult::Processed(false),
+            EventStatus::NotCanceled => TouchEventResult::Processed(true),
         }
     }
 
@@ -1349,10 +1397,11 @@ impl Document {
     pub fn trigger_mozbrowser_event(&self, event: MozBrowserEvent) {
         if PREFS.is_mozbrowser_enabled() {
             if let Some((parent_pipeline_id, _)) = self.window.parent_info() {
+                let global_scope = self.window.upcast::<GlobalScope>();
                 let event = ConstellationMsg::MozBrowserEvent(parent_pipeline_id,
-                                                              Some(self.window.pipeline_id()),
+                                                              Some(global_scope.pipeline_id()),
                                                               event);
-                self.window.constellation_chan().send(event).unwrap();
+                global_scope.constellation_chan().send(event).unwrap();
             }
         }
     }
@@ -1372,10 +1421,11 @@ impl Document {
         //
         // TODO: Should tick animation only when document is visible
         if !self.running_animation_callbacks.get() {
+            let global_scope = self.window.upcast::<GlobalScope>();
             let event = ConstellationMsg::ChangeRunningAnimationsState(
-                self.window.pipeline_id(),
+                global_scope.pipeline_id(),
                 AnimationState::AnimationCallbacksPresent);
-            self.window.constellation_chan().send(event).unwrap();
+            global_scope.constellation_chan().send(event).unwrap();
         }
 
         ident
@@ -1411,9 +1461,10 @@ impl Document {
         if self.animation_frame_list.borrow().is_empty() {
             mem::swap(&mut *self.animation_frame_list.borrow_mut(),
                       &mut animation_frame_list);
-            let event = ConstellationMsg::ChangeRunningAnimationsState(self.window.pipeline_id(),
+            let global_scope = self.window.upcast::<GlobalScope>();
+            let event = ConstellationMsg::ChangeRunningAnimationsState(global_scope.pipeline_id(),
                                                                        AnimationState::NoAnimationCallbacksPresent);
-            self.window.constellation_chan().send(event).unwrap();
+            global_scope.constellation_chan().send(event).unwrap();
         }
 
         self.running_animation_callbacks.set(false);
@@ -1423,17 +1474,6 @@ impl Document {
                            ReflowReason::RequestAnimationFrame);
     }
 
-    /// Add a load to the list of loads blocking this document's load.
-    pub fn add_blocking_load(&self, load: LoadType) {
-        let mut loader = self.loader.borrow_mut();
-        loader.add_blocking_load(load)
-    }
-
-    pub fn prepare_async_load(&self, load: LoadType, referrer_policy: Option<ReferrerPolicy>) -> PendingAsyncLoad {
-        let mut loader = self.loader.borrow_mut();
-        loader.prepare_async_load(load, self, referrer_policy)
-    }
-
     pub fn load_async(&self, load: LoadType, listener: AsyncResponseTarget, referrer_policy: Option<ReferrerPolicy>) {
         let mut loader = self.loader.borrow_mut();
         loader.load_async(load, listener, self, referrer_policy);
@@ -1441,10 +1481,9 @@ impl Document {
 
     pub fn fetch_async(&self, load: LoadType,
                        request: RequestInit,
-                       fetch_target: IpcSender<FetchResponseMsg>,
-                       referrer_policy: Option<ReferrerPolicy>) {
+                       fetch_target: IpcSender<FetchResponseMsg>) {
         let mut loader = self.loader.borrow_mut();
-        loader.fetch_async(load, request, fetch_target, self, referrer_policy);
+        loader.fetch_async(load, request, fetch_target);
     }
 
     pub fn finish_load(&self, load: LoadType) {
@@ -1483,7 +1522,8 @@ impl Document {
         let loader = self.loader.borrow();
         if !loader.is_blocked() && !loader.events_inhibited() {
             let win = self.window();
-            let msg = MainThreadScriptMsg::DocumentLoadsComplete(win.pipeline_id());
+            let msg = MainThreadScriptMsg::DocumentLoadsComplete(
+                win.upcast::<GlobalScope>().pipeline_id());
             win.main_thread_script_chan().send(msg).unwrap();
         }
     }
@@ -1581,9 +1621,10 @@ impl Document {
     }
 
     pub fn notify_constellation_load(&self) {
-        let pipeline_id = self.window.pipeline_id();
+        let global_scope = self.window.upcast::<GlobalScope>();
+        let pipeline_id = global_scope.pipeline_id();
         let load_event = ConstellationMsg::LoadComplete(pipeline_id);
-        self.window.constellation_chan().send(load_event).unwrap();
+        global_scope.constellation_chan().send(load_event).unwrap();
     }
 
     pub fn set_current_parser(&self, script: Option<ParserRef>) {
@@ -1815,7 +1856,7 @@ impl Document {
     }
 
     // https://dom.spec.whatwg.org/#dom-document
-    pub fn Constructor(global: GlobalRef) -> Fallible<Root<Document>> {
+    pub fn Constructor(global: &GlobalScope) -> Fallible<Root<Document>> {
         let win = global.as_window();
         let doc = win.Document();
         let doc = doc.r();
@@ -1853,7 +1894,7 @@ impl Document {
                                                                       doc_loader,
                                                                       referrer,
                                                                       referrer_policy),
-                                          GlobalRef::Window(window),
+                                          window,
                                           DocumentBinding::Wrap);
         {
             let node = document.upcast::<Node>();
@@ -1891,13 +1932,16 @@ impl Document {
                             node.get_stylesheet()
                         } else {
                             None
-                        }.map(|stylesheet| (JS::from_ref(&*node), stylesheet))
+                        }.map(|stylesheet| StylesheetInDocument {
+                            node: JS::from_ref(&*node),
+                            stylesheet: stylesheet
+                        })
                     })
                     .collect());
             };
         }
         self.stylesheets.borrow().as_ref().unwrap().iter()
-                        .map(|&(_, ref stylesheet)| stylesheet.clone())
+                        .map(|s| s.stylesheet.clone())
                         .collect()
     }
 
@@ -2327,13 +2371,13 @@ impl DocumentMethods for Document {
             "mouseevents" | "mouseevent" =>
                 Ok(Root::upcast(MouseEvent::new_uninitialized(&self.window))),
             "customevent" =>
-                Ok(Root::upcast(CustomEvent::new_uninitialized(GlobalRef::Window(&self.window)))),
+                Ok(Root::upcast(CustomEvent::new_uninitialized(self.window.upcast()))),
             "htmlevents" | "events" | "event" | "svgevents" =>
-                Ok(Event::new_uninitialized(GlobalRef::Window(&self.window))),
+                Ok(Event::new_uninitialized(&self.window.upcast())),
             "keyboardevent" =>
                 Ok(Root::upcast(KeyboardEvent::new_uninitialized(&self.window))),
             "messageevent" =>
-                Ok(Root::upcast(MessageEvent::new_uninitialized(GlobalRef::Window(&self.window)))),
+                Ok(Root::upcast(MessageEvent::new_uninitialized(self.window.upcast()))),
             "touchevent" =>
                 Ok(Root::upcast(
                     TouchEvent::new_uninitialized(&self.window,
@@ -2343,25 +2387,25 @@ impl DocumentMethods for Document {
                     )
                 )),
             "webglcontextevent" =>
-                Ok(Root::upcast(WebGLContextEvent::new_uninitialized(GlobalRef::Window(&self.window)))),
+                Ok(Root::upcast(WebGLContextEvent::new_uninitialized(self.window.upcast()))),
             "storageevent" => {
                 let USVString(url) = self.URL();
                 Ok(Root::upcast(StorageEvent::new_uninitialized(&self.window, DOMString::from(url))))
             },
             "progressevent" =>
-                Ok(Root::upcast(ProgressEvent::new_uninitialized(&self.window))),
+                Ok(Root::upcast(ProgressEvent::new_uninitialized(self.window.upcast()))),
             "focusevent" =>
-                Ok(Root::upcast(FocusEvent::new_uninitialized(GlobalRef::Window(&self.window)))),
+                Ok(Root::upcast(FocusEvent::new_uninitialized(self.window.upcast()))),
             "errorevent" =>
-                Ok(Root::upcast(ErrorEvent::new_uninitialized(GlobalRef::Window(&self.window)))),
+                Ok(Root::upcast(ErrorEvent::new_uninitialized(self.window.upcast()))),
             "closeevent" =>
-                Ok(Root::upcast(CloseEvent::new_uninitialized(GlobalRef::Window(&self.window)))),
+                Ok(Root::upcast(CloseEvent::new_uninitialized(self.window.upcast()))),
             "popstateevent" =>
-                Ok(Root::upcast(PopStateEvent::new_uninitialized(GlobalRef::Window(&self.window)))),
+                Ok(Root::upcast(PopStateEvent::new_uninitialized(self.window.upcast()))),
             "hashchangeevent" =>
-                Ok(Root::upcast(HashChangeEvent::new_uninitialized(GlobalRef::Window(&self.window)))),
+                Ok(Root::upcast(HashChangeEvent::new_uninitialized(&self.window.upcast()))),
             "pagetransitionevent" =>
-                Ok(Root::upcast(PageTransitionEvent::new_uninitialized(GlobalRef::Window(&self.window)))),
+                Ok(Root::upcast(PageTransitionEvent::new_uninitialized(self.window.upcast()))),
             _ =>
                 Err(Error::NotSupported),
         }
@@ -2721,7 +2765,10 @@ impl DocumentMethods for Document {
 
         let url = self.url();
         let (tx, rx) = ipc::channel().unwrap();
-        let _ = self.window.resource_threads().send(GetCookiesForUrl((*url).clone(), tx, NonHTTP));
+        let _ = self.window
+            .upcast::<GlobalScope>()
+            .resource_threads()
+            .send(GetCookiesForUrl((*url).clone(), tx, NonHTTP));
         let cookies = rx.recv().unwrap();
         Ok(cookies.map_or(DOMString::new(), DOMString::from))
     }
@@ -2738,6 +2785,7 @@ impl DocumentMethods for Document {
 
         let url = self.url();
         let _ = self.window
+                    .upcast::<GlobalScope>()
                     .resource_threads()
                     .send(SetCookiesForUrl((*url).clone(), String::from(cookie), NonHTTP));
         Ok(())
@@ -2995,7 +3043,7 @@ impl DocumentProgressHandler {
     fn dispatch_load(&self) {
         let document = self.addr.root();
         let window = document.window();
-        let event = Event::new(GlobalRef::Window(window),
+        let event = Event::new(window.upcast(),
                                atom!("load"),
                                EventBubbles::DoesNotBubble,
                                EventCancelable::NotCancelable);

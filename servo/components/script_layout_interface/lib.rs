@@ -52,23 +52,59 @@ use core::nonzero::NonZero;
 use ipc_channel::ipc::IpcSender;
 use libc::c_void;
 use restyle_damage::RestyleDamage;
-use style::data::PrivateStyleData;
-use style::refcell::RefCell;
+use std::sync::atomic::AtomicIsize;
+use style::atomic_refcell::AtomicRefCell;
+use style::data::PersistentStyleData;
 
-pub struct PartialStyleAndLayoutData {
-    pub style_data: PrivateStyleData,
+pub struct PartialPersistentLayoutData {
+    /// Data that the style system associates with a node. When the
+    /// style system is being used standalone, this is all that hangs
+    /// off the node. This must be first to permit the various
+    /// transmutations between PersistentStyleData and PersistentLayoutData.
+    pub style_data: PersistentStyleData,
+
+    /// Description of how to account for recent style changes.
     pub restyle_damage: RestyleDamage,
+
+    /// Information needed during parallel traversals.
+    pub parallel: DomParallelInfo,
+}
+
+impl PartialPersistentLayoutData {
+    pub fn new() -> Self {
+        PartialPersistentLayoutData {
+            style_data: PersistentStyleData::new(),
+            restyle_damage: RestyleDamage::empty(),
+            parallel: DomParallelInfo::new(),
+        }
+    }
 }
 
 #[derive(Copy, Clone, HeapSizeOf)]
 pub struct OpaqueStyleAndLayoutData {
     #[ignore_heap_size_of = "TODO(#6910) Box value that should be counted but \
                              the type lives in layout"]
-    pub ptr: NonZero<*mut RefCell<PartialStyleAndLayoutData>>
+    pub ptr: NonZero<*mut AtomicRefCell<PartialPersistentLayoutData>>
 }
 
 #[allow(unsafe_code)]
 unsafe impl Send for OpaqueStyleAndLayoutData {}
+
+/// Information that we need stored in each DOM node.
+#[derive(HeapSizeOf)]
+pub struct DomParallelInfo {
+    /// The number of children remaining to process during bottom-up traversal.
+    pub children_to_process: AtomicIsize,
+}
+
+impl DomParallelInfo {
+    pub fn new() -> DomParallelInfo {
+        DomParallelInfo {
+            children_to_process: AtomicIsize::new(0),
+        }
+    }
+}
+
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum LayoutNodeType {
@@ -95,10 +131,16 @@ pub enum LayoutElementType {
     HTMLTableRowElement,
     HTMLTableSectionElement,
     HTMLTextAreaElement,
+    SVGSVGElement,
 }
 
 pub struct HTMLCanvasData {
     pub ipc_renderer: Option<IpcSender<CanvasMsg>>,
+    pub width: u32,
+    pub height: u32,
+}
+
+pub struct SVGSVGData {
     pub width: u32,
     pub height: u32,
 }

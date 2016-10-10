@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use body::{BodyOperations, BodyType, consume_body};
+use body::{BodyOperations, BodyType, consume_body, consume_body_with_promise};
 use core::cell::Cell;
 use dom::bindings::cell::DOMRefCell;
 use dom::bindings::codegen::Bindings::HeadersBinding::HeadersMethods;
@@ -10,10 +10,10 @@ use dom::bindings::codegen::Bindings::ResponseBinding;
 use dom::bindings::codegen::Bindings::ResponseBinding::{ResponseMethods, ResponseType as DOMResponseType};
 use dom::bindings::codegen::Bindings::XMLHttpRequestBinding::BodyInit;
 use dom::bindings::error::{Error, Fallible};
-use dom::bindings::global::GlobalRef;
 use dom::bindings::js::{JS, MutNullableHeap, Root};
 use dom::bindings::reflector::{Reflectable, Reflector, reflect_dom_object};
 use dom::bindings::str::{ByteString, USVString};
+use dom::globalscope::GlobalScope;
 use dom::headers::{Headers, Guard};
 use dom::headers::{is_vchar, is_obs_text};
 use dom::promise::Promise;
@@ -22,10 +22,10 @@ use hyper::header::Headers as HyperHeaders;
 use hyper::status::StatusCode;
 use hyper_serde::Serde;
 use net_traits::response::{ResponseBody as NetTraitsResponseBody};
+use std::cell::Ref;
 use std::mem;
 use std::rc::Rc;
 use std::str::FromStr;
-use style::refcell::Ref;
 use url::Position;
 use url::Url;
 
@@ -44,6 +44,8 @@ pub struct Response {
     url_list: DOMRefCell<Vec<Url>>,
     // For now use the existing NetTraitsResponseBody enum
     body: DOMRefCell<NetTraitsResponseBody>,
+    #[ignore_heap_size_of = "Rc"]
+    body_promise: DOMRefCell<Option<(Rc<Promise>, BodyType)>>,
 }
 
 impl Response {
@@ -59,15 +61,16 @@ impl Response {
             url: DOMRefCell::new(None),
             url_list: DOMRefCell::new(vec![]),
             body: DOMRefCell::new(NetTraitsResponseBody::Empty),
+            body_promise: DOMRefCell::new(None),
         }
     }
 
     // https://fetch.spec.whatwg.org/#dom-response
-    pub fn new(global: GlobalRef) -> Root<Response> {
+    pub fn new(global: &GlobalScope) -> Root<Response> {
         reflect_dom_object(box Response::new_inherited(), global, ResponseBinding::Wrap)
     }
 
-    pub fn Constructor(global: GlobalRef, body: Option<BodyInit>, init: &ResponseBinding::ResponseInit)
+    pub fn Constructor(global: &GlobalScope, body: Option<BodyInit>, init: &ResponseBinding::ResponseInit)
                        -> Fallible<Root<Response>> {
         // Step 1
         if init.status < 200 || init.status > 599 {
@@ -135,7 +138,7 @@ impl Response {
     }
 
     // https://fetch.spec.whatwg.org/#dom-response-error
-    pub fn Error(global: GlobalRef) -> Root<Response> {
+    pub fn Error(global: &GlobalScope) -> Root<Response> {
         let r = Response::new(global);
         *r.response_type.borrow_mut() = DOMResponseType::Error;
         r.Headers().set_guard(Guard::Immutable);
@@ -144,7 +147,7 @@ impl Response {
     }
 
     // https://fetch.spec.whatwg.org/#dom-response-redirect
-    pub fn Redirect(global: GlobalRef, url: USVString, status: u16) -> Fallible<Root<Response>> {
+    pub fn Redirect(global: &GlobalScope, url: USVString, status: u16) -> Fallible<Root<Response>> {
         // Step 1
         // TODO: `entry settings object` is not implemented in Servo yet.
         let base_url = global.get_url();
@@ -194,18 +197,26 @@ impl BodyOperations for Response {
         self.BodyUsed()
     }
 
+    fn set_body_promise(&self, p: &Rc<Promise>, body_type: BodyType) {
+        assert!(self.body_promise.borrow().is_none());
+        self.body_used.set(true);
+        *self.body_promise.borrow_mut() = Some((p.clone(), body_type));
+    }
+
     fn is_locked(&self) -> bool {
         self.locked()
     }
 
     fn take_body(&self) -> Option<Vec<u8>> {
-        let body: NetTraitsResponseBody = mem::replace(&mut *self.body.borrow_mut(), NetTraitsResponseBody::Empty);
+        let body = mem::replace(&mut *self.body.borrow_mut(), NetTraitsResponseBody::Empty);
         match body {
-            NetTraitsResponseBody::Done(bytes) | NetTraitsResponseBody::Receiving(bytes) => {
-                self.body_used.set(true);
+            NetTraitsResponseBody::Done(bytes) => {
                 Some(bytes)
             },
-            _ => None,
+            body => {
+                mem::replace(&mut *self.body.borrow_mut(), body);
+                None
+            },
         }
     }
 
@@ -281,7 +292,7 @@ impl ResponseMethods for Response {
 
     // https://fetch.spec.whatwg.org/#dom-response-headers
     fn Headers(&self) -> Root<Headers> {
-        self.headers_reflector.or_init(|| Headers::for_response(self.global().r()))
+        self.headers_reflector.or_init(|| Headers::for_response(&self.global()))
     }
 
     // https://fetch.spec.whatwg.org/#dom-response-clone
@@ -290,7 +301,7 @@ impl ResponseMethods for Response {
         // TODO: This step relies on body and stream, which are still unimplemented.
 
         // Step 2
-        let new_response = Response::new(self.global().r());
+        let new_response = Response::new(&self.global());
         new_response.Headers().set_guard(self.Headers().get_guard());
 
         // https://fetch.spec.whatwg.org/#concept-response-clone
@@ -365,5 +376,13 @@ impl Response {
 
     pub fn set_final_url(&self, final_url: Url) {
         *self.url.borrow_mut() = Some(final_url);
+    }
+
+    #[allow(unrooted_must_root)]
+    pub fn finish(&self, body: Vec<u8>) {
+        *self.body.borrow_mut() = NetTraitsResponseBody::Done(body);
+        if let Some((p, body_type)) = self.body_promise.borrow_mut().take() {
+            consume_body_with_promise(self, body_type, &p);
+        }
     }
 }

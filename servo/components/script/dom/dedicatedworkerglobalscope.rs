@@ -11,16 +11,12 @@ use dom::bindings::codegen::Bindings::DedicatedWorkerGlobalScopeBinding;
 use dom::bindings::codegen::Bindings::DedicatedWorkerGlobalScopeBinding::DedicatedWorkerGlobalScopeMethods;
 use dom::bindings::codegen::Bindings::EventHandlerBinding::EventHandlerNonNull;
 use dom::bindings::error::{ErrorInfo, ErrorResult};
-use dom::bindings::global::{GlobalRef, global_root_from_context};
 use dom::bindings::inheritance::Castable;
 use dom::bindings::js::{Root, RootCollection};
 use dom::bindings::reflector::Reflectable;
 use dom::bindings::str::DOMString;
 use dom::bindings::structuredclone::StructuredCloneData;
-use dom::errorevent::ErrorEvent;
-use dom::event::{Event, EventBubbles, EventCancelable};
-use dom::eventdispatcher::EventStatus;
-use dom::eventtarget::EventTarget;
+use dom::globalscope::GlobalScope;
 use dom::messageevent::MessageEvent;
 use dom::worker::{TrustedWorkerAddress, WorkerErrorHandler, WorkerMessageHandler};
 use dom::workerglobalscope::WorkerGlobalScope;
@@ -36,7 +32,6 @@ use rand::random;
 use script_runtime::{CommonScriptMsg, ScriptChan, ScriptPort, StackRootTLS, get_reports, new_rt_and_cx};
 use script_runtime::ScriptThreadEventCategory::WorkerEvent;
 use script_traits::{TimerEvent, TimerSource, WorkerGlobalScopeInit, WorkerScriptLoadOrigin};
-use std::cell::Cell;
 use std::mem::replace;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicBool;
@@ -81,7 +76,6 @@ enum MixedMessage {
 #[dom_struct]
 pub struct DedicatedWorkerGlobalScope {
     workerglobalscope: WorkerGlobalScope,
-    id: PipelineId,
     #[ignore_heap_size_of = "Defined in std"]
     receiver: Receiver<(TrustedWorkerAddress, WorkerScriptMsg)>,
     #[ignore_heap_size_of = "Defined in std"]
@@ -93,14 +87,11 @@ pub struct DedicatedWorkerGlobalScope {
     #[ignore_heap_size_of = "Can't measure trait objects"]
     /// Sender to the parent thread.
     parent_sender: Box<ScriptChan + Send>,
-    /// https://html.spec.whatwg.org/multipage/#in-error-reporting-mode
-    in_error_reporting_mode: Cell<bool>
 }
 
 impl DedicatedWorkerGlobalScope {
     fn new_inherited(init: WorkerGlobalScopeInit,
                      worker_url: Url,
-                     id: PipelineId,
                      from_devtools_receiver: Receiver<DevtoolScriptControlMsg>,
                      runtime: Runtime,
                      parent_sender: Box<ScriptChan + Send>,
@@ -117,19 +108,16 @@ impl DedicatedWorkerGlobalScope {
                                                                 from_devtools_receiver,
                                                                 timer_event_chan,
                                                                 Some(closing)),
-            id: id,
             receiver: receiver,
             own_sender: own_sender,
             timer_event_port: timer_event_port,
             parent_sender: parent_sender,
             worker: DOMRefCell::new(None),
-            in_error_reporting_mode: Cell::new(false),
         }
     }
 
     pub fn new(init: WorkerGlobalScopeInit,
                worker_url: Url,
-               id: PipelineId,
                from_devtools_receiver: Receiver<DevtoolScriptControlMsg>,
                runtime: Runtime,
                parent_sender: Box<ScriptChan + Send>,
@@ -142,7 +130,6 @@ impl DedicatedWorkerGlobalScope {
         let cx = runtime.cx();
         let scope = box DedicatedWorkerGlobalScope::new_inherited(init,
                                                                   worker_url,
-                                                                  id,
                                                                   from_devtools_receiver,
                                                                   runtime,
                                                                   parent_sender,
@@ -157,7 +144,6 @@ impl DedicatedWorkerGlobalScope {
     #[allow(unsafe_code)]
     pub fn run_worker_scope(init: WorkerGlobalScopeInit,
                             worker_url: Url,
-                            id: PipelineId,
                             from_devtools_receiver: IpcReceiver<DevtoolScriptControlMsg>,
                             worker_rt_for_mainthread: Arc<Mutex<Option<SharedRt>>>,
                             worker: TrustedWorkerAddress,
@@ -170,7 +156,7 @@ impl DedicatedWorkerGlobalScope {
         let name = format!("WebWorker for {}", serialized_worker_url);
         spawn_named(name, move || {
             thread_state::initialize(thread_state::SCRIPT | thread_state::IN_WORKER);
-            PipelineId::install(id);
+            PipelineId::install(init.pipeline_id);
 
             let roots = RootCollection::new();
             let _stack_roots_tls = StackRootTLS::new(&roots);
@@ -204,7 +190,7 @@ impl DedicatedWorkerGlobalScope {
             });
 
             let global = DedicatedWorkerGlobalScope::new(
-                init, url, id, devtools_mpsc_port, runtime,
+                init, url, devtools_mpsc_port, runtime,
                 parent_sender.clone(), own_sender, receiver,
                 timer_ipc_chan, timer_rx, closing);
             // FIXME(njn): workers currently don't have a unique ID suitable for using in reporter
@@ -226,7 +212,7 @@ impl DedicatedWorkerGlobalScope {
             }
 
             let reporter_name = format!("dedicated-worker-reporter-{}", random::<u64>());
-            scope.mem_profiler_chan().run_with_memory_reporting(|| {
+            scope.upcast::<GlobalScope>().mem_profiler_chan().run_with_memory_reporting(|| {
                 while let Ok(event) = global.receive_event() {
                     if scope.is_closing() {
                         break;
@@ -242,10 +228,6 @@ impl DedicatedWorkerGlobalScope {
             sender: self.own_sender.clone(),
             worker: self.worker.borrow().as_ref().unwrap().clone(),
         }
-    }
-
-    pub fn pipeline_id(&self) -> PipelineId {
-        self.id
     }
 
     pub fn new_script_pair(&self) -> (Box<ScriptChan + Send>, Box<ScriptPort + Send>) {
@@ -299,8 +281,8 @@ impl DedicatedWorkerGlobalScope {
                 let _ac = JSAutoCompartment::new(scope.get_cx(),
                                                  scope.reflector().get_jsobject().get());
                 rooted!(in(scope.get_cx()) let mut message = UndefinedValue());
-                data.read(GlobalRef::Worker(scope), message.handle_mut());
-                MessageEvent::dispatch_jsval(target, GlobalRef::Worker(scope), message.handle());
+                data.read(scope.upcast(), message.handle_mut());
+                MessageEvent::dispatch_jsval(target, scope.upcast(), message.handle());
             },
             WorkerScriptMsg::Common(CommonScriptMsg::RunnableMsg(_, runnable)) => {
                 runnable.handler()
@@ -318,14 +300,13 @@ impl DedicatedWorkerGlobalScope {
     fn handle_event(&self, event: MixedMessage) {
         match event {
             MixedMessage::FromDevtools(msg) => {
-                let global_ref = GlobalRef::Worker(self.upcast());
                 match msg {
                     DevtoolScriptControlMsg::EvaluateJS(_pipe_id, string, sender) =>
-                        devtools::handle_evaluate_js(&global_ref, string, sender),
+                        devtools::handle_evaluate_js(self.upcast(), string, sender),
                     DevtoolScriptControlMsg::GetCachedMessages(pipe_id, message_types, sender) =>
                         devtools::handle_get_cached_messages(pipe_id, message_types, sender),
                     DevtoolScriptControlMsg::WantsLiveNotifications(_pipe_id, bool_val) =>
-                        devtools::handle_wants_live_notifications(&global_ref, bool_val),
+                        devtools::handle_wants_live_notifications(self.upcast(), bool_val),
                     _ => debug!("got an unusable devtools control message inside the worker!"),
                 }
             },
@@ -348,53 +329,21 @@ impl DedicatedWorkerGlobalScope {
         }
     }
 
-    /// https://html.spec.whatwg.org/multipage/#report-the-error
-    pub fn report_an_error(&self, error_info: ErrorInfo, value: HandleValue) {
-        // Step 1.
-        if self.in_error_reporting_mode.get() {
-            return;
-        }
-
-        // Step 2.
-        self.in_error_reporting_mode.set(true);
-
-        // Steps 3-12.
-        // FIXME(#13195): muted errors.
-        let event = ErrorEvent::new(GlobalRef::Worker(self.upcast()),
-                                    atom!("error"),
-                                    EventBubbles::DoesNotBubble,
-                                    EventCancelable::Cancelable,
-                                    error_info.message.as_str().into(),
-                                    error_info.filename.as_str().into(),
-                                    error_info.lineno,
-                                    error_info.column,
-                                    value);
-
-        // Step 13.
-        let event_status = event.upcast::<Event>().fire(self.upcast::<EventTarget>());
-
-        // Step 15
-        if event_status == EventStatus::NotCanceled {
-            let worker = self.worker.borrow().as_ref().unwrap().clone();
-            // TODO: Should use the DOM manipulation task source.
-            self.parent_sender
-                .send(CommonScriptMsg::RunnableMsg(WorkerEvent,
-                                                   box WorkerErrorHandler::new(worker, error_info)))
-                .unwrap();
-        }
-
-        // Step 14
-        self.in_error_reporting_mode.set(false);
+    pub fn forward_error_to_worker_object(&self, error_info: ErrorInfo) {
+        let worker = self.worker.borrow().as_ref().unwrap().clone();
+        // TODO: Should use the DOM manipulation task source.
+        self.parent_sender
+            .send(CommonScriptMsg::RunnableMsg(WorkerEvent,
+                                               box WorkerErrorHandler::new(worker, error_info)))
+            .unwrap();
     }
 }
 
 #[allow(unsafe_code)]
 unsafe extern "C" fn interrupt_callback(cx: *mut JSContext) -> bool {
-    let global = global_root_from_context(cx);
-    let worker = match global.r() {
-        GlobalRef::Worker(w) => w,
-        _ => panic!("global for worker is not a worker scope")
-    };
+    let worker =
+        Root::downcast::<WorkerGlobalScope>(GlobalScope::from_context(cx))
+            .expect("global is not a worker scope");
     assert!(worker.is::<DedicatedWorkerGlobalScope>());
 
     // A false response causes the script to terminate

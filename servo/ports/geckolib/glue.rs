@@ -2,11 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#![allow(unsafe_code)]
-
 use app_units::Au;
+use cssparser::{Parser, ToCss};
 use env_logger;
 use euclid::Size2D;
+use parking_lot::RwLock;
 use std::mem::transmute;
 use std::ptr;
 use std::slice;
@@ -30,23 +30,27 @@ use style::gecko_bindings::bindings::{RawServoStyleSheetStrong, ServoComputedVal
 use style::gecko_bindings::bindings::{ServoDeclarationBlockBorrowed, ServoDeclarationBlockStrong};
 use style::gecko_bindings::bindings::{ThreadSafePrincipalHolder, ThreadSafeURIHolder};
 use style::gecko_bindings::bindings::{nsHTMLCSSStyleSheet, ServoComputedValuesBorrowedOrNull};
+use style::gecko_bindings::bindings::Gecko_Utf8SliceToString;
 use style::gecko_bindings::bindings::RawServoStyleSetBorrowedMut;
 use style::gecko_bindings::ptr::{GeckoArcPrincipal, GeckoArcURI};
 use style::gecko_bindings::structs::{SheetParsingMode, nsIAtom};
 use style::gecko_bindings::structs::ServoElementSnapshot;
 use style::gecko_bindings::structs::nsRestyleHint;
+use style::gecko_bindings::structs::nsString;
 use style::gecko_bindings::sugar::ownership::{FFIArcHelpers, HasArcFFI, HasBoxFFI};
 use style::gecko_bindings::sugar::ownership::{HasSimpleFFI, Strong};
 use style::parallel;
-use style::parser::ParserContextExtraData;
-use style::properties::{ComputedValues, parse_one_declaration};
+use style::parser::{ParserContext, ParserContextExtraData};
+use style::properties::{ComputedValues, Importance, PropertyDeclaration};
+use style::properties::{PropertyDeclarationParseResult, PropertyDeclarationBlock};
+use style::properties::{cascade, parse_one_declaration};
 use style::selector_impl::PseudoElementCascadeType;
+use style::selector_matching::ApplicableDeclarationBlock;
 use style::sequential;
 use style::string_cache::Atom;
 use style::stylesheets::{Origin, Stylesheet};
 use style::timer::Timer;
 use url::Url;
-
 
 /*
  * For Gecko->Servo function calls, we need to redeclare the same signature that was declared in
@@ -93,6 +97,7 @@ fn restyle_subtree(node: GeckoNode, raw_data: RawServoStyleSetBorrowedMut) {
         LocalStyleContextCreationInfo::new(per_doc_data.new_animations_sender.clone());
 
     let shared_style_context = SharedStyleContext {
+        // FIXME (bug 1303229): Use the actual viewport size here
         viewport_size: Size2D::new(Au(0), Au(0)),
         screen_size_changed: false,
         generation: 0,
@@ -120,6 +125,35 @@ pub extern "C" fn Servo_RestyleSubtree(node: RawGeckoNodeBorrowed,
                                        raw_data: RawServoStyleSetBorrowedMut) -> () {
     let node = GeckoNode(node);
     restyle_subtree(node, raw_data);
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_RestyleWithAddedDeclaration(declarations: ServoDeclarationBlockBorrowed,
+                                                    previous_style: ServoComputedValuesBorrowed)
+  -> ServoComputedValuesStrong
+{
+    match GeckoDeclarationBlock::as_arc(&declarations).declarations {
+        Some(ref declarations) => {
+            let declaration_block = ApplicableDeclarationBlock {
+                mixed_declarations: declarations.clone(),
+                importance: Importance::Normal,
+                source_order: 0,
+                specificity: ::std::u32::MAX,
+            };
+            let previous_style = ComputedValues::as_arc(&previous_style);
+
+            // FIXME (bug 1303229): Use the actual viewport size here
+            let (computed, _) = cascade(Size2D::new(Au(0), Au(0)),
+                                        &[declaration_block],
+                                        false,
+                                        Some(previous_style),
+                                        None,
+                                        None,
+                                        Box::new(StdoutErrorReporter));
+            Arc::new(computed).into_strong()
+        },
+        None => ServoComputedValuesStrong::null(),
+    }
 }
 
 #[no_mangle]
@@ -253,7 +287,7 @@ pub extern "C" fn Servo_ComputedValues_GetForAnonymousBox(parent_style_or_null: 
     let pseudo = PseudoElement::from_atom_unchecked(atom, /* anon_box = */ true);
 
 
-    let maybe_parent = parent_style_or_null.as_arc_opt();
+    let maybe_parent = ComputedValues::arc_from_borrowed(&parent_style_or_null);
     let new_computed = data.stylist.precomputed_values_for_pseudo(&pseudo, maybe_parent);
     new_computed.map_or(Strong::null(), |c| c.into_strong())
 }
@@ -310,10 +344,11 @@ pub extern "C" fn Servo_ComputedValues_GetForPseudoElement(parent_style: ServoCo
 #[no_mangle]
 pub extern "C" fn Servo_ComputedValues_Inherit(parent_style: ServoComputedValuesBorrowedOrNull)
      -> ServoComputedValuesStrong {
-    let style = if parent_style.is_null() {
-        Arc::new(ComputedValues::initial_values().clone())
+    let maybe_arc = ComputedValues::arc_from_borrowed(&parent_style);
+    let style = if let Some(reference) = maybe_arc.as_ref() {
+        ComputedValues::inherit_from(reference)
     } else {
-        ComputedValues::inherit_from(parent_style.as_arc())
+        Arc::new(ComputedValues::initial_values().clone())
     };
     style.into_strong()
 }
@@ -339,13 +374,63 @@ pub extern "C" fn Servo_StyleSet_Drop(data: RawServoStyleSetOwned) -> () {
     let _ = data.into_box::<PerDocumentStyleData>();
 }
 
+
+#[no_mangle]
+pub extern "C" fn Servo_ParseProperty(property_bytes: *const u8,
+                                      property_length: u32,
+                                      value_bytes: *const u8,
+                                      value_length: u32,
+                                      base_bytes: *const u8,
+                                      base_length: u32,
+                                      base: *mut ThreadSafeURIHolder,
+                                      referrer: *mut ThreadSafeURIHolder,
+                                      principal: *mut ThreadSafePrincipalHolder)
+                                      -> ServoDeclarationBlockStrong {
+    // All this string wrangling is temporary until the Gecko string bindings land (bug 1294742).
+    let name = unsafe { from_utf8_unchecked(slice::from_raw_parts(property_bytes,
+                                                                  property_length as usize)) };
+    let value_str = unsafe { from_utf8_unchecked(slice::from_raw_parts(value_bytes,
+                                                                       value_length as usize)) };
+    let base_str = unsafe { from_utf8_unchecked(slice::from_raw_parts(base_bytes,
+                                                                      base_length as usize)) };
+    let base_url = Url::parse(base_str).unwrap();
+    let extra_data = ParserContextExtraData {
+        base: Some(GeckoArcURI::new(base)),
+        referrer: Some(GeckoArcURI::new(referrer)),
+        principal: Some(GeckoArcPrincipal::new(principal)),
+    };
+
+    let context = ParserContext::new_with_extra_data(Origin::Author, &base_url,
+                                                     Box::new(StdoutErrorReporter),
+                                                     extra_data);
+
+    let mut results = vec![];
+    match PropertyDeclaration::parse(name, &context, &mut Parser::new(value_str),
+                                     &mut results, false) {
+        PropertyDeclarationParseResult::ValidOrIgnoredDeclaration => {},
+        _ => return ServoDeclarationBlockStrong::null(),
+    }
+
+    let results = results.into_iter().map(|r| (r, Importance::Normal)).collect();
+
+    Arc::new(GeckoDeclarationBlock {
+        declarations: Some(Arc::new(RwLock::new(PropertyDeclarationBlock {
+            declarations: results,
+            important_count: 0,
+        }))),
+        cache: AtomicPtr::new(ptr::null_mut()),
+        immutable: AtomicBool::new(false),
+    }).into_strong()
+}
 #[no_mangle]
 pub extern "C" fn Servo_ParseStyleAttribute(bytes: *const u8, length: u32,
                                             cache: *mut nsHTMLCSSStyleSheet)
                                             -> ServoDeclarationBlockStrong {
     let value = unsafe { from_utf8_unchecked(slice::from_raw_parts(bytes, length as usize)) };
     Arc::new(GeckoDeclarationBlock {
-        declarations: GeckoElement::parse_style_attribute(value).map(Arc::new),
+        declarations: GeckoElement::parse_style_attribute(value).map(|block| {
+            Arc::new(RwLock::new(block))
+        }),
         cache: AtomicPtr::new(cache),
         immutable: AtomicBool::new(false),
     }).into_strong()
@@ -362,6 +447,13 @@ pub extern "C" fn Servo_DeclarationBlock_Release(declarations: ServoDeclarationB
 }
 
 #[no_mangle]
+pub extern "C" fn Servo_DeclarationBlock_Equals(a: ServoDeclarationBlockBorrowed,
+                                                b: ServoDeclarationBlockBorrowed)
+                                                -> bool {
+    GeckoDeclarationBlock::as_arc(&a) == GeckoDeclarationBlock::as_arc(&b)
+}
+
+#[no_mangle]
 pub extern "C" fn Servo_DeclarationBlock_GetCache(declarations: ServoDeclarationBlockBorrowed)
                                                  -> *mut nsHTMLCSSStyleSheet {
     GeckoDeclarationBlock::as_arc(&declarations).cache.load(Ordering::Relaxed)
@@ -375,6 +467,39 @@ pub extern "C" fn Servo_DeclarationBlock_SetImmutable(declarations: ServoDeclara
 #[no_mangle]
 pub extern "C" fn Servo_DeclarationBlock_ClearCachePointer(declarations: ServoDeclarationBlockBorrowed) {
     GeckoDeclarationBlock::as_arc(&declarations).cache.store(ptr::null_mut(), Ordering::Relaxed)
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_DeclarationBlock_SerializeOneValue(
+    declarations: ServoDeclarationBlockBorrowed,
+    buffer: *mut nsString)
+{
+    let mut string = String::new();
+
+    if let Some(ref declarations) = GeckoDeclarationBlock::as_arc(&declarations).declarations {
+        declarations.read().to_css(&mut string).unwrap();
+        // FIXME: We are expecting |declarations| to be a declaration block with either a single
+        // longhand property-declaration or a series of longhand property-declarations that make
+        // up a single shorthand property. As a result, it should be possible to serialize
+        // |declarations| as a single declaration. However, we only want to return the *value* from
+        // that single declaration. For now, we just manually strip the property name, colon,
+        // leading spacing, and trailing space. In future we should find a more robust way to do
+        // this.
+        //
+        // See https://github.com/servo/servo/issues/13423
+        debug_assert!(string.find(':').is_some());
+        let position = string.find(':').unwrap();
+        // Get the value after the first colon and any following whitespace.
+        let value = &string[(position + 1)..].trim_left();
+        debug_assert!(value.ends_with(';'));
+        let length = value.len() - 1; // Strip last semicolon.
+
+        // FIXME: Once we have nsString bindings for Servo (bug 1294742), we should be able to drop
+        // this and fill in |buffer| directly.
+        unsafe {
+            Gecko_Utf8SliceToString(buffer, value.as_ptr(), length);
+        }
+    }
 }
 
 #[no_mangle]

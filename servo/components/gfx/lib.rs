@@ -11,12 +11,14 @@
 #![feature(custom_derive)]
 #![feature(mpsc_select)]
 #![feature(plugin)]
+#![feature(proc_macro)]
 #![feature(range_contains)]
+#![feature(rustc_attrs)]
+#![feature(structural_match)]
 #![feature(unique)]
 
 #![plugin(heapsize_plugin)]
 #![plugin(plugins)]
-#![plugin(serde_macros)]
 
 #![deny(unsafe_code)]
 
@@ -33,14 +35,18 @@ extern crate bitflags;
 #[cfg(target_os = "macos")] extern crate core_graphics;
 #[cfg(target_os = "macos")] extern crate core_text;
 
+// Windows-specific library dependencies
+#[cfg(target_os = "windows")] extern crate gdi32;
+#[cfg(target_os = "windows")] extern crate winapi;
+
 extern crate euclid;
 extern crate fnv;
 
 // Platforms that use Freetype/Fontconfig library dependencies
-#[cfg(any(target_os = "linux", target_os = "android", all(target_os = "windows", target_env = "gnu")))]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 extern crate fontconfig;
 extern crate fontsan;
-#[cfg(any(target_os = "linux", target_os = "android", all(target_os = "windows", target_env = "gnu")))]
+#[cfg(any(target_os = "linux", target_os = "android", target_os = "windows"))]
 extern crate freetype;
 
 extern crate gfx_traits;
@@ -69,6 +75,8 @@ extern crate rand;
 extern crate range;
 extern crate rustc_serialize;
 extern crate serde;
+#[macro_use]
+extern crate serde_derive;
 
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 extern crate simd;

@@ -3,8 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use cssparser::Color;
-use gecko_bindings::structs::{nscolor, StyleComplexColor};
 use gecko::values::{convert_nscolor_to_rgba, convert_rgba_to_nscolor};
+use gecko_bindings::structs::{nscolor, StyleComplexColor};
 
 impl From<nscolor> for StyleComplexColor {
     fn from(other: nscolor) -> Self {
@@ -36,12 +36,12 @@ impl From<Color> for StyleComplexColor {
 impl From<StyleComplexColor> for Color {
     fn from(other: StyleComplexColor) -> Self {
         if other.mForegroundRatio == 0 {
-            return Color::RGBA(convert_nscolor_to_rgba(other.mColor))
+            Color::RGBA(convert_nscolor_to_rgba(other.mColor))
         } else if other.mForegroundRatio == 255 {
-            return Color::CurrentColor
+            Color::CurrentColor
         } else {
-            // FIXME handle interpolation values
-            return Color::CurrentColor
+            // FIXME #13546 handle interpolation values
+            Color::CurrentColor
         }
     }
 }

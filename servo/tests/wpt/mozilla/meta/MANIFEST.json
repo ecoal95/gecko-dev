@@ -2420,6 +2420,30 @@
             "url": "/_mozilla/css/inline_absolute_hypothetical_clip_a.html"
           }
         ],
+        "css/inline_absolute_hypothetical_line_metrics_a.html": [
+          {
+            "path": "css/inline_absolute_hypothetical_line_metrics_a.html",
+            "references": [
+              [
+                "/_mozilla/css/inline_absolute_hypothetical_line_metrics_ref.html",
+                "=="
+              ]
+            ],
+            "url": "/_mozilla/css/inline_absolute_hypothetical_line_metrics_a.html"
+          }
+        ],
+        "css/inline_absolute_hypothetical_metrics_a.html": [
+          {
+            "path": "css/inline_absolute_hypothetical_metrics_a.html",
+            "references": [
+              [
+                "/_mozilla/css/inline_absolute_hypothetical_metrics_ref.html",
+                "=="
+              ]
+            ],
+            "url": "/_mozilla/css/inline_absolute_hypothetical_metrics_a.html"
+          }
+        ],
         "css/inline_absolute_out_of_flow_a.html": [
           {
             "path": "css/inline_absolute_out_of_flow_a.html",
@@ -6268,6 +6292,18 @@
               ]
             ],
             "url": "/_mozilla/mozilla/sslfail.html"
+          }
+        ],
+        "mozilla/svg/svg.html": [
+          {
+            "path": "mozilla/svg/svg.html",
+            "references": [
+              [
+                "/_mozilla/mozilla/svg/svg_ref.html",
+                "=="
+              ]
+            ],
+            "url": "/_mozilla/mozilla/svg/svg.html"
           }
         ],
         "mozilla/table_valign_bottom.html": [
@@ -16142,6 +16178,30 @@
           "url": "/_mozilla/css/inline_absolute_hypothetical_clip_a.html"
         }
       ],
+      "css/inline_absolute_hypothetical_line_metrics_a.html": [
+        {
+          "path": "css/inline_absolute_hypothetical_line_metrics_a.html",
+          "references": [
+            [
+              "/_mozilla/css/inline_absolute_hypothetical_line_metrics_ref.html",
+              "=="
+            ]
+          ],
+          "url": "/_mozilla/css/inline_absolute_hypothetical_line_metrics_a.html"
+        }
+      ],
+      "css/inline_absolute_hypothetical_metrics_a.html": [
+        {
+          "path": "css/inline_absolute_hypothetical_metrics_a.html",
+          "references": [
+            [
+              "/_mozilla/css/inline_absolute_hypothetical_metrics_ref.html",
+              "=="
+            ]
+          ],
+          "url": "/_mozilla/css/inline_absolute_hypothetical_metrics_a.html"
+        }
+      ],
       "css/inline_absolute_out_of_flow_a.html": [
         {
           "path": "css/inline_absolute_out_of_flow_a.html",
@@ -19990,6 +20050,18 @@
             ]
           ],
           "url": "/_mozilla/mozilla/sslfail.html"
+        }
+      ],
+      "mozilla/svg/svg.html": [
+        {
+          "path": "mozilla/svg/svg.html",
+          "references": [
+            [
+              "/_mozilla/mozilla/svg/svg_ref.html",
+              "=="
+            ]
+          ],
+          "url": "/_mozilla/mozilla/svg/svg.html"
         }
       ],
       "mozilla/table_valign_bottom.html": [

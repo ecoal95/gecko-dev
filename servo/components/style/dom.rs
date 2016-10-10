@@ -6,11 +6,11 @@
 
 #![allow(unsafe_code)]
 
-use context::SharedStyleContext;
-use data::PrivateStyleData;
+use atomic_refcell::{AtomicRef, AtomicRefMut};
+use data::PersistentStyleData;
 use element_state::ElementState;
+use parking_lot::RwLock;
 use properties::{ComputedValues, PropertyDeclarationBlock};
-use refcell::{Ref, RefMut};
 use restyle_hints::{RESTYLE_DESCENDANTS, RESTYLE_LATER_SIBLINGS, RESTYLE_SELF, RestyleHint};
 use selector_impl::{ElementExt, PseudoElement};
 use selector_matching::ApplicableDeclarationBlock;
@@ -139,17 +139,21 @@ pub trait TNode : Sized + Copy + Clone + NodeInfo {
 
     unsafe fn set_can_be_fragmented(&self, value: bool);
 
-    /// Borrows the PrivateStyleData without checks.
-    #[inline(always)]
-    unsafe fn borrow_data_unchecked(&self) -> Option<*const PrivateStyleData>;
+    /// Atomically stores the number of children of this node that we will
+    /// need to process during bottom-up traversal.
+    fn store_children_to_process(&self, n: isize);
 
-    /// Borrows the PrivateStyleData immutably. Fails on a conflicting borrow.
-    #[inline(always)]
-    fn borrow_data(&self) -> Option<Ref<PrivateStyleData>>;
+    /// Atomically notes that a child has been processed during bottom-up
+    /// traversal. Returns the number of children left to process.
+    fn did_process_child(&self) -> isize;
 
-    /// Borrows the PrivateStyleData mutably. Fails on a conflicting borrow.
+    /// Borrows the style data immutably. Fails on a conflicting borrow.
     #[inline(always)]
-    fn mutate_data(&self) -> Option<RefMut<PrivateStyleData>>;
+    fn borrow_data(&self) -> Option<AtomicRef<PersistentStyleData>>;
+
+    /// Borrows the style data mutably. Fails on a conflicting borrow.
+    #[inline(always)]
+    fn mutate_data(&self) -> Option<AtomicRefMut<PersistentStyleData>>;
 
     /// Get the description of how to account for recent style changes.
     fn restyle_damage(self) -> Self::ConcreteRestyleDamage;
@@ -166,13 +170,6 @@ pub trait TNode : Sized + Copy + Clone + NodeInfo {
     fn prev_sibling(&self) -> Option<Self>;
 
     fn next_sibling(&self) -> Option<Self>;
-
-
-    /// Returns the style results for the given node. If CSS selector matching
-    /// has not yet been performed, fails.
-    fn style(&self, _context: &SharedStyleContext) -> Ref<Arc<ComputedValues>> {
-        Ref::map(self.borrow_data().unwrap(), |data| data.style.as_ref().unwrap())
-    }
 
     /// Removes the style from this node.
     fn unstyle(self) {
@@ -214,7 +211,7 @@ pub trait TElement : PartialEq + Debug + Sized + Copy + Clone + ElementExt + Pre
 
     fn as_node(&self) -> Self::ConcreteNode;
 
-    fn style_attribute(&self) -> Option<&Arc<PropertyDeclarationBlock>>;
+    fn style_attribute(&self) -> Option<&Arc<RwLock<PropertyDeclarationBlock>>>;
 
     fn get_state(&self) -> ElementState;
 

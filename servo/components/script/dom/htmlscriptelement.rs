@@ -10,7 +10,6 @@ use dom::bindings::codegen::Bindings::DocumentBinding::DocumentMethods;
 use dom::bindings::codegen::Bindings::HTMLScriptElementBinding;
 use dom::bindings::codegen::Bindings::HTMLScriptElementBinding::HTMLScriptElementMethods;
 use dom::bindings::codegen::Bindings::NodeBinding::NodeMethods;
-use dom::bindings::global::GlobalRef;
 use dom::bindings::inheritance::Castable;
 use dom::bindings::js::{JS, Root};
 use dom::bindings::js::RootedReference;
@@ -21,11 +20,11 @@ use dom::document::Document;
 use dom::element::{AttributeMutation, Element, ElementCreator};
 use dom::event::{Event, EventBubbles, EventCancelable};
 use dom::eventdispatcher::EventStatus;
+use dom::globalscope::GlobalScope;
 use dom::htmlelement::HTMLElement;
 use dom::node::{ChildrenMutation, CloneChildrenFlag, Node};
 use dom::node::{document_from_node, window_from_node};
 use dom::virtualmethods::VirtualMethods;
-use dom::window::ScriptHelpers;
 use encoding::label::encoding_from_whatwg_label;
 use encoding::types::{DecoderTrap, EncodingRef};
 use html5ever::tree_builder::NextParserState;
@@ -243,7 +242,7 @@ fn fetch_a_classic_script(script: &HTMLScriptElement,
             _ => CredentialsMode::Include,
         },
         origin: doc.url().clone(),
-        pipeline_id: Some(script.global().r().pipeline_id()),
+        pipeline_id: Some(script.global().pipeline_id()),
         referrer_url: Some(doc.url().clone()),
         referrer_policy: doc.get_referrer_policy(),
         .. RequestInit::default()
@@ -260,8 +259,6 @@ fn fetch_a_classic_script(script: &HTMLScriptElement,
         status: Ok(())
     }));
 
-    let doc = document_from_node(script);
-
     let (action_sender, action_receiver) = ipc::channel().unwrap();
     let listener = NetworkListener {
         context: context,
@@ -272,7 +269,7 @@ fn fetch_a_classic_script(script: &HTMLScriptElement,
     ROUTER.add_route(action_receiver.to_opaque(), box move |message| {
         listener.notify_fetch(message.to().unwrap());
     });
-    doc.fetch_async(LoadType::Script(url), request, action_sender, None);
+    doc.fetch_async(LoadType::Script(url), request, action_sender);
 }
 
 impl HTMLScriptElement {
@@ -507,9 +504,8 @@ impl HTMLScriptElement {
         // Step 5.a.2.
         let window = window_from_node(self);
         rooted!(in(window.get_cx()) let mut rval = UndefinedValue());
-        window.evaluate_script_on_global_with_result(&script.text,
-                                                     script.url.as_str(),
-                                                     rval.handle_mut());
+        window.upcast::<GlobalScope>().evaluate_script_on_global_with_result(
+            &script.text, script.url.as_str(), rval.handle_mut());
 
         // Step 6.
         document.set_current_script(old_script.r());
@@ -608,7 +604,7 @@ impl HTMLScriptElement {
                       cancelable: EventCancelable) -> EventStatus {
         let window = window_from_node(self);
         let window = window.r();
-        let event = Event::new(GlobalRef::Window(window), type_, bubbles, cancelable);
+        let event = Event::new(window.upcast(), type_, bubbles, cancelable);
         event.fire(self.upcast())
     }
 }

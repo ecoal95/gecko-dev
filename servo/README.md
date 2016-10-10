@@ -19,8 +19,10 @@ Please select your operating system:
 * [Debian-based Linuxes](#on-debian-based-linuxes)
 * [Fedora](#on-fedora)
 * [Arch Linux](#on-arch-linux)
+* [openSUSE](#on-opensuse-linux)
 * [Gentoo Linux](#on-gentoo-linux)
-* [Microsoft Windows](#on-windows)
+* [Microsoft Windows (MSVC)](#on-windows-msvc)
+* [Microsoft Windows (mingw)](#on-windows-mingw)
 * [Android](#cross-compilation-for-android)
 
 #### OS X
@@ -70,6 +72,13 @@ sudo dnf install curl freeglut-devel libtool gcc-c++ libXi-devel \
     rpm-build openssl-devel cmake bzip2-devel libXcursor-devel libXmu-devel mesa-libOSMesa-devel \
     dbus-devel
 ```
+#### On openSUSE Linux
+``` sh
+sudo zypper install libX11-devel libexpat-devel libbz2-devel Mesa-libEGL-devel Mesa-libGL-devel cabextract cmake \
+    dbus-1-devel fontconfig-devel freetype-devel gcc-c++ git glib2-devel gperf \
+    harfbuzz-devel libOSMesa-devel libXcursor-devel libXi-devel libXmu-devel libXrandr-devel libopenssl-devel \
+    python-pip python-virtualenv rpm-build glu-devel
+```
 #### On Arch Linux
 
 ``` sh
@@ -83,14 +92,33 @@ sudo emerge net-misc/curl media-libs/freeglut \
     dev-python/virtualenv dev-python/pip dev-libs/openssl \
     x11-libs/libXmu media-libs/glu x11-base/xorg-server
 ```
-#### On Windows
+#### On Windows MSVC
+
+Install Git for Windows (https://git-scm.com/download/win). DO allow it to add git.exe to the PATH (default
+settings for the installer are fine).
+
+Install Visual Studio 2015 Community Edition (https://www.visualstudio.com/). You MUST add "Visual C++" to the
+list of installed components. It is not on by default.
+
+Install Python for Windows (https://www.python.org/downloads/release/python-2711/). The windows x86-64 MSI installer is fine.
+You should change the installation to install the "Add python.exe to Path" feature.
+
+Install virtualenv.
+
+In a normal Windows Shell (cmd.exe or "Command Prompt" from the start menu), do:
+```
+pip install virtualenv
+```
+If this does not work, you may need to reboot for the changed PATH settings (by the python installer) to take effect.
+
+#### On Windows mingw
 
 Download Python for Windows [here](https://www.python.org/downloads/release/python-2711/). This is
 required for the SpiderMonkey build on Windows.
 
 Install MSYS2 from [here](https://msys2.github.io/). After you have done so, open an MSYS shell
 window and update the core libraries and install new packages. The extra step at the end is to
-downgrate GCC to 5.4, as the GCC6 versions in mingw currently fail to compile some of our
+downgrade GCC to 5.4, as the GCC6 versions in mingw currently fail to compile some of our
 dependencies. We are upgrading to a gcc-free build on Windows as soon as possible:
 
 ```sh
@@ -147,6 +175,13 @@ git clone https://github.com/servo/servo
 cd servo
 ./mach build --dev
 ./mach run tests/html/about-mozilla.html
+```
+
+Or on Windows MSVC, in a normal Command Prompt (cmd.exe):
+``` cmd
+git clone https://github.com/servo/servo
+cd servo
+mach.bat build --dev
 ```
 
 For benchmarking, performance testing, or

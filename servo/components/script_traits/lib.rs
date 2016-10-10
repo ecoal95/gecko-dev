@@ -6,8 +6,8 @@
 //! The traits are here instead of in script so that these modules won't have
 //! to depend on script.
 
-#![feature(custom_derive, plugin)]
-#![plugin(heapsize_plugin, plugins, serde_macros)]
+#![feature(custom_derive, plugin, proc_macro, rustc_attrs, structural_match)]
+#![plugin(heapsize_plugin, plugins)]
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
 
@@ -28,6 +28,8 @@ extern crate offscreen_gl_context;
 extern crate profile_traits;
 extern crate rustc_serialize;
 extern crate serde;
+#[macro_use]
+extern crate serde_derive;
 extern crate style_traits;
 extern crate time;
 extern crate url;
@@ -449,6 +451,8 @@ pub struct IFrameLoadInfo {
     pub load_data: Option<LoadData>,
     /// Pipeline ID of the parent of this iframe
     pub parent_pipeline_id: PipelineId,
+    /// The ID for this iframe.
+    pub frame_id: FrameId,
     /// The old pipeline ID for this iframe, if a page was previously loaded.
     pub old_pipeline_id: Option<PipelineId>,
     /// The new pipeline ID that the iframe has generated.
@@ -663,6 +667,8 @@ pub struct WorkerGlobalScopeInit {
     pub scheduler_chan: IpcSender<TimerEventRequest>,
     /// The worker id
     pub worker_id: WorkerId,
+    /// The pipeline id
+    pub pipeline_id: PipelineId,
 }
 
 /// Common entities representing a network load origin

@@ -154,8 +154,7 @@ impl CompiledEventListener {
                 match *handler {
                     CommonEventHandler::ErrorEventHandler(ref handler) => {
                         if let Some(event) = event.downcast::<ErrorEvent>() {
-                            let global = object.global();
-                            let cx = global.r().get_cx();
+                            let cx = object.global().get_cx();
                             rooted!(in(cx) let error = event.Error(cx));
                             let return_value = handler.Call_(object,
                                                              EventOrString::String(event.Message()),
@@ -201,8 +200,7 @@ impl CompiledEventListener {
 
                     CommonEventHandler::EventHandler(ref handler) => {
                         if let Ok(value) = handler.Call_(object, event, exception_handle) {
-                            let global = object.global();
-                            let cx = global.r().get_cx();
+                            let cx = object.global().get_cx();
                             rooted!(in(cx) let value = value);
                             let value = value.handle();
 
@@ -500,8 +498,7 @@ impl EventTarget {
                       bubbles: EventBubbles,
                       cancelable: EventCancelable)
                       -> Root<Event> {
-        let global = self.global();
-        let event = Event::new(global.r(), Atom::from(name), bubbles, cancelable);
+        let event = Event::new(&self.global(), Atom::from(name), bubbles, cancelable);
 
         event.fire(self);
 
@@ -515,21 +512,23 @@ impl EventTargetMethods for EventTarget {
                         ty: DOMString,
                         listener: Option<Rc<EventListener>>,
                         capture: bool) {
-        if let Some(listener) = listener {
-            let mut handlers = self.handlers.borrow_mut();
-            let entry = match handlers.entry(Atom::from(ty)) {
-                Occupied(entry) => entry.into_mut(),
-                Vacant(entry) => entry.insert(EventListeners(vec!())),
-            };
+        let listener = match listener {
+            Some(l) => l,
+            None => return,
+        };
+        let mut handlers = self.handlers.borrow_mut();
+        let entry = match handlers.entry(Atom::from(ty)) {
+            Occupied(entry) => entry.into_mut(),
+            Vacant(entry) => entry.insert(EventListeners(vec!())),
+        };
 
-            let phase = if capture { ListenerPhase::Capturing } else { ListenerPhase::Bubbling };
-            let new_entry = EventListenerEntry {
-                phase: phase,
-                listener: EventListenerType::Additive(listener)
-            };
-            if !entry.contains(&new_entry) {
-                entry.push(new_entry);
-            }
+        let phase = if capture { ListenerPhase::Capturing } else { ListenerPhase::Bubbling };
+        let new_entry = EventListenerEntry {
+            phase: phase,
+            listener: EventListenerType::Additive(listener)
+        };
+        if !entry.contains(&new_entry) {
+            entry.push(new_entry);
         }
     }
 
@@ -538,18 +537,20 @@ impl EventTargetMethods for EventTarget {
                            ty: DOMString,
                            listener: Option<Rc<EventListener>>,
                            capture: bool) {
-        if let Some(ref listener) = listener {
-            let mut handlers = self.handlers.borrow_mut();
-            let entry = handlers.get_mut(&Atom::from(ty));
-            for entry in entry {
-                let phase = if capture { ListenerPhase::Capturing } else { ListenerPhase::Bubbling };
-                let old_entry = EventListenerEntry {
-                    phase: phase,
-                    listener: EventListenerType::Additive(listener.clone())
-                };
-                if let Some(position) = entry.iter().position(|e| *e == old_entry) {
-                    entry.remove(position);
-                }
+        let ref listener = match listener {
+            Some(l) => l,
+            None => return,
+        };
+        let mut handlers = self.handlers.borrow_mut();
+        let entry = handlers.get_mut(&Atom::from(ty));
+        for entry in entry {
+            let phase = if capture { ListenerPhase::Capturing } else { ListenerPhase::Bubbling };
+            let old_entry = EventListenerEntry {
+                phase: phase,
+                listener: EventListenerType::Additive(listener.clone())
+            };
+            if let Some(position) = entry.iter().position(|e| *e == old_entry) {
+                entry.remove(position);
             }
         }
     }
