@@ -1085,15 +1085,20 @@ case "$target" in
             dnl MSVC allows the use of intrinsics without any flags
             dnl and doesn't have a separate arch for SSSE3
             SSSE3_FLAGS="-arch:SSE2"
-            dnl clang-cl, however, requires the appropriate flags.
-            if test -n "$CLANG_CL"; then
-                SSSE3_FLAGS="-mssse3"
-            fi
+        fi
+        dnl clang-cl requires appropriate flags to enable SSSE3 support
+        dnl on all architectures.
+        if test -n "$CLANG_CL"; then
+            SSSE3_FLAGS="-mssse3"
         fi
         dnl VS2013+ requires -FS when parallel building by make -jN.
         dnl If nothing, compiler sometimes causes C1041 error.
         CFLAGS="$CFLAGS -FS"
         CXXFLAGS="$CXXFLAGS -FS"
+        dnl VS2013+ supports -Gw for better linker optimizations.
+        dnl http://blogs.msdn.com/b/vcblog/archive/2013/09/11/introducing-gw-compiler-switch.aspx
+        CFLAGS="$CFLAGS -Gw"
+        CXXFLAGS="$CXXFLAGS -Gw"
         # khuey says we can safely ignore MSVC warning C4251
         # MSVC warning C4244 (implicit type conversion may lose data) warns
         # and requires workarounds for perfectly valid code.  Also, GCC/clang
@@ -1338,6 +1343,7 @@ if test -z "$COMPILE_ENVIRONMENT"; then
     SKIP_COMPILER_CHECKS=1
     SKIP_LIBRARY_CHECKS=1
     PKG_SKIP_STRIP=1
+    MOZ_DEBUGGING_OPTS
 else
     MOZ_COMPILER_OPTS
 fi # COMPILE_ENVIRONMENT
@@ -1359,23 +1365,6 @@ MOZ_CXX11
 
 AC_LANG_C
 
-dnl Check for .hidden assembler directive and visibility attribute.
-dnl Borrowed from glibc configure.in
-dnl ===============================================================
-if test "$GNU_CC" -a "$OS_TARGET" != WINNT; then
-  AC_DEFINE(HAVE_VISIBILITY_HIDDEN_ATTRIBUTE)
-  AC_DEFINE(HAVE_VISIBILITY_ATTRIBUTE)
-  case "$OS_TARGET" in
-  Darwin)
-    VISIBILITY_FLAGS='-fvisibility=hidden -fvisibility-inlines-hidden'
-    ;;
-  *)
-    VISIBILITY_FLAGS="-I${DIST}/system_wrappers -include ${_topsrcdir}/config/gcc_hidden.h"
-    WRAP_SYSTEM_INCLUDES=1
-    ;;
-  esac
-fi         # GNU_CC
-
 case "${OS_TARGET}" in
 Darwin)
   ;;
@@ -1384,9 +1373,6 @@ Darwin)
   WRAP_STL_INCLUDES=1
   ;;
 esac
-
-AC_SUBST(WRAP_SYSTEM_INCLUDES)
-AC_SUBST_LIST(VISIBILITY_FLAGS)
 
 dnl Checks for header files.
 dnl ========================================================
@@ -5714,7 +5700,7 @@ if test "$MOZ_TELEMETRY_REPORTING"; then
     AC_DEFINE(MOZ_TELEMETRY_REPORTING)
 
     # Enable Telemetry by default for nightly and aurora channels
-    if test -z "$RELEASE_BUILD"; then
+    if test -z "$RELEASE_OR_BETA"; then
       AC_DEFINE(MOZ_TELEMETRY_ON_BY_DEFAULT)
     fi
 fi
@@ -5731,6 +5717,25 @@ fi
 dnl win32 options
 AC_SUBST(WIN32_REDIST_DIR)
 AC_SUBST(WIN_UCRT_REDIST_DIR)
+
+dnl ========================================================
+dnl ICU Support
+dnl ========================================================
+
+# Internationalization is not built or exposed on Fennec.
+# See Bug 1215256
+
+if test "$MOZ_BUILD_APP" = "mobile/android"; then
+    _INTL_API=no
+else
+    _INTL_API=yes
+fi
+
+if test "$MOZ_WIDGET_TOOLKIT" = "cocoa"; then
+    USE_ICU=1
+fi
+
+MOZ_CONFIG_ICU()
 
 dnl Echo the CFLAGS to remove extra whitespace.
 CFLAGS=`echo \
@@ -5986,25 +5991,6 @@ fi
 AC_SUBST(PREPROCESS_OPTION)
 
 dnl ========================================================
-dnl ICU Support
-dnl ========================================================
-
-# Internationalization is not built or exposed on Fennec.
-# See Bug 1215256
-
-if test "$MOZ_BUILD_APP" = "mobile/android"; then
-    _INTL_API=no
-else
-    _INTL_API=yes
-fi
-
-if test "$MOZ_WIDGET_TOOLKIT" = "cocoa"; then
-    USE_ICU=1
-fi
-
-MOZ_CONFIG_ICU()
-
-dnl ========================================================
 dnl mask as shorthand property
 dnl ========================================================
 
@@ -6012,7 +5998,7 @@ dnl ========================================================
 # Refer to bug 1281101 for more details.
 
 # Enable mask-as-shorthand property by default for nightly and aurora channels
-if test -z "$RELEASE_BUILD"; then
+if test -z "$RELEASE_OR_BETA"; then
   dnl mask as shorthand property enabled
   MOZ_ENABLE_MASK_AS_SHORTHAND=1
   AC_DEFINE(MOZ_ENABLE_MASK_AS_SHORTHAND)

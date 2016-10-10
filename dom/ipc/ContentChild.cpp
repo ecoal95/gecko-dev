@@ -170,7 +170,6 @@
 #endif
 
 #include "mozilla/dom/File.h"
-#include "mozilla/dom/cellbroadcast/CellBroadcastIPCService.h"
 #include "mozilla/dom/icc/IccChild.h"
 #include "mozilla/dom/mobileconnection/MobileConnectionChild.h"
 #include "mozilla/dom/mobilemessage/SmsChild.h"
@@ -207,7 +206,6 @@
 using namespace mozilla;
 using namespace mozilla::docshell;
 using namespace mozilla::dom::bluetooth;
-using namespace mozilla::dom::cellbroadcast;
 using namespace mozilla::dom::devicestorage;
 using namespace mozilla::dom::icc;
 using namespace mozilla::dom::ipc;
@@ -1982,30 +1980,6 @@ bool ContentChild::DeallocPHandlerServiceChild(PHandlerServiceChild* aHandlerSer
   return true;
 }
 
-PCellBroadcastChild*
-ContentChild::AllocPCellBroadcastChild()
-{
-  MOZ_CRASH("No one should be allocating PCellBroadcastChild actors");
-}
-
-PCellBroadcastChild*
-ContentChild::SendPCellBroadcastConstructor(PCellBroadcastChild* aActor)
-{
-  aActor = PContentChild::SendPCellBroadcastConstructor(aActor);
-  if (aActor) {
-    static_cast<CellBroadcastIPCService*>(aActor)->AddRef();
-  }
-
-  return aActor;
-}
-
-bool
-ContentChild::DeallocPCellBroadcastChild(PCellBroadcastChild* aActor)
-{
-  static_cast<CellBroadcastIPCService*>(aActor)->Release();
-  return true;
-}
-
 PSmsChild*
 ContentChild::AllocPSmsChild()
 {
@@ -3448,6 +3422,27 @@ ContentChild::RecvGetFilesResponse(const nsID& aUUID,
 
   mGetFilesPendingRequests.Remove(aUUID);
   return true;
+}
+
+/* static */ void
+ContentChild::FatalErrorIfNotUsingGPUProcess(const char* const aProtocolName,
+                                             const char* const aErrorMsg,
+                                             base::ProcessId aOtherPid)
+{
+  // If we're communicating with the same process or the UI process then we
+  // want to crash normally. Otherwise we want to just warn as the other end
+  // must be the GPU process and it crashing shouldn't be fatal for us.
+  if (aOtherPid == base::GetCurrentProcId() ||
+      (GetSingleton() && GetSingleton()->OtherPid() == aOtherPid)) {
+    mozilla::ipc::FatalError(aProtocolName, aErrorMsg, false);
+  } else {
+    nsAutoCString formattedMessage("IPDL error [");
+    formattedMessage.AppendASCII(aProtocolName);
+    formattedMessage.AppendLiteral("]: \"");
+    formattedMessage.AppendASCII(aErrorMsg);
+    formattedMessage.AppendLiteral("\".");
+    NS_WARNING(formattedMessage.get());
+  }
 }
 
 } // namespace dom

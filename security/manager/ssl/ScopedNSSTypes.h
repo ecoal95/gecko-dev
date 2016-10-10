@@ -11,6 +11,7 @@
 #define ScopedNSSTypes_h
 
 #include <limits>
+#include <memory>
 
 #include "cert.h"
 #include "cms.h"
@@ -101,7 +102,7 @@ struct name##DeletePolicy \
 { \
   void operator()(Type* aValue) { Deleter(aValue); } \
 }; \
-typedef UniquePtr<Type, name##DeletePolicy> name;
+typedef std::unique_ptr<Type, name##DeletePolicy> name;
 
 MOZ_TYPE_SPECIFIC_UNIQUE_PTR_TEMPLATE(UniquePK11Context,
                                       PK11Context,
@@ -343,9 +344,6 @@ MOZ_TYPE_SPECIFIC_UNIQUE_PTR_TEMPLATE(UniqueCERTCertificateRequest,
 MOZ_TYPE_SPECIFIC_UNIQUE_PTR_TEMPLATE(UniqueCERTCertList,
                                       CERTCertList,
                                       CERT_DestroyCertList)
-MOZ_TYPE_SPECIFIC_UNIQUE_PTR_TEMPLATE(UniqueCERTCertNicknames,
-                                      CERTCertNicknames,
-                                      CERT_FreeNicknames)
 MOZ_TYPE_SPECIFIC_UNIQUE_PTR_TEMPLATE(UniqueCERTName,
                                       CERTName,
                                       CERT_DestroyName)

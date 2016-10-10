@@ -30,7 +30,6 @@ using namespace mozilla::gfx;
 RemoteContentController::RemoteContentController()
   : mCompositorThread(MessageLoop::current())
   , mCanSend(true)
-  , mMutex("RemoteContentController")
 {
 }
 
@@ -45,6 +44,21 @@ RemoteContentController::RequestContentRepaint(const FrameMetrics& aFrameMetrics
 
   if (mCanSend) {
     Unused << SendRequestContentRepaint(aFrameMetrics);
+  }
+}
+
+void
+RemoteContentController::HandleTapOnMainThread(TapType aTapType,
+                                               LayoutDevicePoint aPoint,
+                                               Modifiers aModifiers,
+                                               ScrollableLayerGuid aGuid,
+                                               uint64_t aInputBlockId)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  dom::TabParent* tab = dom::TabParent::GetTabParentFromLayersId(aGuid.mLayersId);
+  if (tab) {
+    tab->SendHandleTap(aTapType, aPoint, aModifiers, aGuid, aInputBlockId);
   }
 }
 
@@ -66,22 +80,20 @@ RemoteContentController::HandleTap(TapType aTapType,
         CompositorBridgeParent::GetApzcTreeManagerParentForRoot(aGuid.mLayersId);
     if (apzctmp) {
       Unused << apzctmp->SendHandleTap(aTapType, aPoint, aModifiers, aGuid, aInputBlockId);
-      return;
     }
+
+    return;
   }
 
-  // If we get here we're probably in the parent process, but we might be in
-  // the GPU process in some shutdown phase where the LayerTreeState or
-  // APZCTreeManagerParent structures are torn down. In that case we'll just get
-  // a null TabParent.
-  dom::TabParent* tab = dom::TabParent::GetTabParentFromLayersId(aGuid.mLayersId);
-  if (tab) {
-    // If we got a TabParent we're definitely in the parent process, and the
-    // message is going to a child process. That means we're in an e10s
-    // environment, so we must be on the main thread.
-    MOZ_ASSERT(XRE_IsParentProcess());
-    MOZ_ASSERT(NS_IsMainThread());
-    tab->SendHandleTap(aTapType, aPoint, aModifiers, aGuid, aInputBlockId);
+  MOZ_ASSERT(XRE_IsParentProcess());
+
+  if (NS_IsMainThread()) {
+    HandleTapOnMainThread(aTapType, aPoint, aModifiers, aGuid, aInputBlockId);
+  } else {
+    // We don't want to get the TabParent or call TabParent::SendHandleTap() from a non-main thread (this might happen
+    // on Android, where this is called from the Java UI thread)
+    NS_DispatchToMainThread(NewRunnableMethod<TapType, LayoutDevicePoint, Modifiers, ScrollableLayerGuid, uint64_t>
+        (this, &RemoteContentController::HandleTapOnMainThread, aTapType, aPoint, aModifiers, aGuid, aInputBlockId));
   }
 }
 
@@ -145,18 +157,6 @@ void
 RemoteContentController::DispatchToRepaintThread(already_AddRefed<Runnable> aTask)
 {
   mCompositorThread->PostTask(Move(aTask));
-}
-
-bool
-RemoteContentController::GetTouchSensitiveRegion(CSSRect* aOutRegion)
-{
-  MutexAutoLock lock(mMutex);
-  if (mTouchSensitiveRegion.IsEmpty()) {
-    return false;
-  }
-
-  *aOutRegion = CSSRect::FromAppUnits(mTouchSensitiveRegion.GetBounds());
-  return true;
 }
 
 void
@@ -249,14 +249,6 @@ RemoteContentController::NotifyFlushComplete()
   if (mCanSend) {
     Unused << SendNotifyFlushComplete();
   }
-}
-
-bool
-RemoteContentController::RecvUpdateHitRegion(const nsRegion& aRegion)
-{
-  MutexAutoLock lock(mMutex);
-  mTouchSensitiveRegion = aRegion;
-  return true;
 }
 
 void

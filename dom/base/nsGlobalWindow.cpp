@@ -860,7 +860,7 @@ nsOuterWindowProxy::defineProperty(JSContext* cx,
     return result.failCantDefineWindowElement();
   }
 
-#ifndef RELEASE_BUILD // To be turned on in bug 1178638.
+#ifndef RELEASE_OR_BETA // To be turned on in bug 1178638.
   // For now, allow chrome code to define non-configurable properties
   // on windows, until we sort out what exactly the addon SDK is
   // doing.  In the meantime, this still allows us to test web compat
@@ -6112,12 +6112,16 @@ nsGlobalWindow::SetFullScreen(bool aFullScreen)
   return SetFullscreenInternal(FullscreenReason::ForFullscreenMode, aFullScreen);
 }
 
-void
+static void
 FinishDOMFullscreenChange(nsIDocument* aDoc, bool aInDOMFullscreen)
 {
   if (aInDOMFullscreen) {
     // Ask the document to handle any pending DOM fullscreen change.
-    nsIDocument::HandlePendingFullscreenRequests(aDoc);
+    if (!nsIDocument::HandlePendingFullscreenRequests(aDoc)) {
+      // If we don't end up having anything in fullscreen,
+      // async request exiting fullscreen.
+      nsIDocument::AsyncExitFullscreen(aDoc);
+    }
   } else {
     // If the window is leaving fullscreen state, also ask the document
     // to exit from DOM Fullscreen.
@@ -10577,7 +10581,8 @@ nsGlobalWindow::GetSessionStorage(ErrorResult& aError)
 }
 
 DOMStorage*
-nsGlobalWindow::GetLocalStorage(ErrorResult& aError)
+nsGlobalWindow::GetLocalStorage(const Maybe<nsIPrincipal*>& aSubjectPrincipal,
+                                ErrorResult& aError)
 {
   MOZ_RELEASE_ASSERT(IsInnerWindow());
 
@@ -10586,7 +10591,7 @@ nsGlobalWindow::GetLocalStorage(ErrorResult& aError)
   }
 
   if (!mLocalStorage) {
-    if (!DOMStorage::CanUseStorage(AsInner())) {
+    if (!DOMStorage::CanUseStorage(AsInner(), aSubjectPrincipal)) {
       aError.Throw(NS_ERROR_DOM_SECURITY_ERR);
       return nullptr;
     }
@@ -11535,8 +11540,7 @@ nsGlobalWindow::Observe(nsISupports* aSubject, const char* aTopic,
     // Clone the storage event included in the observer notification. We want
     // to dispatch clones rather than the original event.
     ErrorResult error;
-    RefPtr<StorageEvent> newEvent = CloneStorageEvent(eventType,
-                                                        event, error);
+    RefPtr<StorageEvent> newEvent = CloneStorageEvent(eventType, event, error);
     if (error.Failed()) {
       return error.StealNSResult();
     }
@@ -11653,7 +11657,10 @@ nsGlobalWindow::CloneStorageEvent(const nsAString& aType,
 
   RefPtr<DOMStorage> storage;
   if (storageArea->GetType() == DOMStorage::LocalStorage) {
-    storage = GetLocalStorage(aRv);
+    storage = GetLocalStorage(nsContentUtils::GetCurrentJSContext()
+                                ? Some(nsContentUtils::SubjectPrincipal())
+                                : Nothing(),
+                              aRv);
   } else {
     MOZ_ASSERT(storageArea->GetType() == DOMStorage::SessionStorage);
     storage = GetSessionStorage(aRv);

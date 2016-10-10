@@ -37,7 +37,7 @@ const {HTMLEditor} = require("devtools/client/inspector/markup/html-editor");
 const promise = require("promise");
 const defer = require("devtools/shared/defer");
 const Services = require("Services");
-const {HTMLTooltip} = require("devtools/client/shared/widgets/HTMLTooltip");
+const {HTMLTooltip} = require("devtools/client/shared/widgets/tooltip/HTMLTooltip");
 const {setImageTooltip, setBrokenImageTooltip} =
       require("devtools/client/shared/widgets/tooltip/ImageTooltipHelper");
 const {setEventTooltip} = require("devtools/client/shared/widgets/tooltip/EventTooltipHelper");
@@ -104,12 +104,11 @@ function MarkupView(inspector, frame, controllerWindow) {
     Services.prefs.getIntPref(ATTR_COLLAPSE_LENGTH_PREF);
 
   // Creating the popup to be used to show CSS suggestions.
-  let options = {
+  // The popup will be attached to the toolbox document.
+  this.popup = new AutocompletePopup(inspector.toolbox.doc, {
     autoSelect: true,
     theme: "auto",
-  };
-
-  this.popup = new AutocompletePopup(inspector.toolbox, options);
+  });
 
   this.undo = new UndoStack();
   this.undo.installController(controllerWindow);
@@ -185,9 +184,10 @@ MarkupView.prototype = {
   },
 
   _initTooltips: function () {
-    this.eventDetailsTooltip = new HTMLTooltip(this.toolbox,
+    // The tooltips will be attached to the toolbox document.
+    this.eventDetailsTooltip = new HTMLTooltip(this.toolbox.doc,
       {type: "arrow"});
-    this.imagePreviewTooltip = new HTMLTooltip(this.toolbox,
+    this.imagePreviewTooltip = new HTMLTooltip(this.toolbox.doc,
       {type: "arrow", useXulWrapper: "true"});
     this._enableImagePreviewTooltip();
   },
@@ -3198,6 +3198,7 @@ ElementEditor.prototype = {
     // Create the template editor, which will save some variables here.
     let data = {
       attrName: attribute.name,
+      attrValue: attribute.value,
       tabindex: this.container.canFocus ? "0" : "-1",
     };
     this.template("attribute", data);

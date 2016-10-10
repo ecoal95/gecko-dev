@@ -22,7 +22,7 @@ const {SideMenuWidget} = require("resource://devtools/client/shared/widgets/Side
 const {VariablesView} = require("resource://devtools/client/shared/widgets/VariablesView.jsm");
 const {VariablesViewController} = require("resource://devtools/client/shared/widgets/VariablesViewController.jsm");
 const {ToolSidebar} = require("devtools/client/framework/sidebar");
-const {HTMLTooltip} = require("devtools/client/shared/widgets/HTMLTooltip");
+const {HTMLTooltip} = require("devtools/client/shared/widgets/tooltip/HTMLTooltip");
 const {setImageTooltip, getImageDimensions} =
   require("devtools/client/shared/widgets/tooltip/ImageTooltipHelper");
 const { testing: isTesting } = require("devtools/shared/flags");
@@ -477,7 +477,8 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
       .createInstance(Ci.nsITimer);
 
     // Create a tooltip for the newly appended network request item.
-    this.tooltip = new HTMLTooltip(NetMonitorController._toolbox, { type: "arrow" });
+    // The popup will be attached to the toolbox document.
+    this.tooltip = new HTMLTooltip(NetMonitorController._toolbox.doc, { type: "arrow" });
     this.tooltip.startTogglingOnHover(widgetParentEl, this._onHover, {
       toggleDelay: REQUESTS_TOOLTIP_TOGGLE_DELAY,
       interactive: true

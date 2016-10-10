@@ -871,6 +871,12 @@ nsWindow::SetParent(nsIWidget *aNewParent)
     return NS_OK;
 }
 
+bool
+nsWindow::WidgetTypeSupportsAcceleration()
+{
+  return !IsSmallPopup();
+}
+
 void
 nsWindow::ReparentNativeWidget(nsIWidget* aNewParent)
 {
@@ -1044,7 +1050,14 @@ void nsWindow::SetSizeConstraints(const SizeConstraints& aConstraints)
         geometry.max_height = DevicePixelsToGdkCoordRoundDown(
                               mSizeConstraints.mMaxSize.height);
 
-        uint32_t hints = GDK_HINT_MIN_SIZE | GDK_HINT_MAX_SIZE;
+        uint32_t hints = 0;
+        if (aConstraints.mMinSize != LayoutDeviceIntSize(0, 0)) {
+            hints |= GDK_HINT_MIN_SIZE;
+        }
+        if (aConstraints.mMaxSize !=
+            LayoutDeviceIntSize(NS_MAXSIZE, NS_MAXSIZE)) {
+            hints |= GDK_HINT_MAX_SIZE;
+        }
         gtk_window_set_geometry_hints(GTK_WINDOW(mShell), nullptr,
                                       &geometry, GdkWindowHints(hints));
     }

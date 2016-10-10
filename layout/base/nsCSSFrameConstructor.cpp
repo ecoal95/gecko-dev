@@ -3561,16 +3561,7 @@ nsCSSFrameConstructor::FindHTMLData(Element* aElement,
     return nullptr;
   }
 
-  if (aTag == nsGkAtoms::details || aTag == nsGkAtoms::summary) {
-    if (!HTMLDetailsElement::IsDetailsEnabled()) {
-      return nullptr;
-    }
-  }
-
-  if (aTag == nsGkAtoms::summary &&
-      (!aParentFrame || aParentFrame->GetType() != nsGkAtoms::detailsFrame)) {
-    // <summary> is special only if it is a direct child of <details>. If it
-    // isn't, construct it as a normal block frame instead of a summary frame.
+  if (aTag == nsGkAtoms::details && !HTMLDetailsElement::IsDetailsEnabled()) {
     return nullptr;
   }
 
@@ -3663,8 +3654,12 @@ nsCSSFrameConstructor::FindInputData(Element* aElement,
     SIMPLE_INT_CREATE(NS_FORM_INPUT_NUMBER, NS_NewNumberControlFrame),
     // TODO: this is temporary until a frame is written: bug 888320.
     SIMPLE_INT_CREATE(NS_FORM_INPUT_DATE, NS_NewTextControlFrame),
-    // TODO: this is temporary until a frame is written: bug 888320
+#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
+    // On Android/B2G, date/time input appears as a normal text box.
     SIMPLE_INT_CREATE(NS_FORM_INPUT_TIME, NS_NewTextControlFrame),
+#else
+    SIMPLE_INT_CREATE(NS_FORM_INPUT_TIME, NS_NewDateTimeControlFrame),
+#endif
     // TODO: this is temporary until a frame is written: bug 888320
     SIMPLE_INT_CREATE(NS_FORM_INPUT_MONTH, NS_NewTextControlFrame),
     // TODO: this is temporary until a frame is written: bug 888320
@@ -3888,34 +3883,68 @@ nsCSSFrameConstructor::ConstructFrameFromItemInternal(FrameConstructionItem& aIt
     nsIFrame* maybeAbsoluteContainingBlock = newFrame;
     nsIFrame* possiblyLeafFrame = newFrame;
     if (bits & FCDATA_CREATE_BLOCK_WRAPPER_FOR_ALL_KIDS) {
-      RefPtr<nsStyleContext> blockContext;
-      blockContext =
+      RefPtr<nsStyleContext> outerSC =
         mPresShell->StyleSet()->ResolveAnonymousBoxStyle(*data->mAnonBoxPseudo,
                                                          styleContext);
-      nsIFrame* blockFrame =
-        NS_NewBlockFormattingContext(mPresShell, blockContext);
-
 #ifdef DEBUG
       nsContainerFrame* containerFrame = do_QueryFrame(newFrame);
       MOZ_ASSERT(containerFrame);
 #endif
       nsContainerFrame* container = static_cast<nsContainerFrame*>(newFrame);
-      InitAndRestoreFrame(aState, content, container, blockFrame);
-
-      SetInitialSingleChild(container, blockFrame);
-
-      // Now figure out whether newFrame or blockFrame should be the
-      // absolute container.  It should be the latter if it's
-      // positioned, otherwise the former.
-      const nsStyleDisplay* blockDisplay = blockContext->StyleDisplay();
-      if (blockDisplay->IsAbsPosContainingBlock(blockFrame)) {
-        maybeAbsoluteContainingBlockDisplay = blockDisplay;
-        maybeAbsoluteContainingBlock = blockFrame;
-        maybeAbsoluteContainingBlockStyleFrame = blockFrame;
+      nsContainerFrame* outerFrame;
+      nsContainerFrame* innerFrame;
+      switch (display->mDisplay) {
+        case StyleDisplay::Flex:
+        case StyleDisplay::InlineFlex:
+          outerFrame = NS_NewFlexContainerFrame(mPresShell, outerSC);
+          InitAndRestoreFrame(aState, content, container, outerFrame);
+          innerFrame = outerFrame;
+          break;
+        case StyleDisplay::Grid:
+        case StyleDisplay::InlineGrid:
+          outerFrame = NS_NewGridContainerFrame(mPresShell, outerSC);
+          InitAndRestoreFrame(aState, content, container, outerFrame);
+          innerFrame = outerFrame;
+          break;
+        default: {
+          nsContainerFrame* columnSetFrame = nullptr;
+          RefPtr<nsStyleContext> innerSC = outerSC;
+          const nsStyleColumn* columns = outerSC->StyleColumn();
+          if (columns->mColumnCount != NS_STYLE_COLUMN_COUNT_AUTO ||
+              columns->mColumnWidth.GetUnit() != eStyleUnit_Auto) {
+            columnSetFrame =
+              NS_NewColumnSetFrame(mPresShell, outerSC, nsFrameState(0));
+            InitAndRestoreFrame(aState, content, container, columnSetFrame);
+            innerSC = mPresShell->StyleSet()->ResolveAnonymousBoxStyle(
+              nsCSSAnonBoxes::columnContent, outerSC);
+          }
+          innerFrame = NS_NewBlockFormattingContext(mPresShell, innerSC);
+          if (columnSetFrame) {
+            InitAndRestoreFrame(aState, content, columnSetFrame, innerFrame);
+            SetInitialSingleChild(columnSetFrame, innerFrame);
+            outerFrame = columnSetFrame;
+          } else {
+            InitAndRestoreFrame(aState, content, container, innerFrame);
+            outerFrame = innerFrame;
+          }
+          break;
+        }
       }
 
-      // Our kids should go into the blockFrame
-      newFrame = blockFrame;
+      SetInitialSingleChild(container, outerFrame);
+
+      // Now figure out whether newFrame or outerFrame should be the
+      // absolute container.
+      auto outerDisplay = outerSC->StyleDisplay();
+      if (outerDisplay->IsAbsPosContainingBlock(outerFrame)) {
+        maybeAbsoluteContainingBlockDisplay = outerDisplay;
+        maybeAbsoluteContainingBlock = outerFrame;
+        maybeAbsoluteContainingBlockStyleFrame = outerFrame;
+        innerFrame->AddStateBits(NS_FRAME_CAN_HAVE_ABSPOS_CHILDREN);
+      }
+
+      // Our kids should go into the innerFrame.
+      newFrame = innerFrame;
     }
 
     aState.AddChild(frameToAddToList, aFrameItems, content, styleContext,
@@ -5905,10 +5934,23 @@ nsCSSFrameConstructor::AddFrameConstructionItemsInternal(nsFrameConstructorState
     return;
   }
 
-  FrameConstructionItem* item =
-    aItems.AppendItem(data, aContent, aTag, aNameSpaceID,
-                      pendingBinding, styleContext.forget(),
-                      aSuppressWhiteSpaceOptimizations, aAnonChildren);
+  FrameConstructionItem* item = nullptr;
+  if (details && details->IsDetailsEnabled() && details->Open()) {
+    auto* summary = HTMLSummaryElement::FromContentOrNull(aContent);
+    if (summary && summary->IsMainSummary()) {
+      // If details is open, the main summary needs to be rendered as if it is
+      // the first child, so add the item to the front of the item list.
+      item = aItems.PrependItem(data, aContent, aTag, aNameSpaceID,
+                                pendingBinding, styleContext.forget(),
+                                aSuppressWhiteSpaceOptimizations, aAnonChildren);
+    }
+  }
+
+  if (!item) {
+    item = aItems.AppendItem(data, aContent, aTag, aNameSpaceID,
+                             pendingBinding, styleContext.forget(),
+                             aSuppressWhiteSpaceOptimizations, aAnonChildren);
+  }
   item->mIsText = isText;
   item->mIsGeneratedContent = isGeneratedContent;
   item->mIsAnonymousContentCreatorContent =

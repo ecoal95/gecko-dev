@@ -157,6 +157,7 @@ task_description_schema = Schema({
 
         # worker features that should be enabled
         Required('relengapi-proxy', default=False): bool,
+        Required('chainOfTrust', default=False): bool,
         Required('taskcluster-proxy', default=False): bool,
         Required('allow-ptrace', default=False): bool,
         Required('loopback-video', default=False): bool,
@@ -196,6 +197,10 @@ task_description_schema = Schema({
 
         # the maximum time to run, in seconds
         'max-run-time': int,
+
+        # the exit status code that indicates the task should be retried
+        Optional('retry-exit-status'): int,
+
     }, {
         Required('implementation'): 'generic-worker',
 
@@ -326,6 +331,9 @@ def build_docker_worker_payload(config, task, task_def):
         features['allowPtrace'] = True
         task_def['scopes'].append('docker-worker:feature:allowPtrace')
 
+    if worker.get('chainOfTrust'):
+        features['chainOfTrust'] = True
+
     capabilities = {}
 
     for lo in 'audio', 'video':
@@ -343,6 +351,9 @@ def build_docker_worker_payload(config, task, task_def):
 
     if 'max-run-time' in worker:
         payload['maxRunTime'] = worker['max-run-time']
+
+    if 'retry-exit-status' in worker:
+        payload['onExitStatus'] = {'retry': [worker['retry-exit-status']]}
 
     if 'artifacts' in worker:
         artifacts = {}
@@ -393,6 +404,9 @@ def build_generic_worker_payload(config, task, task_def):
         'env': worker['env'],
         'maxRunTime': worker['max-run-time'],
     }
+
+    if 'retry-exit-status' in worker:
+        raise Exception("retry-exit-status not supported in generic-worker")
 
 
 transforms = TransformSequence()

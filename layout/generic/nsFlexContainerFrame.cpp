@@ -106,9 +106,11 @@ IsLegacyBox(const nsStyleDisplay* aStyleDisp,
   if (aStyleDisp->mDisplay == mozilla::StyleDisplay::Block) {
     nsStyleContext* parentStyleContext = aStyleContext->GetParent();
     NS_ASSERTION(parentStyleContext &&
-                 aStyleContext->GetPseudo() == nsCSSAnonBoxes::scrolledContent,
+                 (aStyleContext->GetPseudo() == nsCSSAnonBoxes::buttonContent ||
+                  aStyleContext->GetPseudo() == nsCSSAnonBoxes::scrolledContent),
                  "The only way a nsFlexContainerFrame can have 'display:block' "
-                 "should be if it's the inner part of a scrollable element");
+                 "should be if it's the inner part of a scrollable or button "
+                 "element");
     if (IsDisplayValueLegacyBox(parentStyleContext->StyleDisplay())) {
       return true;
     }
@@ -2743,7 +2745,7 @@ CrossAxisPositionTracker::
                     aAxisTracker.IsCrossAxisReversed()),
     mPackingSpaceRemaining(0),
     mNumPackingSpacesRemaining(0),
-    mAlignContent(aReflowInput.mStylePosition->ComputedAlignContent())
+    mAlignContent(aReflowInput.mStylePosition->mAlignContent)
 {
   MOZ_ASSERT(aFirstLine, "null first line pointer");
 
@@ -4067,7 +4069,7 @@ nsFlexContainerFrame::DoFlexLayout(nsPresContext*           aPresContext,
   const auto justifyContent = IsLegacyBox(aReflowInput.mStyleDisplay,
                                           mStyleContext) ?
     ConvertLegacyStyleToJustifyContent(StyleXUL()) :
-    aReflowInput.mStylePosition->ComputedJustifyContent();
+    aReflowInput.mStylePosition->mJustifyContent;
 
   for (FlexLine* line = lines.getFirst(); line; line = line->getNext()) {
     // Main-Axis Alignment - Flexbox spec section 9.5

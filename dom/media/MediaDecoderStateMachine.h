@@ -345,8 +345,8 @@ private:
 
   // TODO: Those callback function may receive demuxed-only data.
   // Need to figure out a suitable API name for this case.
-  void OnAudioDecoded(MediaData* aAudioSample);
-  void OnVideoDecoded(MediaData* aVideoSample, TimeStamp aDecodeStartTime);
+  void OnAudioDecoded(MediaData* aAudio);
+  void OnVideoDecoded(MediaData* aVideo, TimeStamp aDecodeStartTime);
   void OnNotDecoded(MediaData::Type aType, const MediaResult& aError);
 
   // Resets all state related to decoding and playback, emptying all buffers
@@ -472,9 +472,6 @@ protected:
   // If we don't, switch to buffering mode.
   void MaybeStartBuffering();
 
-  // The entry action of DECODER_STATE_DECODING_FIRSTFRAME.
-  void DecodeFirstFrame();
-
   // Moves the decoder into the shutdown state, and dispatches an error
   // event to the media element. This begins shutting down the decoder.
   // The decoder monitor must be held. This is only called on the
@@ -489,7 +486,7 @@ protected:
   void EnqueueFirstFrameLoadedEvent();
 
   // Clears any previous seeking state and initiates a new seek on the decoder.
-  RefPtr<MediaDecoder::SeekPromise> InitiateSeek(SeekJob aSeekJob);
+  void InitiateSeek(SeekJob aSeekJob);
 
   void DispatchAudioDecodeTaskIfNeeded();
   void DispatchVideoDecodeTaskIfNeeded();
@@ -533,14 +530,7 @@ protected:
   // must be held when calling this. Called on the decode thread.
   int64_t GetDecodedAudioDuration();
 
-  // Notify FirstFrameLoaded if having decoded first frames and
-  // transition to SEEKING if there is any pending seek, or DECODING otherwise.
-  void MaybeFinishDecodeFirstFrame();
-
   void FinishDecodeFirstFrame();
-
-  // Completes the seek operation, moves onto the next appropriate state.
-  void SeekCompleted();
 
   // Queries our state to see whether the decode has finished for all streams.
   bool CheckIfDecodeComplete();
@@ -627,18 +617,6 @@ private:
 
   // Queued seek - moves to mCurrentSeek when DecodeFirstFrame completes.
   SeekJob mQueuedSeek;
-  SeekJob mCurrentSeek;
-
-  // mSeekTask is responsible for executing the current seek request.
-  RefPtr<SeekTask> mSeekTask;
-  MozPromiseRequestHolder<SeekTask::SeekTaskPromise> mSeekTaskRequest;
-
-  void OnSeekTaskResolved(SeekTaskResolveValue aValue);
-  void OnSeekTaskRejected(SeekTaskRejectValue aValue);
-
-  // This method discards the seek task and then get the ownership of
-  // MedaiDecoderReaderWarpper back via registering MDSM's callback into it.
-  void DiscardSeekTaskIfExist();
 
   // Media Fragment end time in microseconds. Access controlled by decoder monitor.
   int64_t mFragmentEndTime;
@@ -667,11 +645,6 @@ private:
 
   // Playback rate. 1.0 : normal speed, 0.5 : two times slower.
   double mPlaybackRate;
-
-  // The maximum number of second we spend buffering when we are short on
-  // unbuffered data.
-  uint32_t mBufferingWait;
-  int64_t  mLowDataThresholdUsecs;
 
   // If we've got more than this number of decoded video frames waiting in
   // the video queue, we will not decode any more video frames until some have
@@ -724,29 +697,12 @@ private:
   bool DonePrerollingVideo()
   {
     MOZ_ASSERT(OnTaskQueue());
-    return !mIsVisible ||
-        !IsVideoDecoding() ||
+    return !IsVideoDecoding() ||
         static_cast<uint32_t>(VideoQueue().GetSize()) >=
             VideoPrerollFrames() * mPlaybackRate + 1;
   }
 
-  void StopPrerollingAudio()
-  {
-    MOZ_ASSERT(OnTaskQueue());
-    if (mIsAudioPrerolling) {
-      mIsAudioPrerolling = false;
-      ScheduleStateMachine();
-    }
-  }
-
-  void StopPrerollingVideo()
-  {
-    MOZ_ASSERT(OnTaskQueue());
-    if (mIsVideoPrerolling) {
-      mIsVideoPrerolling = false;
-      ScheduleStateMachine();
-    }
-  }
+  void MaybeStopPrerolling();
 
   // When we start decoding (either for the first time, or after a pause)
   // we may be low on decoded data. We don't want our "low data" logic to
@@ -754,10 +710,8 @@ private:
   // can't keep up with the decode, and cause us to pause playback. So we
   // have a "preroll" stage, where we ignore the results of our "low data"
   // logic during the first few frames of our decode. This occurs during
-  // playback. The flags below are true when the corresponding stream is
-  // being "prerolled".
-  bool mIsAudioPrerolling;
-  bool mIsVideoPrerolling;
+  // playback.
+  bool mIsPrerolling = false;
 
   // Only one of a given pair of ({Audio,Video}DataPromise, WaitForDataPromise)
   // should exist at any given moment.

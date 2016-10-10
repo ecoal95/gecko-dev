@@ -67,6 +67,14 @@ if CONFIG['ANDROID_APPCOMPAT_V7_AAR']:
     ANDROID_EXTRA_PACKAGES += ['android.support.v7.appcompat']
     ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_APPCOMPAT_V7_AAR_RES']]
     resjar.generated_sources += ['android/support/v7/appcompat/R.java']
+if CONFIG['ANDROID_SUPPORT_VECTOR_DRAWABLE_AAR']:
+    ANDROID_EXTRA_PACKAGES += ['android.support.graphics.drawable']
+    ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_SUPPORT_VECTOR_DRAWABLE_AAR_RES']]
+# (no reosurces) resjar.generated_sources += ['android/support/graphics/drawable/R.java']
+if CONFIG['ANDROID_ANIMATED_VECTOR_DRAWABLE_AAR']:
+    ANDROID_EXTRA_PACKAGES += ['android.support.graphics.drawable.animated']
+    ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_ANIMATED_VECTOR_DRAWABLE_AAR_RES']]
+# (no resources) resjar.generated_sources += ['android/support/graphics/drawable/animated/R.java']
 if CONFIG['ANDROID_CARDVIEW_V7_AAR']:
     ANDROID_EXTRA_PACKAGES += ['android.support.v7.cardview']
     ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_CARDVIEW_V7_AAR_RES']]
@@ -236,13 +244,9 @@ gvjar.sources += [geckoview_source_dir + 'java/org/mozilla/gecko/' + x
     'GeckoViewChrome.java',
     'GeckoViewContent.java',
     'GeckoViewFragment.java',
-    'gfx/Axis.java',
     'gfx/BitmapUtils.java',
     'gfx/BufferedImage.java',
     'gfx/BufferedImageGLInfo.java',
-    'gfx/DisplayPortCalculator.java',
-    'gfx/DisplayPortMetrics.java',
-    'gfx/DrawTimingQueue.java',
     'gfx/DynamicToolbarAnimator.java',
     'gfx/FloatSize.java',
     'gfx/FullScreenState.java',
@@ -261,9 +265,7 @@ gvjar.sources += [geckoview_source_dir + 'java/org/mozilla/gecko/' + x
     'gfx/ProgressiveUpdateData.java',
     'gfx/RectUtils.java',
     'gfx/RenderTask.java',
-    'gfx/SimpleScaleGestureDetector.java',
     'gfx/StackScroller.java',
-    'gfx/SubdocumentScrollHelper.java',
     'gfx/SurfaceTextureListener.java',
     'gfx/ViewTransform.java',
     'InputConnectionListener.java',
@@ -570,13 +572,10 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'menu/MenuPanel.java',
     'menu/MenuPopup.java',
     'MotionEventInterceptor.java',
-    'notifications/AppNotificationClient.java',
     'notifications/NotificationClient.java',
-    'notifications/NotificationHandler.java',
     'notifications/NotificationHelper.java',
     'notifications/NotificationReceiver.java',
     'notifications/NotificationService.java',
-    'notifications/ServiceNotificationClient.java',
     'notifications/WhatsNewReceiver.java',
     'overlays/OverlayConstants.java',
     'overlays/service/OverlayActionService.java',
@@ -691,7 +690,6 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'text/FloatingToolbarTextSelection.java',
     'text/TextAction.java',
     'text/TextSelection.java',
-    'TextSelectionHandle.java',
     'ThumbnailHelper.java',
     'toolbar/AutocompleteHandler.java',
     'toolbar/BackButton.java',
@@ -904,6 +902,8 @@ if CONFIG['MOZ_INSTALL_TRACKING']:
         resjar.generated_sources += ['com/google/android/gms/R.java']
 
 gbjar.extra_jars += [CONFIG['ANDROID_APPCOMPAT_V7_AAR_LIB']]
+gbjar.extra_jars += [CONFIG['ANDROID_SUPPORT_VECTOR_DRAWABLE_AAR_LIB']]
+gbjar.extra_jars += [CONFIG['ANDROID_ANIMATED_VECTOR_DRAWABLE_AAR_LIB']]
 gbjar.extra_jars += [CONFIG['ANDROID_CARDVIEW_V7_AAR_LIB']]
 gbjar.extra_jars += [CONFIG['ANDROID_DESIGN_AAR_LIB']]
 gbjar.extra_jars += [CONFIG['ANDROID_RECYCLERVIEW_V7_AAR_LIB']]

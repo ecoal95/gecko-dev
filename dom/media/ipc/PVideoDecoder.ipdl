@@ -9,6 +9,7 @@ include protocol PVideoDecoderManager;
 include LayersSurfaces;
 using VideoInfo from "MediaInfo.h";
 using mozilla::layers::LayersBackend from "mozilla/layers/LayersTypes.h";
+using struct mozilla::layers::TextureFactoryIdentifier from "mozilla/layers/CompositorTypes.h";
 
 namespace mozilla {
 namespace dom {
@@ -46,7 +47,7 @@ async protocol PVideoDecoder
 {
   manager PVideoDecoderManager;
 parent:
-  async Init(VideoInfo info, LayersBackend backend);
+  async Init(VideoInfo info, TextureFactoryIdentifier identifier);
 
   async Input(MediaRawDataIPDL data);
 
@@ -54,11 +55,13 @@ parent:
   async Drain();
   async Shutdown();
 
+  async SetSeekThreshold(int64_t time);
+
   async __delete__();
 
 child:
 
-  async InitComplete();
+  async InitComplete(bool hardware, nsCString hardwareReason);
   async InitFailed(nsresult reason);
 
   // Each output includes a SurfaceDescriptorGPUVideo that represents the decoded

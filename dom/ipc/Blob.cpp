@@ -712,38 +712,38 @@ CreateBlobImpl(const nsID& aKnownBlobIDData,
 }
 
 already_AddRefed<BlobImpl>
-CreateBlobImpl(const IPCStream& aStream,
+CreateBlobImpl(const BlobDataStream& aStream,
                const CreateBlobImplMetadata& aMetadata)
 {
   MOZ_ASSERT(gProcessType == GeckoProcessType_Default);
 
-  nsCOMPtr<nsIInputStream> inputStream = DeserializeIPCStream(aStream);
+  nsCOMPtr<nsIInputStream> inputStream = DeserializeIPCStream(aStream.stream());
   if (!inputStream) {
     ASSERT_UNLESS_FUZZING();
     return nullptr;
   }
 
-  uint64_t available;
-  MOZ_ALWAYS_SUCCEEDS(inputStream->Available(&available));
+  uint64_t length = aStream.length();
 
   RefPtr<BlobImpl> blobImpl;
   if (!aMetadata.mHasRecursed && aMetadata.IsFile()) {
-    if (available) {
+    if (length) {
       blobImpl =
         new BlobImplStream(inputStream,
                            aMetadata.mName,
                            aMetadata.mContentType,
                            aMetadata.mLastModifiedDate,
-                           available);
+                           length);
     } else {
       blobImpl =
         new EmptyBlobImpl(aMetadata.mName,
                           aMetadata.mContentType,
                           aMetadata.mLastModifiedDate);
     }
-  } else if (available) {
+  } else if (length) {
     blobImpl =
-      new BlobImplStream(inputStream, aMetadata.mContentType, available);
+      new BlobImplStream(inputStream, aMetadata.mContentType,
+                         length);
   } else {
     blobImpl = new EmptyBlobImpl(aMetadata.mContentType);
   }
@@ -771,8 +771,8 @@ CreateBlobImplFromBlobData(const BlobData& aBlobData,
       break;
     }
 
-    case BlobData::TIPCStream: {
-      blobImpl = CreateBlobImpl(aBlobData.get_IPCStream(), aMetadata);
+    case BlobData::TBlobDataStream: {
+      blobImpl = CreateBlobImpl(aBlobData.get_BlobDataStream(), aMetadata);
       break;
     }
 
@@ -912,7 +912,8 @@ CreateBlobImpl(const ParentBlobConstructorParams& aParams,
 template <class ChildManagerType>
 void
 BlobDataFromBlobImpl(ChildManagerType* aManager, BlobImpl* aBlobImpl,
-                     BlobData& aBlobData)
+                     BlobData& aBlobData,
+                     nsTArray<UniquePtr<AutoIPCStream>>& aIPCStreams)
 {
   MOZ_ASSERT(gProcessType != GeckoProcessType_Default);
   MOZ_ASSERT(aBlobImpl);
@@ -931,7 +932,7 @@ BlobDataFromBlobImpl(ChildManagerType* aManager, BlobImpl* aBlobImpl,
          index < count;
          index++) {
       BlobDataFromBlobImpl(aManager, subBlobs->ElementAt(index),
-                           subBlobDatas[index]);
+                           subBlobDatas[index], aIPCStreams);
     }
 
     return;
@@ -947,13 +948,18 @@ BlobDataFromBlobImpl(ChildManagerType* aManager, BlobImpl* aBlobImpl,
   }
 
   ErrorResult rv;
+  uint64_t length = aBlobImpl->GetSize(rv);
+  MOZ_ALWAYS_TRUE(!rv.Failed());
+
   nsCOMPtr<nsIInputStream> inputStream;
   aBlobImpl->GetInternalStream(getter_AddRefs(inputStream), rv);
   MOZ_ALWAYS_TRUE(!rv.Failed());
 
-  AutoIPCStream autoStream;
-  autoStream.Serialize(inputStream, aManager);
-  aBlobData = autoStream.TakeValue();
+  UniquePtr<AutoIPCStream> autoStream(new AutoIPCStream());
+  autoStream->Serialize(inputStream, aManager);
+  aBlobData = BlobDataStream(autoStream->TakeValue(), length);
+
+  aIPCStreams.AppendElement(Move(autoStream));
 }
 
 RemoteInputStream::RemoteInputStream(BlobImpl* aBlobImpl,
@@ -3347,6 +3353,7 @@ BlobChild::GetOrCreateFromImpl(ChildManagerType* aManager,
   MOZ_ASSERT(!aBlobImpl->IsDateUnknown());
 
   AnyBlobConstructorParams blobParams;
+  nsTArray<UniquePtr<AutoIPCStream>> autoIPCStreams;
 
   if (gProcessType == GeckoProcessType_Default) {
     RefPtr<BlobImpl> sameProcessImpl = aBlobImpl;
@@ -3358,7 +3365,7 @@ BlobChild::GetOrCreateFromImpl(ChildManagerType* aManager,
     // BlobData is going to be populate here and it _must_ be send via IPC in
     // order to avoid leaks.
     BlobData blobData;
-    BlobDataFromBlobImpl(aManager, aBlobImpl, blobData);
+    BlobDataFromBlobImpl(aManager, aBlobImpl, blobData, autoIPCStreams);
 
     nsString contentType;
     aBlobImpl->GetType(contentType);
@@ -3393,6 +3400,7 @@ BlobChild::GetOrCreateFromImpl(ChildManagerType* aManager,
     return nullptr;
   }
 
+  autoIPCStreams.Clear();
   return actor;
 }
 

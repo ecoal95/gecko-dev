@@ -19,7 +19,7 @@
  */
 
 // Node data
-SERVO_BINDING_FUNC(Servo_Node_ClearNodeData, void, RawGeckoNode* node)
+SERVO_BINDING_FUNC(Servo_Node_ClearNodeData, void, RawGeckoNodeBorrowed node)
 
 // Styleset and Stylesheet management
 SERVO_BINDING_FUNC(Servo_StyleSheet_FromUTF8Bytes, RawServoStyleSheetStrong,
@@ -47,6 +47,23 @@ SERVO_BINDING_FUNC(Servo_StyleSet_InsertStyleSheetBefore, void,
                    RawServoStyleSetBorrowedMut set, RawServoStyleSheetBorrowed sheet,
                    RawServoStyleSheetBorrowed reference)
 
+// Animations API
+SERVO_BINDING_FUNC(Servo_ParseProperty,
+                   ServoDeclarationBlockStrong,
+                   const uint8_t* property_bytes,
+                   uint32_t property_length,
+                   const uint8_t* value_bytes,
+                   uint32_t value_length,
+                   const uint8_t* base_bytes,
+                   uint32_t base_length,
+                   ThreadSafeURIHolder* base,
+                   ThreadSafeURIHolder* referrer,
+                   ThreadSafePrincipalHolder* principal)
+SERVO_BINDING_FUNC(Servo_RestyleWithAddedDeclaration,
+                   ServoComputedValuesStrong,
+                   ServoDeclarationBlockBorrowed declarations,
+                   ServoComputedValuesBorrowed previous_style)
+
 // Style attribute
 SERVO_BINDING_FUNC(Servo_ParseStyleAttribute, ServoDeclarationBlockStrong,
                    const uint8_t* bytes, uint32_t length,
@@ -55,12 +72,18 @@ SERVO_BINDING_FUNC(Servo_DeclarationBlock_AddRef, void,
                    ServoDeclarationBlockBorrowed declarations)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_Release, void,
                    ServoDeclarationBlockBorrowed declarations)
+SERVO_BINDING_FUNC(Servo_DeclarationBlock_Equals, bool,
+                   ServoDeclarationBlockBorrowed a,
+                   ServoDeclarationBlockBorrowed b)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_GetCache, nsHTMLCSSStyleSheet*,
                    ServoDeclarationBlockBorrowed declarations)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_SetImmutable, void,
                    ServoDeclarationBlockBorrowed declarations)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_ClearCachePointer, void,
                    ServoDeclarationBlockBorrowed declarations)
+SERVO_BINDING_FUNC(Servo_DeclarationBlock_SerializeOneValue, void,
+                   ServoDeclarationBlockBorrowed declarations,
+                   nsString* buffer)
 
 // CSS supports()
 SERVO_BINDING_FUNC(Servo_CSSSupports, bool,
@@ -93,7 +116,7 @@ SERVO_BINDING_FUNC(Servo_Shutdown, void)
 
 // Restyle hints
 SERVO_BINDING_FUNC(Servo_ComputeRestyleHint, nsRestyleHint,
-                   RawGeckoElement* element, ServoElementSnapshot* snapshot,
+                   RawGeckoElementBorrowed element, ServoElementSnapshot* snapshot,
                    RawServoStyleSetBorrowed set)
 
 // Restyle the given subtree.
@@ -104,6 +127,6 @@ SERVO_BINDING_FUNC(Servo_RestyleSubtree, void,
 #define STYLE_STRUCT(name, checkdata_cb)                            \
   struct nsStyle##name;                                             \
   SERVO_BINDING_FUNC(Servo_GetStyle##name, const nsStyle##name*,  \
-                     ServoComputedValuesBorrowed computed_values)
+                     ServoComputedValuesBorrowedOrNull computed_values)
 #include "nsStyleStructList.h"
 #undef STYLE_STRUCT

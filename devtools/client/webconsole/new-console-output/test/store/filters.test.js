@@ -19,8 +19,8 @@ describe("Filtering", () => {
   let store;
   let numMessages;
   // Number of messages in prepareBaseStore which are not filtered out, i.e. Evaluation
-  // Results and console commands .
-  const numUnfilterableMessages = 2;
+  // Results, console commands and console.groups .
+  const numUnfilterableMessages = 3;
 
   beforeEach(() => {
     store = prepareBaseStore();
@@ -65,11 +65,11 @@ describe("Filtering", () => {
       store.dispatch(messageAdd(message));
 
       let messages = getAllMessages(store.getState());
-      expect(messages.size).toEqual(numMessages + 1);
+      expect(messages.size).toEqual(numMessages);
 
       store.dispatch(actions.filterToggle("netxhr"));
       messages = getAllMessages(store.getState());
-      expect(messages.size).toEqual(numMessages);
+      expect(messages.size).toEqual(numMessages + 1);
     });
 
     it("filters network messages", () => {
@@ -77,11 +77,11 @@ describe("Filtering", () => {
       store.dispatch(messageAdd(message));
 
       let messages = getAllMessages(store.getState());
-      expect(messages.size).toEqual(numMessages + 1);
-
-      store.dispatch(actions.filterToggle("network"));
-      messages = getAllMessages(store.getState());
       expect(messages.size).toEqual(numMessages);
+
+      store.dispatch(actions.filterToggle("net"));
+      messages = getAllMessages(store.getState());
+      expect(messages.size).toEqual(numMessages + 1);
     });
   });
 
@@ -171,8 +171,8 @@ describe("Clear filters", () => {
       "error": false,
       "info": true,
       "log": true,
-      "network": true,
-      "netxhr": false,
+      "net": false,
+      "netxhr": true,
       "warn": true,
       "text": "foobar"
     });
@@ -185,8 +185,8 @@ describe("Clear filters", () => {
       "error": true,
       "info": true,
       "log": true,
-      "network": true,
-      "netxhr": true,
+      "net": false,
+      "netxhr": false,
       "warn": true,
       "text": ""
     });
@@ -204,7 +204,8 @@ function prepareBaseStore() {
     // Evaluation Result - never filtered
     "new Date(0)",
     // PageError
-    "ReferenceError: asdf is not defined"
+    "ReferenceError: asdf is not defined",
+    "console.group('bar')"
   ]);
 
   // Console Command - never filtered

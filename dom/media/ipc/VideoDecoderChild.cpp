@@ -21,8 +21,9 @@ using namespace gfx;
 
 VideoDecoderChild::VideoDecoderChild()
   : mThread(VideoDecoderManagerChild::GetManagerThread())
-  , mLayersBackend(layers::LayersBackend::LAYERS_NONE)
   , mCanSend(true)
+  , mInitialized(false)
+  , mIsHardwareAccelerated(false)
 {
 }
 
@@ -80,10 +81,13 @@ VideoDecoderChild::RecvError(const nsresult& aError)
 }
 
 bool
-VideoDecoderChild::RecvInitComplete()
+VideoDecoderChild::RecvInitComplete(const bool& aHardware, const nsCString& aHardwareReason)
 {
   AssertOnManagerThread();
   mInitPromise.Resolve(TrackInfo::kVideoTrack, __func__);
+  mInitialized = true;
+  mIsHardwareAccelerated = aHardware;
+  mHardwareAcceleratedReason = aHardwareReason;
   return true;
 }
 
@@ -98,19 +102,26 @@ VideoDecoderChild::RecvInitFailed(const nsresult& aReason)
 void
 VideoDecoderChild::ActorDestroy(ActorDestroyReason aWhy)
 {
+  if (aWhy == AbnormalShutdown) {
+    if (mInitialized) {
+      mCallback->Error(NS_ERROR_DOM_MEDIA_FATAL_ERR);
+    } else {
+      mInitPromise.RejectIfExists(NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
+    }
+  }
   mCanSend = false;
 }
 
 void
 VideoDecoderChild::InitIPDL(MediaDataDecoderCallback* aCallback,
                             const VideoInfo& aVideoInfo,
-                            layers::LayersBackend aLayersBackend)
+                            layers::KnowsCompositor* aKnowsCompositor)
 {
   VideoDecoderManagerChild::GetSingleton()->SendPVideoDecoderConstructor(this);
   mIPDLSelfRef = this;
   mCallback = aCallback;
   mVideoInfo = aVideoInfo;
-  mLayersBackend = aLayersBackend;
+  mKnowsCompositor = aKnowsCompositor;
 }
 
 void
@@ -133,7 +144,7 @@ RefPtr<MediaDataDecoder::InitPromise>
 VideoDecoderChild::Init()
 {
   AssertOnManagerThread();
-  if (!mCanSend || !SendInit(mVideoInfo, mLayersBackend)) {
+  if (!mCanSend || !SendInit(mVideoInfo, mKnowsCompositor->GetTextureFactoryIdentifier())) {
     return MediaDataDecoder::InitPromise::CreateAndReject(
       NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
   }
@@ -195,6 +206,23 @@ VideoDecoderChild::Shutdown()
 {
   AssertOnManagerThread();
   if (!mCanSend || !SendShutdown()) {
+    mCallback->Error(NS_ERROR_DOM_MEDIA_FATAL_ERR);
+  }
+  mInitialized = false;
+}
+
+bool
+VideoDecoderChild::IsHardwareAccelerated(nsACString& aFailureReason) const
+{
+  aFailureReason = mHardwareAcceleratedReason;
+  return mIsHardwareAccelerated;
+}
+
+void
+VideoDecoderChild::SetSeekThreshold(const media::TimeUnit& aTime)
+{
+  AssertOnManagerThread();
+  if (!mCanSend || !SendSetSeekThreshold(aTime.ToMicroseconds())) {
     mCallback->Error(NS_ERROR_DOM_MEDIA_FATAL_ERR);
   }
 }

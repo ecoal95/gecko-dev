@@ -159,7 +159,7 @@ MP4Metadata::MP4Metadata(Stream* aSource)
  , mPreferRust(false)
  , mReportedAudioTrackTelemetry(false)
  , mReportedVideoTrackTelemetry(false)
-#ifndef RELEASE_BUILD
+#ifndef RELEASE_OR_BETA
  , mRustTestMode(MediaPrefs::RustTestMode())
 #endif
 #endif
@@ -280,7 +280,7 @@ MP4Metadata::GetTrackInfo(mozilla::TrackInfo::TrackType aType,
   mozilla::UniquePtr<mozilla::TrackInfo> infoRust =
       mRust->GetTrackInfo(aType, aTrackNumber);
 
-#ifndef RELEASE_BUILD
+#ifndef RELEASE_OR_BETA
   if (mRustTestMode && info) {
     MOZ_DIAGNOSTIC_ASSERT(infoRust);
     MOZ_DIAGNOSTIC_ASSERT(infoRust->mId == info->mId);
@@ -803,6 +803,15 @@ MP4MetadataRust::GetTrackInfo(mozilla::TrackInfo::TrackType aType,
       MOZ_LOG(sLog, LogLevel::Warning, ("unhandled track type %d", aType));
       return nullptr;
       break;
+  }
+
+  // No duration in track, use fragment_duration.
+  if (e && !e->mDuration) {
+    mp4parse_fragment_info info;
+    auto rv = mp4parse_get_fragment_info(mRustParser.get(), &info);
+    if (rv == MP4PARSE_OK) {
+      e->mDuration = info.fragment_duration;
+    }
   }
 
   if (e && e->IsValid()) {

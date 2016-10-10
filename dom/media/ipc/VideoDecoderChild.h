@@ -29,7 +29,7 @@ public:
   bool RecvInputExhausted() override;
   bool RecvDrainComplete() override;
   bool RecvError(const nsresult& aError) override;
-  bool RecvInitComplete() override;
+  bool RecvInitComplete(const bool& aHardware, const nsCString& aHardwareReason) override;
   bool RecvInitFailed(const nsresult& aReason) override;
 
   void ActorDestroy(ActorDestroyReason aWhy) override;
@@ -39,11 +39,13 @@ public:
   void Flush();
   void Drain();
   void Shutdown();
+  bool IsHardwareAccelerated(nsACString& aFailureReason) const;
+  void SetSeekThreshold(const media::TimeUnit& aTime);
 
   MOZ_IS_CLASS_INIT
   void InitIPDL(MediaDataDecoderCallback* aCallback,
                 const VideoInfo& aVideoInfo,
-                layers::LayersBackend aLayersBackend);
+                layers::KnowsCompositor* aKnowsCompositor);
   void DestroyIPDL();
 
   // Called from IPDL when our actor has been destroyed
@@ -62,8 +64,11 @@ private:
   MozPromiseHolder<MediaDataDecoder::InitPromise> mInitPromise;
 
   VideoInfo mVideoInfo;
-  layers::LayersBackend mLayersBackend;
+  RefPtr<layers::KnowsCompositor> mKnowsCompositor;
+  nsCString mHardwareAcceleratedReason;
   bool mCanSend;
+  bool mInitialized;
+  bool mIsHardwareAccelerated;
 };
 
 } // namespace dom

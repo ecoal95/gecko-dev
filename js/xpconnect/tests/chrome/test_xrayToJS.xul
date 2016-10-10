@@ -159,7 +159,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=933681
   // DO NOT CHANGE WTIHOUT REVIEW FROM AN XPCONNECT PEER.
   var version = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULAppInfo).version;
   var isNightlyBuild = version.endsWith("a1");
-  var isReleaseBuild = !version.includes("a");
+  var isReleaseOrBeta = !version.includes("a");
   var gPrototypeProperties = {};
   var gConstructorProperties = {};
   function constructorProps(arr) {
@@ -752,6 +752,10 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=933681
       is(t.wrappedJSObject.length, 42, "Set tricky expando")
       is(t.length, 10, "Length accessor works over Xrays")
       is(t.byteLength, t.length * window[c].prototype.BYTES_PER_ELEMENT, "byteLength accessor works over Xrays")
+
+      // Can create TypedArray from content ArrayBuffer
+      var buffer = new iwin.ArrayBuffer(8);
+      eval(`new ${c}(buffer);`);
 
       var xray = new iwin[c](0);
       var xrayTypedArrayProto = Object.getPrototypeOf(Object.getPrototypeOf(xray));

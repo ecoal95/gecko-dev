@@ -535,7 +535,6 @@ TabChild::TabChild(nsIContentChild* aManager,
   , mNotified(false)
   , mTriedBrowserInit(false)
   , mOrientation(eScreenOrientation_PortraitPrimary)
-  , mUpdateHitRegion(false)
   , mIgnoreKeyPressEvent(false)
   , mHasValidInnerSize(false)
   , mDestroyed(false)
@@ -548,7 +547,6 @@ TabChild::TabChild(nsIContentChild* aManager,
   , mParentIsActive(false)
   , mDidSetRealShowInfo(false)
   , mDidLoadURLInit(false)
-  , mAPZChild(nullptr)
   , mLayerObserverEpoch(0)
 #if defined(XP_WIN) && defined(ACCESSIBILITY)
   , mNativeWindowHandle(0)
@@ -2642,28 +2640,6 @@ TabChild::RecvDestroy()
 }
 
 bool
-TabChild::RecvSetUpdateHitRegion(const bool& aEnabled)
-{
-    mUpdateHitRegion = aEnabled;
-
-    // We need to trigger a repaint of the child frame to ensure that it
-    // recomputes and sends its region.
-    if (!mUpdateHitRegion) {
-      return true;
-    }
-
-    nsCOMPtr<nsIDocument> document(GetDocument());
-    NS_ENSURE_TRUE(document, true);
-    nsCOMPtr<nsIPresShell> presShell = document->GetShell();
-    NS_ENSURE_TRUE(presShell, true);
-    RefPtr<nsPresContext> presContext = presShell->GetPresContext();
-    NS_ENSURE_TRUE(presContext, true);
-    presContext->InvalidatePaintedLayers();
-
-    return true;
-}
-
-bool
 TabChild::RecvSetDocShellIsActive(const bool& aIsActive,
                                   const bool& aPreserveLayers,
                                   const uint64_t& aLayerObserverEpoch)
@@ -3008,15 +2984,6 @@ TabChild::MakeHidden()
   }
 }
 
-void
-TabChild::UpdateHitRegion(const nsRegion& aRegion)
-{
-  mRemoteFrame->SendUpdateHitRegion(aRegion);
-  if (mAPZChild) {
-    mAPZChild->SendUpdateHitRegion(aRegion);
-  }
-}
-
 NS_IMETHODIMP
 TabChild::GetMessageManager(nsIContentFrameMessageManager** aResult)
 {
@@ -3259,6 +3226,10 @@ TabChild::ReinitRendering()
   lf->IdentifyTextureHost(mTextureFactoryIdentifier);
 
   mApzcTreeManager = CompositorBridgeChild::Get()->GetAPZCTreeManager(mLayersId);
+  if (mApzcTreeManager) {
+    APZChild* apz = ContentProcessController::Create(mUniqueId);
+    CompositorBridgeChild::Get()->SendPAPZConstructor(apz, mLayersId);
+  }
 }
 
 void

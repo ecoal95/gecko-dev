@@ -48,6 +48,7 @@ class MediaResource;
 class MediaDecoder;
 class VideoFrameContainer;
 namespace dom {
+class AudioChannelAgent;
 class MediaKeys;
 class TextTrack;
 class TimeRanges;
@@ -1221,9 +1222,8 @@ protected:
   // Notifies the audio channel agent when the element starts or stops playing.
   void NotifyAudioChannelAgent(bool aPlaying);
 
-  // Creates the audio channel agent if needed.  Returns true if the audio
-  // channel agent is ready to be used.
-  bool MaybeCreateAudioChannelAgent();
+  // Creates the audio channel agent.
+  void CreateAudioChannelAgent();
 
   // Determine if the element should be paused because of suspend conditions.
   bool ShouldElementBePaused();
@@ -1618,7 +1618,7 @@ protected:
   bool mDisableVideo;
 
   // An agent used to join audio channel service.
-  nsCOMPtr<nsIAudioChannelAgent> mAudioChannelAgent;
+  RefPtr<AudioChannelAgent> mAudioChannelAgent;
 
   RefPtr<TextTrackManager> mTextTrackManager;
 
@@ -1632,17 +1632,10 @@ protected:
   // MediaStream.
   nsCOMPtr<nsIPrincipal> mSrcStreamVideoPrincipal;
 
-  enum ElementInTreeState {
-    // The MediaElement is not in the DOM tree now.
-    ELEMENT_NOT_INTREE,
-    // The MediaElement is in the DOM tree now.
-    ELEMENT_INTREE,
-    // The MediaElement is not in the DOM tree now but had been binded to the
-    // tree before.
-    ELEMENT_NOT_INTREE_HAD_INTREE
-  };
-
-  ElementInTreeState mElementInTreeState;
+  // True if UnbindFromTree() is called on the element.
+  // Note this flag is false when the element is in a phase after creation and
+  // before attaching to the DOM tree.
+  bool mUnboundFromTree = false;
 
 public:
   // Helper class to measure times for MSE telemetry stats

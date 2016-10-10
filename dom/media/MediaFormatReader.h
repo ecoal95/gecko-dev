@@ -28,8 +28,7 @@ class MediaFormatReader final : public MediaDecoderReader
 public:
   MediaFormatReader(AbstractMediaDecoder* aDecoder,
                     MediaDataDemuxer* aDemuxer,
-                    VideoFrameContainer* aVideoFrameContainer = nullptr,
-                    layers::LayersBackend aLayersBackend = layers::LayersBackend::LAYERS_NONE);
+                    VideoFrameContainer* aVideoFrameContainer = nullptr);
 
   virtual ~MediaFormatReader();
 
@@ -328,7 +327,9 @@ private:
     Maybe<MediaResult> mError;
     bool HasFatalError() const
     {
-      return mError.isSome() && mError.ref() != NS_ERROR_DOM_MEDIA_DECODE_ERR;
+      return mError.isSome() &&
+             (mError.ref() != NS_ERROR_DOM_MEDIA_DECODE_ERR ||
+              mNumOfConsecutiveError > mMaxConsecutiveError);
     }
 
     // If set, all decoded samples prior mTimeThreshold will be dropped.
@@ -520,7 +521,7 @@ private:
   // Default mLastDecodedKeyframeTime_us value, must be bigger than anything.
   static const int64_t sNoPreviousDecodedKeyframe = INT64_MAX;
 
-  layers::LayersBackend mLayersBackendType;
+  RefPtr<layers::KnowsCompositor> mKnowsCompositor;
 
   // Metadata objects
   // True if we've read the streams' metadata.

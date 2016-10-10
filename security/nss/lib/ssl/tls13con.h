@@ -52,6 +52,7 @@ SECStatus tls13_HandlePostHelloHandshakeMessage(sslSocket *ss, SSL3Opaque *b,
                                                 SSL3Hashes *hashesPtr);
 void tls13_DestroyKeyShareEntry(TLS13KeyShareEntry *entry);
 void tls13_DestroyKeyShares(PRCList *list);
+SECStatus tls13_CreateKeyShare(sslSocket *ss, const sslNamedGroupDef *groupDef);
 void tls13_DestroyEarlyData(PRCList *list);
 void tls13_CipherSpecAddRef(ssl3CipherSpec *spec);
 void tls13_CipherSpecRelease(ssl3CipherSpec *spec);
@@ -67,5 +68,9 @@ PRInt32 tls13_Read0RttData(sslSocket *ss, void *buf, PRInt32 len);
 SECStatus tls13_HandleEndOfEarlyData(sslSocket *ss);
 SECStatus tls13_HandleEarlyApplicationData(sslSocket *ss, sslBuffer *origBuf);
 PRBool tls13_ClientAllow0Rtt(sslSocket *ss, const sslSessionID *sid);
+PRUint16 tls13_EncodeDraftVersion(PRUint16 version);
+PRUint16 tls13_DecodeDraftVersion(PRUint16 version);
+SECStatus tls13_NegotiateVersion(sslSocket *ss,
+                                 const TLSExtension *supported_versions);
 
 #endif /* __tls13con_h_ */

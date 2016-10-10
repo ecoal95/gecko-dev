@@ -34,6 +34,9 @@
 #include "IHistory.h"
 #include "imgIContainer.h"
 #include "mozIApplication.h"
+#if defined(XP_WIN) && defined(ACCESSIBILITY)
+#include "mozilla/a11y/AccessibleWrap.h"
+#endif
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/StyleSheetInlines.h"
 #include "mozilla/DataStorage.h"
@@ -55,7 +58,6 @@
 #include "mozilla/dom/PMemoryReportRequestParent.h"
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
 #include "mozilla/dom/bluetooth/PBluetoothParent.h"
-#include "mozilla/dom/cellbroadcast/CellBroadcastParent.h"
 #include "mozilla/dom/devicestorage/DeviceStorageRequestParent.h"
 #include "mozilla/dom/icc/IccParent.h"
 #include "mozilla/dom/mobileconnection/MobileConnectionParent.h"
@@ -291,7 +293,6 @@ using mozilla::ProfileGatherer;
 using namespace CrashReporter;
 #endif
 using namespace mozilla::dom::bluetooth;
-using namespace mozilla::dom::cellbroadcast;
 using namespace mozilla::dom::devicestorage;
 using namespace mozilla::dom::icc;
 using namespace mozilla::dom::power;
@@ -1954,6 +1955,10 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
   }
 
   mBlobURLs.Clear();
+
+#if defined(XP_WIN32) && defined(ACCESSIBILITY)
+  a11y::AccessibleWrap::ReleaseContentProcessIdFor(ChildID());
+#endif
 }
 
 void
@@ -3463,31 +3468,6 @@ ContentParent::DeallocPHandlerServiceParent(PHandlerServiceParent* aHandlerServi
 {
   static_cast<HandlerServiceParent*>(aHandlerServiceParent)->Release();
   return true;
-}
-
-PCellBroadcastParent*
-ContentParent::AllocPCellBroadcastParent()
-{
-  if (!AssertAppProcessPermission(this, "cellbroadcast")) {
-    return nullptr;
-  }
-
-  CellBroadcastParent* actor = new CellBroadcastParent();
-  actor->AddRef();
-  return actor;
-}
-
-bool
-ContentParent::DeallocPCellBroadcastParent(PCellBroadcastParent* aActor)
-{
-  static_cast<CellBroadcastParent*>(aActor)->Release();
-  return true;
-}
-
-bool
-ContentParent::RecvPCellBroadcastConstructor(PCellBroadcastParent* aActor)
-{
-  return static_cast<CellBroadcastParent*>(aActor)->Init();
 }
 
 PSmsParent*
@@ -5346,6 +5326,18 @@ ContentParent::RecvUnstoreAndBroadcastBlobURLUnregistration(const nsCString& aUR
   mBlobURLs.RemoveElement(aURI);
 
   return true;
+}
+
+bool
+ContentParent::RecvGetA11yContentId(uint32_t* aContentId)
+{
+#if defined(XP_WIN32) && defined(ACCESSIBILITY)
+  *aContentId = a11y::AccessibleWrap::GetContentProcessIdFor(ChildID());
+  MOZ_ASSERT(*aContentId);
+  return true;
+#else
+  return false;
+#endif
 }
 
 } // namespace dom

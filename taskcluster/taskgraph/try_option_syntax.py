@@ -89,12 +89,12 @@ UNITTEST_ALIASES = {
     'mochitest-debug': alias_prefix('mochitest-debug-'),
     'mochitest-a11y': alias_contains('mochitest-a11y'),
     'mochitest-bc': alias_prefix('mochitest-browser-chrome'),
-    'mochitest-bc-e10s': alias_prefix('mochitest-browser-chrome-e10s'),
+    'mochitest-e10s-bc': alias_prefix('mochitest-e10s-browser-chrome'),
     'mochitest-browser-chrome': alias_prefix('mochitest-browser-chrome'),
-    'mochitest-browser-chrome-e10s': alias_prefix('mochitest-browser-chrome-e10s'),
+    'mochitest-e10s-browser-chrome': alias_prefix('mochitest-e10s-browser-chrome'),
     'mochitest-chrome': alias_contains('mochitest-chrome'),
     'mochitest-dt': alias_prefix('mochitest-devtools-chrome'),
-    'mochitest-dt-e10s': alias_prefix('mochitest-devtools-chrome-e10s'),
+    'mochitest-e10s-dt': alias_prefix('mochitest-e10s-devtools-chrome'),
     'mochitest-gl': alias_prefix('mochitest-webgl'),
     'mochitest-gl-e10s': alias_prefix('mochitest-webgl-e10s'),
     'mochitest-gpu': alias_prefix('mochitest-gpu'),
@@ -125,8 +125,9 @@ UNITTEST_ALIASES = {
 # substrings.  This is intended only for backward-compatibility.  New test
 # platforms should have their `test_platform` spelled out fully in try syntax.
 UNITTEST_PLATFORM_PRETTY_NAMES = {
-    'Ubuntu': ['linux', 'linux64'],
+    'Ubuntu': ['linux', 'linux64', 'linux64-asan'],
     'x64': ['linux64', 'linux64-asan'],
+    'Android 4.3': ['android-4.3-arm7-api-15'],
     # other commonly-used substrings for platforms not yet supported with
     # in-tree taskgraphs:
     # '10.10': [..TODO..],
@@ -134,7 +135,6 @@ UNITTEST_PLATFORM_PRETTY_NAMES = {
     # '10.6': [..TODO..],
     # '10.8': [..TODO..],
     # 'Android 2.3 API9': [..TODO..],
-    # 'Android 4.3 API15+': [..TODO..],
     # 'Windows 7':  [..TODO..],
     # 'Windows 7 VM': [..TODO..],
     # 'Windows 8':  [..TODO..],

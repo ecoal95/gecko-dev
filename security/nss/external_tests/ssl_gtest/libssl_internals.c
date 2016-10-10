@@ -68,6 +68,9 @@ SECStatus SSLInt_UpdateSSLv2ClientRandom(PRFileDesc *fd, uint8_t *rnd,
     return rv;
   }
 
+  // Ensure we don't overrun hs.client_random.
+  rnd_len = PR_MIN(SSL3_RANDOM_LENGTH, rnd_len);
+
   // Zero the client_random struct.
   PORT_Memset(&ss->ssl3.hs.client_random, 0, SSL3_RANDOM_LENGTH);
 
@@ -144,8 +147,9 @@ PRBool SSLInt_CheckSecretsDestroyed(PRFileDesc *fd) {
   CHECK_SECRET(currentSecret);
   CHECK_SECRET(resumptionPsk);
   CHECK_SECRET(dheSecret);
-  CHECK_SECRET(earlyTrafficSecret);
-  CHECK_SECRET(hsTrafficSecret);
+  CHECK_SECRET(clientEarlyTrafficSecret);
+  CHECK_SECRET(clientHsTrafficSecret);
+  CHECK_SECRET(serverHsTrafficSecret);
 
   return PR_TRUE;
 }
@@ -177,14 +181,19 @@ PRBool sslint_DamageTrafficSecret(PRFileDesc *fd, size_t offset) {
   return PR_TRUE;
 }
 
-PRBool SSLInt_DamageHsTrafficSecret(PRFileDesc *fd) {
+PRBool SSLInt_DamageClientHsTrafficSecret(PRFileDesc *fd) {
   return sslint_DamageTrafficSecret(
-      fd, offsetof(SSL3HandshakeState, hsTrafficSecret));
+      fd, offsetof(SSL3HandshakeState, clientHsTrafficSecret));
+}
+
+PRBool SSLInt_DamageServerHsTrafficSecret(PRFileDesc *fd) {
+  return sslint_DamageTrafficSecret(
+      fd, offsetof(SSL3HandshakeState, serverHsTrafficSecret));
 }
 
 PRBool SSLInt_DamageEarlyTrafficSecret(PRFileDesc *fd) {
   return sslint_DamageTrafficSecret(
-      fd, offsetof(SSL3HandshakeState, earlyTrafficSecret));
+      fd, offsetof(SSL3HandshakeState, clientEarlyTrafficSecret));
 }
 
 SECStatus SSLInt_Set0RttAlpn(PRFileDesc *fd, PRUint8 *data, unsigned int len) {

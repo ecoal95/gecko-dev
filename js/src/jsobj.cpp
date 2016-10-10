@@ -1860,7 +1860,11 @@ JSObject::fixupAfterMovingGC()
     if (is<NativeObject>()) {
         NativeObject& obj = as<NativeObject>();
         if (obj.denseElementsAreCopyOnWrite()) {
-            NativeObject* owner = MaybeForwarded(obj.getElementsHeader()->ownerObject().get());
+            NativeObject* owner = obj.getElementsHeader()->ownerObject();
+            // Get the new owner pointer but don't call MaybeForwarded as we
+            // don't need to access the object's shape.
+            if (IsForwarded(owner))
+                owner = Forwarded(owner);
             if (owner != &obj && owner->hasFixedElements())
                 obj.elements_ = owner->getElementsHeader()->elements();
             MOZ_ASSERT(!IsForwarded(obj.getElementsHeader()->ownerObject().get()));
@@ -3741,7 +3745,6 @@ JSObject::allocKindForTenure(const js::Nursery& nursery) const
         return kind;
     return GetBackgroundAllocKind(kind);
 }
-
 
 void
 JSObject::addSizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf, JS::ClassInfo* info)

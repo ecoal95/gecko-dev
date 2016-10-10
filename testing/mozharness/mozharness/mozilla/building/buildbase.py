@@ -1821,6 +1821,9 @@ or run without that action (ie: --no-{action})"
                            self.generate_signing_manifest(abs_files))
 
     def check_test(self):
+        if self.config.get('forced_artifact_build'):
+            self.info('Skipping due to forced artifact build.')
+            return
         c = self.config
         dirs = self.query_abs_dirs()
 
@@ -1859,6 +1862,10 @@ or run without that action (ie: --no-{action})"
         and then posts to graph server the results.
         We only post to graph server for non nightly build
         """
+        if self.config.get('forced_artifact_build'):
+            self.info('Skipping due to forced artifact build.')
+            return
+
         import tarfile
         import zipfile
         c = self.config
@@ -2050,6 +2057,9 @@ or run without that action (ie: --no-{action})"
 
     def update(self):
         """ submit balrog update steps. """
+        if self.config.get('forced_artifact_build'):
+            self.info('Skipping due to forced artifact build.')
+            return
         if not self.query_is_nightly():
             self.info("Not a nightly build, skipping balrog submission.")
             return

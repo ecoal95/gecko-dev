@@ -14,6 +14,7 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimeStamp.h"
+#include "mozilla/Unused.h"
 
 #include "mozilla/Logging.h"
 #include "mozilla/Services.h"
@@ -279,14 +280,25 @@ CrashStatsLogForwarder::UpdateStringsVector(const std::string& aString)
 void CrashStatsLogForwarder::UpdateCrashReport()
 {
   std::stringstream message;
-  if (XRE_IsParentProcess()) {
-    for(LoggingRecord::iterator it = mBuffer.begin(); it != mBuffer.end(); ++it) {
-      message << "|[" << Get<0>(*it) << "]" << Get<1>(*it) << " (t=" << Get<2>(*it) << ") ";
-    }
-  } else {
-    for(LoggingRecord::iterator it = mBuffer.begin(); it != mBuffer.end(); ++it) {
-      message << "|[C" << Get<0>(*it) << "]" << Get<1>(*it) << " (t=" << Get<2>(*it) << ") ";
-    }
+  std::string logAnnotation;
+
+  switch (XRE_GetProcessType()) {
+  case GeckoProcessType_Default:
+    logAnnotation = "|[";
+    break;
+  case GeckoProcessType_Content:
+    logAnnotation = "|[C";
+    break;
+  case GeckoProcessType_GPU:
+    logAnnotation = "|[G";
+    break;
+  default:
+    logAnnotation = "|[X";
+    break;
+  }
+
+  for (LoggingRecord::iterator it = mBuffer.begin(); it != mBuffer.end(); ++it) {
+    message << logAnnotation << Get<0>(*it) << "]" << Get<1>(*it) << " (t=" << Get<2>(*it) << ") ";
   }
 
 #ifdef MOZ_CRASHREPORTER
@@ -310,9 +322,16 @@ class LogForwarderEvent : public Runnable
   explicit LogForwarderEvent(const nsCString& aMessage) : mMessage(aMessage) {}
 
   NS_IMETHOD Run() override {
-    MOZ_ASSERT(NS_IsMainThread() && XRE_IsContentProcess());
-    dom::ContentChild* cc = dom::ContentChild::GetSingleton();
-    cc->SendGraphicsError(mMessage);
+    MOZ_ASSERT(NS_IsMainThread() && (XRE_IsContentProcess() || XRE_IsGPUProcess()));
+
+    if (XRE_IsContentProcess()) {
+      dom::ContentChild* cc = dom::ContentChild::GetSingleton();
+      Unused << cc->SendGraphicsError(mMessage);
+    } else if (XRE_IsGPUProcess()) {
+      GPUParent* gp = GPUParent::GetSingleton();
+      Unused << gp->SendGraphicsError(mMessage);
+    }
+
     return NS_OK;
   }
 
@@ -334,8 +353,13 @@ void CrashStatsLogForwarder::Log(const std::string& aString)
   if (!XRE_IsParentProcess()) {
     nsCString stringToSend(aString.c_str());
     if (NS_IsMainThread()) {
-      dom::ContentChild* cc = dom::ContentChild::GetSingleton();
-      cc->SendGraphicsError(stringToSend);
+      if (XRE_IsContentProcess()) {
+        dom::ContentChild* cc = dom::ContentChild::GetSingleton();
+        Unused << cc->SendGraphicsError(stringToSend);
+      } else if (XRE_IsGPUProcess()) {
+        GPUParent* gp = GPUParent::GetSingleton();
+        Unused << gp->SendGraphicsError(stringToSend);
+      }
     } else {
       nsCOMPtr<nsIRunnable> r1 = new LogForwarderEvent(stringToSend);
       NS_DispatchToMainThread(r1);
@@ -366,7 +390,7 @@ NS_IMPL_ISUPPORTS_INHERITED0(CrashTelemetryEvent, Runnable);
 void
 CrashStatsLogForwarder::CrashAction(LogReason aReason)
 {
-#ifndef RELEASE_BUILD
+#ifndef RELEASE_OR_BETA
   // Non-release builds crash by default, but will use telemetry
   // if this environment variable is present.
   static bool useTelemetry = gfxEnv::GfxDevCrashTelemetry();
@@ -600,9 +624,6 @@ gfxPlatform::Init()
       GPUProcessManager::Initialize();
     }
 
-    auto fwd = new CrashStatsLogForwarder("GraphicsCriticalError");
-    fwd->SetCircularBufferSize(gfxPrefs::GfxLoggingCrashLength());
-
     // Drop a note in the crash report if we end up forcing an option that could
     // destabilize things.  New items should be appended at the end (of an existing
     // or in a new section), so that we don't have to know the version to interpret
@@ -638,12 +659,7 @@ gfxPlatform::Init()
       ScopedGfxFeatureReporter::AppNote(forcedPrefs);
     }
 
-    mozilla::gfx::Config cfg;
-    cfg.mLogForwarder = fwd;
-    cfg.mMaxTextureSize = gfxPrefs::MaxTextureSize();
-    cfg.mMaxAllocSize = gfxPrefs::MaxAllocSize();
-
-    gfx::Factory::Init(cfg);
+    InitMoz2DLogging();
 
     gGfxPlatformPrefsLock = new Mutex("gfxPlatform::gGfxPlatformPrefsLock");
 
@@ -779,6 +795,20 @@ gfxPlatform::Init()
     if (obs) {
       obs->NotifyObservers(nullptr, "gfx-features-ready", nullptr);
     }
+}
+
+/* static */ void
+gfxPlatform::InitMoz2DLogging()
+{
+    auto fwd = new CrashStatsLogForwarder("GraphicsCriticalError");
+    fwd->SetCircularBufferSize(gfxPrefs::GfxLoggingCrashLength());
+
+    mozilla::gfx::Config cfg;
+    cfg.mLogForwarder = fwd;
+    cfg.mMaxTextureSize = gfxPrefs::MaxTextureSize();
+    cfg.mMaxAllocSize = gfxPrefs::MaxAllocSize();
+
+    gfx::Factory::Init(cfg);
 }
 
 static bool sLayersIPCIsUp = false;
@@ -1251,10 +1281,15 @@ gfxPlatform::SupportsAzureContentForDrawTarget(DrawTarget* aTarget)
   return SupportsAzureContentForType(aTarget->GetBackendType());
 }
 
-bool gfxPlatform::UseAcceleratedCanvas()
+bool gfxPlatform::AllowOpenGLCanvas()
 {
+  // For now, only allow Skia+OpenGL, unless it's blocked.
   // Allow acceleration on Skia if the preference is set, unless it's blocked
-  if (mPreferredCanvasBackend == BackendType::SKIA && gfxPrefs::CanvasAzureAccelerated()) {
+  // as long as we have the accelerated layers
+  if (gfxPrefs::CanvasAzureAccelerated() &&
+      mCompositorBackend == LayersBackend::LAYERS_OPENGL &&
+      (GetContentBackendFor(mCompositorBackend) == BackendType::SKIA))
+  {
     nsCOMPtr<nsIGfxInfo> gfxInfo = do_GetService("@mozilla.org/gfx/info;1");
     int32_t status;
     nsCString discardFailureId;
@@ -1270,7 +1305,7 @@ bool gfxPlatform::UseAcceleratedCanvas()
 void
 gfxPlatform::InitializeSkiaCacheLimits()
 {
-  if (UseAcceleratedCanvas()) {
+  if (AllowOpenGLCanvas()) {
 #ifdef USE_SKIA_GPU
     bool usingDynamicCache = gfxPrefs::CanvasSkiaGLDynamicCache();
     int cacheItemLimit = gfxPrefs::CanvasSkiaGLCacheItems();
@@ -1307,9 +1342,7 @@ gfxPlatform::GetSkiaGLGlue()
 #ifdef USE_SKIA_GPU
   // Check the accelerated Canvas is enabled for the first time,
   // because the callers should check it before using.
-  if (!mSkiaGlue &&
-      !UseAcceleratedCanvas()) {
-    gfxCriticalNote << "Accelerated Skia canvas is disabled";
+  if (!mSkiaGlue && !AllowOpenGLCanvas()) {
     return nullptr;
   }
 

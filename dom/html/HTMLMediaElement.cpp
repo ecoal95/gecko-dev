@@ -90,6 +90,8 @@
 #include "nsIContentPolicy.h"
 #include "mozilla/Telemetry.h"
 #include "DecoderDoctorDiagnostics.h"
+#include "DecoderTraits.h"
+#include "MediaContentType.h"
 
 #include "ImageContainer.h"
 #include "nsRange.h"
@@ -108,7 +110,6 @@ static mozilla::LazyLogModule gMediaElementEventsLog("nsMediaElementEvents");
 #include "mozilla/FloatingPoint.h"
 
 #include "nsIPermissionManager.h"
-#include "nsContentTypeParser.h"
 #include "nsDocShell.h"
 
 #include "mozilla/EventStateManager.h"
@@ -1617,18 +1618,6 @@ nsresult HTMLMediaElement::LoadResource()
   // Set the media element's CORS mode only when loading a resource
   mCORSMode = AttrValueToCORSMode(GetParsedAttr(nsGkAtoms::crossorigin));
 
-  bool isBlob = false;
-  if (mMediaKeys &&
-      Preferences::GetBool("media.eme.mse-only", true) &&
-      // We only want mediaSource URLs, but they are BlobURL, so we have to
-      // check the schema and if they are not MediaStream or real Blob.
-      (NS_FAILED(mLoadingSrc->SchemeIs(BLOBURI_SCHEME, &isBlob)) ||
-       !isBlob ||
-       IsMediaStreamURI(mLoadingSrc) ||
-       IsBlobURI(mLoadingSrc))) {
-    return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
-  }
-
   HTMLMediaElement* other = LookupMediaElementURITable(mLoadingSrc);
   if (other && other->mDecoder) {
     // Clone it.
@@ -2907,7 +2896,6 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
     mAudioChannelVolume(1.0),
     mPlayingThroughTheAudioChannel(false),
     mDisableVideo(false),
-    mElementInTreeState(ELEMENT_NOT_INTREE),
     mHasUserInteraction(false),
     mFirstFrameLoaded(false),
     mDefaultPlaybackStartPosition(0.0),
@@ -3408,6 +3396,9 @@ nsresult HTMLMediaElement::BindToTree(nsIDocument* aDocument, nsIContent* aParen
                                                  aParent,
                                                  aBindingParent,
                                                  aCompileEventHandlers);
+
+  mUnboundFromTree = false;
+
   if (aDocument) {
     mAutoplayEnabled =
       IsAutoplayEnabled() && (!aDocument || !aDocument->IsStaticDocument()) &&
@@ -3416,7 +3407,6 @@ nsresult HTMLMediaElement::BindToTree(nsIDocument* aDocument, nsIContent* aParen
     // It's value may have changed, so update it.
     UpdatePreloadAction();
   }
-  mElementInTreeState = ELEMENT_INTREE;
 
   if (mDecoder) {
     // When the MediaElement is binding to tree, the dormant status is
@@ -3650,11 +3640,7 @@ HTMLMediaElement::ReportTelemetry()
 void HTMLMediaElement::UnbindFromTree(bool aDeep,
                                       bool aNullParent)
 {
-  if (!mPaused && mNetworkState != nsIDOMHTMLMediaElement::NETWORK_EMPTY) {
-    Pause();
-  }
-
-  mElementInTreeState = ELEMENT_NOT_INTREE_HAD_INTREE;
+  mUnboundFromTree = true;
 
   nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
 
@@ -3662,6 +3648,15 @@ void HTMLMediaElement::UnbindFromTree(bool aDeep,
     MOZ_ASSERT(IsHidden());
     mDecoder->NotifyOwnerActivityChanged(false);
   }
+
+  RefPtr<HTMLMediaElement> self(this);
+  nsCOMPtr<nsIRunnable> task = NS_NewRunnableFunction([self] () {
+    if (self->mUnboundFromTree &&
+        self->mNetworkState != nsIDOMHTMLMediaElement::NETWORK_EMPTY) {
+      self->Pause();
+    }
+  });
+  RunInStableState(task);
 }
 
 /* static */
@@ -3669,20 +3664,8 @@ CanPlayStatus
 HTMLMediaElement::GetCanPlay(const nsAString& aType,
                              DecoderDoctorDiagnostics* aDiagnostics)
 {
-  nsContentTypeParser parser(aType);
-  nsAutoString mimeType;
-  nsresult rv = parser.GetType(mimeType);
-  if (NS_FAILED(rv))
-    return CANPLAY_NO;
-
-  nsAutoString codecs;
-  rv = parser.GetParameter("codecs", codecs);
-
-  NS_ConvertUTF16toUTF8 mimeTypeUTF8(mimeType);
-  return DecoderTraits::CanHandleMediaType(mimeTypeUTF8.get(),
-                                           NS_SUCCEEDED(rv),
-                                           codecs,
-                                           aDiagnostics);
+  MediaContentType contentType{aType};
+  return DecoderTraits::CanHandleContentType(contentType, aDiagnostics);
 }
 
 NS_IMETHODIMP
@@ -4989,11 +4972,8 @@ bool HTMLMediaElement::IsActive() const
 
 bool HTMLMediaElement::IsHidden() const
 {
-  if (mElementInTreeState == ELEMENT_NOT_INTREE_HAD_INTREE) {
-    return true;
-  }
-  nsIDocument* ownerDoc = OwnerDoc();
-  return !ownerDoc || ownerDoc->Hidden();
+  nsIDocument* ownerDoc;
+  return mUnboundFromTree || !(ownerDoc = OwnerDoc()) || ownerDoc->Hidden();
 }
 
 VideoFrameContainer* HTMLMediaElement::GetVideoFrameContainer()
@@ -5719,26 +5699,27 @@ ImageContainer* HTMLMediaElement::GetImageContainer()
   return container ? container->GetImageContainer() : nullptr;
 }
 
-bool
-HTMLMediaElement::MaybeCreateAudioChannelAgent()
+void
+HTMLMediaElement::CreateAudioChannelAgent()
 {
-  if (!mAudioChannelAgent) {
-    nsresult rv;
-    mAudioChannelAgent = do_CreateInstance("@mozilla.org/audiochannelagent;1", &rv);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return false;
-    }
-    MOZ_ASSERT(mAudioChannelAgent);
-    mAudioChannelAgent->InitWithWeakCallback(OwnerDoc()->GetInnerWindow(),
-                                             static_cast<int32_t>(mAudioChannel),
-                                             this);
+  if (mAudioChannelAgent) {
+    return;
   }
-  return true;
+
+  mAudioChannelAgent = new AudioChannelAgent();
+  mAudioChannelAgent->InitWithWeakCallback(OwnerDoc()->GetInnerWindow(),
+                                           static_cast<int32_t>(mAudioChannel),
+                                           this);
 }
 
 bool
 HTMLMediaElement::IsPlayingThroughTheAudioChannel() const
 {
+  // If we have an error, we are not playing.
+  if (mError) {
+    return false;
+  }
+
   // It might be resumed from remote, we should keep the audio channel agent.
   if (IsSuspendedByAudioChannel()) {
     return true;
@@ -5746,11 +5727,6 @@ HTMLMediaElement::IsPlayingThroughTheAudioChannel() const
 
   // Are we paused
   if (mPaused) {
-    return false;
-  }
-
-  // If we have an error, we are not playing.
-  if (mError) {
     return false;
   }
 
@@ -5764,6 +5740,11 @@ HTMLMediaElement::IsPlayingThroughTheAudioChannel() const
     return true;
   }
 
+  // If we are actually playing...
+  if (IsCurrentlyPlaying()) {
+    return true;
+  }
+
   // If we are seeking, we consider it as playing
   if (mPlayingThroughTheAudioChannelBeforeSeek) {
     return true;
@@ -5774,7 +5755,7 @@ HTMLMediaElement::IsPlayingThroughTheAudioChannel() const
     return true;
   }
 
-  return true;
+  return false;
 }
 
 void
@@ -5790,9 +5771,8 @@ HTMLMediaElement::UpdateAudioChannelPlayingState()
        return;
     }
 
-    if (MaybeCreateAudioChannelAgent()) {
-      NotifyAudioChannelAgent(mPlayingThroughTheAudioChannel);
-    }
+    CreateAudioChannelAgent();
+    NotifyAudioChannelAgent(mPlayingThroughTheAudioChannel);
   }
 }
 
@@ -6390,20 +6370,8 @@ HTMLMediaElement::IsCurrentlyPlaying() const
 {
   // We have playable data, but we still need to check whether data is "real"
   // current data.
-  if (mReadyState >= nsIDOMHTMLMediaElement::HAVE_CURRENT_DATA &&
-      !IsPlaybackEnded()) {
-
-    // Restart the video after ended, it needs to seek to the new position.
-    // In b2g, the cache is not large enough to store whole video data, so we
-    // need to download data again. In this case, although the ready state is
-    // "HAVE_CURRENT_DATA", it is the previous old data. Actually we are not
-    // yet have enough currently data.
-    if (mDecoder && mDecoder->IsSeeking() && !mPlayingBeforeSeek) {
-      return false;
-    }
-    return true;
-  }
-  return false;
+  return mReadyState >= nsIDOMHTMLMediaElement::HAVE_CURRENT_DATA &&
+         !IsPlaybackEnded();
 }
 
 void

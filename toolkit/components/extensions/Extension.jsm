@@ -79,7 +79,7 @@ const CATEGORY_EXTENSION_SCRIPTS_ADDON = "webextension-scripts-addon";
 
 let schemaURLs = new Set();
 
-if (!AppConstants.RELEASE_BUILD) {
+if (!AppConstants.RELEASE_OR_BETA) {
   schemaURLs.add("chrome://extensions/content/schemas/experiments.json");
 }
 
@@ -627,7 +627,7 @@ var UninstallObserver = {
 
       // Clear localStorage created by the extension
       let attrs = JSON.stringify({addonId: addon.id});
-      Services.obs.notifyObservers(null, "clear-origin-data", attrs);
+      Services.obs.notifyObservers(null, "clear-origin-attributes-data", attrs);
     }
 
     if (!this.leaveUuid) {
@@ -686,6 +686,10 @@ GlobalManager = {
 
     let schemaWrapper = {
       isChromeCompat,
+
+      get url() {
+        return context.uri.spec;
+      },
 
       get principal() {
         return context.principal;
@@ -902,15 +906,16 @@ this.ExtensionData = class {
 
       // FIXME: We need a way to do this without main thread IO.
 
-      this.rootURI.QueryInterface(Ci.nsIJARURI);
+      let uri = this.rootURI.QueryInterface(Ci.nsIJARURI);
 
-      let file = this.rootURI.JARFile.QueryInterface(Ci.nsIFileURL).file;
+      let file = uri.JARFile.QueryInterface(Ci.nsIFileURL).file;
       let zipReader = Cc["@mozilla.org/libjar/zip-reader;1"].createInstance(Ci.nsIZipReader);
       zipReader.open(file);
       try {
         let results = [];
 
         // Normalize the directory path.
+        path = `${uri.JAREntry}/${path}`;
         path = path.replace(/\/\/+/g, "/").replace(/^\/|\/$/g, "") + "/";
 
         // Escape pattern metacharacters.
@@ -948,7 +953,9 @@ this.ExtensionData = class {
 
       NetUtil.asyncFetch({uri, loadUsingSystemPrincipal: true}, (inputStream, status) => {
         if (!Components.isSuccessCode(status)) {
-          reject(new Error(status));
+          // Convert status code to a string
+          let e = Components.Exception("", status);
+          reject(new Error(`Error while loading '${uri}' (${e.name})`));
           return;
         }
         try {
@@ -1523,7 +1530,7 @@ this.Extension = class extends ExtensionData {
 
   readManifest() {
     return super.readManifest().then(manifest => {
-      if (AppConstants.RELEASE_BUILD) {
+      if (AppConstants.RELEASE_OR_BETA) {
         return manifest;
       }
 

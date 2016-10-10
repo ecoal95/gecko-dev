@@ -405,7 +405,9 @@ PacketFilter::Action TlsExtensionFilter::FilterExtensions(
     // Write out extension.
     offset = output->Write(offset, extension_type, 2);
     offset = output->Write(offset, source->len(), 2);
-    offset = output->Write(offset, *source);
+    if (source->len() > 0) {
+      offset = output->Write(offset, *source);
+    }
   }
   output->Truncate(offset);
 
@@ -478,6 +480,17 @@ PacketFilter::Action SelectiveDropFilter::Filter(const DataBuffer& input,
     return KEEP;
   }
   return ((1 << counter_++) & pattern_) ? DROP : KEEP;
+}
+
+PacketFilter::Action TlsInspectorClientHelloVersionSetter::FilterHandshake(
+    const HandshakeHeader& header, const DataBuffer& input,
+    DataBuffer* output) {
+  if (header.handshake_type() == kTlsHandshakeClientHello) {
+    *output = input;
+    output->Write(0, version_, 2);
+    return CHANGE;
+  }
+  return KEEP;
 }
 
 }  // namespace nss_test

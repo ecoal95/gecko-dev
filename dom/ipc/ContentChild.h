@@ -335,12 +335,6 @@ public:
 
   virtual bool DeallocPHandlerServiceChild(PHandlerServiceChild*) override;
 
-  virtual PCellBroadcastChild* AllocPCellBroadcastChild() override;
-
-  PCellBroadcastChild* SendPCellBroadcastConstructor(PCellBroadcastChild* aActor);
-
-  virtual bool DeallocPCellBroadcastChild(PCellBroadcastChild* aActor) override;
-
   virtual PSmsChild* AllocPSmsChild() override;
 
   virtual bool DeallocPSmsChild(PSmsChild*) override;
@@ -670,6 +664,16 @@ public:
 
   virtual bool
   RecvBlobURLUnregistration(const nsCString& aURI) override;
+
+  /**
+   * Helper function for protocols that use the GPU process when available.
+   * Overrides FatalError to just be a warning when communicating with the
+   * GPU process since we don't want to crash the content process when the
+   * GPU process crashes.
+   */
+  static void FatalErrorIfNotUsingGPUProcess(const char* const aProtocolName,
+                                             const char* const aErrorMsg,
+                                             base::ProcessId aOtherPid);
 
 private:
   static void ForceKillTimerCallback(nsITimer* aTimer, void* aClosure);
