@@ -1,5 +1,6 @@
 #!/bin/sh
 
+
 if [[ ! -d mozglue || ! -d servo ]]; then
   echo "Abort: It doesn't look like you're in an incubator repo."
   exit 1
