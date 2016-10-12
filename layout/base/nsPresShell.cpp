@@ -975,8 +975,9 @@ PresShell::Init(nsIDocument* aDocument,
     animCtrl->NotifyRefreshDriverCreated(GetPresContext()->RefreshDriver());
   }
 
-  mDocument->Timeline()->NotifyRefreshDriverCreated(GetPresContext()->
-                                                      RefreshDriver());
+  for (DocumentTimeline* timeline : mDocument->Timelines()) {
+    timeline->NotifyRefreshDriverCreated(GetPresContext()->RefreshDriver());
+  }
 
   // Get our activeness from the docShell.
   QueryIsActive();
@@ -1276,8 +1277,9 @@ PresShell::Destroy()
     if (mDocument->HasAnimationController()) {
       mDocument->GetAnimationController()->NotifyRefreshDriverDestroying(rd);
     }
-
-    mDocument->Timeline()->NotifyRefreshDriverDestroying(rd);
+    for (DocumentTimeline* timeline : mDocument->Timelines()) {
+      timeline->NotifyRefreshDriverDestroying(rd);
+    }
   }
 
   if (mPresContext) {
@@ -7657,7 +7659,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
           frame = nullptr;
         }
         // Implicit pointer capture for touch
-        if (sPointerEventImplicitCapture &&
+        if (frame && sPointerEventImplicitCapture &&
             pointerEvent->mMessage == ePointerDown &&
             pointerEvent->inputSource == nsIDOMMouseEvent::MOZ_SOURCE_TOUCH) {
           nsCOMPtr<nsIContent> targetContent;

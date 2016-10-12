@@ -34,6 +34,7 @@
 #include "prclist.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/CORSMode.h"
+#include "mozilla/LinkedList.h"
 #include "mozilla/StyleBackendType.h"
 #include "mozilla/StyleSheet.h"
 #include <bitset>                        // for member
@@ -2325,6 +2326,7 @@ public:
   virtual already_AddRefed<mozilla::dom::UndoManager> GetUndoManager() = 0;
 
   virtual mozilla::dom::DocumentTimeline* Timeline() = 0;
+  virtual mozilla::LinkedList<mozilla::dom::DocumentTimeline>& Timelines() = 0;
 
   virtual void GetAnimations(
       nsTArray<RefPtr<mozilla::dom::Animation>>& aAnimations) = 0;
@@ -2685,6 +2687,9 @@ public:
                                           const nsAString& aAttrName,
                                           const nsAString& aAttrValue);
   Element* GetBindingParent(nsINode& aNode);
+  void LoadBindingDocument(const nsAString& aURI,
+                           nsIPrincipal& aSubjectPrincipal,
+                           mozilla::ErrorResult& rv);
   void LoadBindingDocument(const nsAString& aURI,
                            const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
                            mozilla::ErrorResult& rv);
