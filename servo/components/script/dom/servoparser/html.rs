@@ -23,20 +23,20 @@ use dom::htmltemplateelement::HTMLTemplateElement;
 use dom::node::{document_from_node, window_from_node};
 use dom::node::Node;
 use dom::processinginstruction::ProcessingInstruction;
-use dom::servohtmlparser;
-use dom::servohtmlparser::{FragmentContext, ServoHTMLParser};
 use dom::text::Text;
 use html5ever::Attribute;
 use html5ever::serialize::{AttrRef, Serializable, Serializer};
 use html5ever::serialize::TraversalScope;
 use html5ever::serialize::TraversalScope::{ChildrenOnly, IncludeNode};
 use html5ever::tendril::StrTendril;
-use html5ever::tree_builder::{NextParserState, NodeOrText, QuirksMode, TreeSink};
+use html5ever::tokenizer::{Tokenizer as HtmlTokenizer, TokenizerOpts};
+use html5ever::tree_builder::{NextParserState, NodeOrText, QuirksMode};
+use html5ever::tree_builder::{TreeBuilder, TreeBuilderOpts, TreeSink};
 use msg::constellation_msg::PipelineId;
-use parse::Parser;
 use std::borrow::Cow;
 use std::io::{self, Write};
 use string_cache::QualName;
+use super::{LastChunkState, ServoParser, Sink, Tokenizer};
 use url::Url;
 
 fn insert(parent: &Node, reference_child: Option<&Node>, child: NodeOrText<JS<Node>>) {
@@ -53,7 +53,7 @@ fn insert(parent: &Node, reference_child: Option<&Node>, child: NodeOrText<JS<No
     }
 }
 
-impl<'a> TreeSink for servohtmlparser::Sink {
+impl<'a> TreeSink for Sink {
     type Output = Self;
     fn finish(self) -> Self { self }
 
@@ -163,7 +163,7 @@ impl<'a> TreeSink for servohtmlparser::Sink {
 
     fn reparent_children(&mut self, node: JS<Node>, new_parent: JS<Node>) {
         while let Some(ref child) = node.GetFirstChild() {
-            new_parent.AppendChild(child.r()).unwrap();
+            new_parent.AppendChild(&child).unwrap();
         }
 
     }
@@ -200,7 +200,7 @@ impl<'a> Serializable for &'a Node {
                 };
 
                 for handle in children {
-                    try!(handle.r().serialize(serializer, IncludeNode));
+                    try!((&*handle).serialize(serializer, IncludeNode));
                 }
 
                 if traversal_scope == IncludeNode {
@@ -211,7 +211,7 @@ impl<'a> Serializable for &'a Node {
 
             (ChildrenOnly, NodeTypeId::Document(_)) => {
                 for handle in node.children() {
-                    try!(handle.r().serialize(serializer, IncludeNode));
+                    try!((&*handle).serialize(serializer, IncludeNode));
                 }
                 Ok(())
             },
@@ -246,6 +246,14 @@ impl<'a> Serializable for &'a Node {
     }
 }
 
+/// FragmentContext is used only to pass this group of related values
+/// into functions.
+#[derive(Copy, Clone)]
+pub struct FragmentContext<'a> {
+    pub context_elem: &'a Node,
+    pub form_elem: Option<&'a Node>,
+}
+
 pub enum ParseContext<'a> {
     Fragment(FragmentContext<'a>),
     Owner(Option<PipelineId>),
@@ -255,11 +263,40 @@ pub fn parse_html(document: &Document,
                   input: DOMString,
                   url: Url,
                   context: ParseContext) {
+    let sink = Sink {
+        base_url: url,
+        document: JS::from_ref(document),
+    };
+
+    let options = TreeBuilderOpts {
+        ignore_missing_rules: true,
+        .. Default::default()
+    };
+
     let parser = match context {
-        ParseContext::Owner(owner) =>
-            ServoHTMLParser::new(Some(url), document, owner),
-        ParseContext::Fragment(fc) =>
-            ServoHTMLParser::new_for_fragment(Some(url), document, fc),
+        ParseContext::Owner(owner) => {
+            let tb = TreeBuilder::new(sink, options);
+            let tok = HtmlTokenizer::new(tb, Default::default());
+
+            ServoParser::new(
+                document, owner, Tokenizer::HTML(tok), LastChunkState::NotReceived)
+        },
+        ParseContext::Fragment(fc) => {
+            let tb = TreeBuilder::new_for_fragment(
+                sink,
+                JS::from_ref(fc.context_elem),
+                fc.form_elem.map(|n| JS::from_ref(n)),
+                options);
+
+            let tok_options = TokenizerOpts {
+                initial_state: Some(tb.tokenizer_state_for_context_elem()),
+                .. Default::default()
+            };
+            let tok = HtmlTokenizer::new(tb, tok_options);
+
+            ServoParser::new(
+                document, None, Tokenizer::HTML(tok), LastChunkState::Received)
+        }
     };
     parser.parse_chunk(String::from(input));
 }
@@ -270,12 +307,11 @@ pub fn parse_html_fragment(context_node: &Node,
                            output: &Node) {
     let window = window_from_node(context_node);
     let context_document = document_from_node(context_node);
-    let context_document = context_document.r();
     let url = context_document.url();
 
     // Step 1.
     let loader = DocumentLoader::new(&*context_document.loader());
-    let document = Document::new(window.r(), None, Some(url.clone()),
+    let document = Document::new(&window, None, Some(url.clone()),
                                  IsHTMLDocument::HTMLDocument,
                                  None, None,
                                  DocumentSource::FromParser,
@@ -292,11 +328,11 @@ pub fn parse_html_fragment(context_node: &Node,
         context_elem: context_node,
         form_elem: form.r(),
     };
-    parse_html(document.r(), input, url.clone(), ParseContext::Fragment(fragment_context));
+    parse_html(&document, input, url.clone(), ParseContext::Fragment(fragment_context));
 
     // Step 14.
     let root_element = document.GetDocumentElement().expect("no document element");
     for child in root_element.upcast::<Node>().children() {
-        output.AppendChild(child.r()).unwrap();
+        output.AppendChild(&child).unwrap();
     }
 }

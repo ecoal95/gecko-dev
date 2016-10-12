@@ -30,7 +30,7 @@ use logical_geometry::WritingMode;
 use parser::{ParserContext, ParserContextExtraData};
 use selector_matching::{ApplicableDeclarationBlock, ApplicableDeclarationBlockReadGuard};
 use stylesheets::Origin;
-use values::LocalToCss;
+#[cfg(feature = "servo")] use values::LocalToCss;
 use values::HasViewportPercentage;
 use values::computed::{self, ToComputedValue};
 use cascade_info::CascadeInfo;
@@ -767,7 +767,7 @@ impl PropertyDeclaration {
                                 return PropertyDeclarationParseResult::UnknownProperty
                             }
                         % endif
-                        % if property.experimental:
+                        % if property.experimental and product == "servo":
                             if !::util::prefs::PREFS.get("${property.experimental}")
                                 .as_boolean().unwrap_or(false) {
                                 return PropertyDeclarationParseResult::ExperimentalProperty
@@ -797,7 +797,7 @@ impl PropertyDeclaration {
                             return PropertyDeclarationParseResult::UnknownProperty
                         }
                     % endif
-                    % if shorthand.experimental:
+                    % if shorthand.experimental and product == "servo":
                         if !::util::prefs::PREFS.get("${shorthand.experimental}")
                             .as_boolean().unwrap_or(false) {
                             return PropertyDeclarationParseResult::ExperimentalProperty

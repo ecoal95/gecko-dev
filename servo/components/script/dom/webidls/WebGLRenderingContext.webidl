@@ -41,7 +41,7 @@ dictionary WebGLContextAttributes {
     GLboolean failIfMajorPerformanceCaveat = false;
 };
 
-[NoInterfaceObject, Exposed=(Window,Worker)]
+[NoInterfaceObject]
 interface WebGLRenderingContextBase
 {
 
@@ -713,14 +713,23 @@ interface WebGLRenderingContextBase
     //                      Float32Array value);
     //void uniformMatrix2fv(WebGLUniformLocation? location, GLboolean transpose,
     //                      sequence<GLfloat> value);
+    [Throws]
+    void uniformMatrix2fv(WebGLUniformLocation? location, GLboolean transpose,
+                          object v);
     //void uniformMatrix3fv(WebGLUniformLocation? location, GLboolean transpose,
     //                      Float32Array value);
     //void uniformMatrix3fv(WebGLUniformLocation? location, GLboolean transpose,
     //                      sequence<GLfloat> value);
+    [Throws]
+    void uniformMatrix3fv(WebGLUniformLocation? location, GLboolean transpose,
+                          object v);
     //void uniformMatrix4fv(WebGLUniformLocation? location, GLboolean transpose,
     //                      Float32Array value);
     //void uniformMatrix4fv(WebGLUniformLocation? location, GLboolean transpose,
     //                      sequence<GLfloat> value);
+    [Throws]
+    void uniformMatrix4fv(WebGLUniformLocation? location, GLboolean transpose,
+                          object v);
 
     void useProgram(WebGLProgram? program);
     void validateProgram(WebGLProgram? program);
@@ -753,7 +762,6 @@ interface WebGLRenderingContextBase
     void viewport(GLint x, GLint y, GLsizei width, GLsizei height);
 };
 
-[Exposed=(Window,Worker)]
 interface WebGLRenderingContext
 {
 };

@@ -87,6 +87,13 @@ impl<T: Reflectable> JS<T> {
     }
 }
 
+impl<'root, T: Reflectable + 'root> RootedReference<'root> for JS<T> {
+    type Ref = &'root T;
+    fn r(&'root self) -> &'root T {
+        &self
+    }
+}
+
 impl<T: Reflectable> Deref for JS<T> {
     type Target = T;
 
@@ -444,56 +451,42 @@ impl<T: Reflectable> LayoutJS<T> {
         debug_assert!(thread_state::get().is_layout());
         *self.ptr
     }
-}
 
-/// Get an `&T` out of a `Rc<T>`
-pub trait RootedRcReference<T> {
-    /// Obtain a safe reference to the wrapped non-JS owned value.
-    fn r(&self) -> &T;
-}
-
-impl<T: Reflectable> RootedRcReference<T> for Rc<T> {
-    fn r(&self) -> &T {
-        &*self
+    /// Returns a reference to the interior of this JS object. This method is
+    /// safe to call because it originates from the layout thread, and it cannot
+    /// mutate DOM nodes.
+    pub fn get_for_script(&self) -> &T {
+        debug_assert!(thread_state::get().is_script());
+        unsafe { &**self.ptr }
     }
 }
 
-/// Get an `Option<&T>` out of an `Option<Root<T>>`
-pub trait RootedReference<T> {
-    /// Obtain a safe optional reference to the wrapped JS owned-value that
-    /// cannot outlive the lifetime of this root.
-    fn r(&self) -> Option<&T>;
+/// Get a reference out of a rooted value.
+pub trait RootedReference<'root> {
+    /// The type of the reference.
+    type Ref: 'root;
+    /// Obtain a reference out of the rooted value.
+    fn r(&'root self) -> Self::Ref;
 }
 
-impl<T: Reflectable> RootedReference<T> for Option<Rc<T>> {
-    fn r(&self) -> Option<&T> {
-        self.as_ref().map(|root| &**root)
+impl<'root, T: JSTraceable + Reflectable + 'root> RootedReference<'root> for [JS<T>] {
+    type Ref = &'root [&'root T];
+    fn r(&'root self) -> &'root [&'root T] {
+        unsafe { mem::transmute(self) }
     }
 }
 
-impl<T: Reflectable> RootedReference<T> for Option<Root<T>> {
-    fn r(&self) -> Option<&T> {
-        self.as_ref().map(|root| root.r())
+impl<'root, T: Reflectable + 'root> RootedReference<'root> for Rc<T> {
+    type Ref = &'root T;
+    fn r(&'root self) -> &'root T {
+        self
     }
 }
 
-/// Get an `Option<&T> out of an `Option<JS<T>>`
-impl<T: Reflectable> RootedReference<T> for Option<JS<T>> {
-    fn r(&self) -> Option<&T> {
-        self.as_ref().map(|inner| &**inner)
-    }
-}
-
-/// Get an `Option<Option<&T>>` out of an `Option<Option<Root<T>>>`
-pub trait OptionalRootedReference<T> {
-    /// Obtain a safe optional optional reference to the wrapped JS owned-value
-    /// that cannot outlive the lifetime of this root.
-    fn r(&self) -> Option<Option<&T>>;
-}
-
-impl<T: Reflectable> OptionalRootedReference<T> for Option<Option<Root<T>>> {
-    fn r(&self) -> Option<Option<&T>> {
-        self.as_ref().map(|inner| inner.r())
+impl<'root, T: RootedReference<'root> + 'root> RootedReference<'root> for Option<T> {
+    type Ref = Option<T::Ref>;
+    fn r(&'root self) -> Option<T::Ref> {
+        self.as_ref().map(RootedReference::r)
     }
 }
 
@@ -615,11 +608,12 @@ impl<T: Reflectable> Root<T> {
     pub fn from_ref(unrooted: &T) -> Root<T> {
         Root::new(unsafe { NonZero::new(&*unrooted) })
     }
+}
 
-    /// Obtain a safe reference to the wrapped JS owned-value that cannot
-    /// outlive the lifetime of this root.
-    pub fn r(&self) -> &T {
-        &**self
+impl<'root, T: Reflectable + 'root> RootedReference<'root> for Root<T> {
+    type Ref = &'root T;
+    fn r(&'root self) -> &'root T {
+        self
     }
 }
 

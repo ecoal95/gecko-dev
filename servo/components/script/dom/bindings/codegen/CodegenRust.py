@@ -2748,7 +2748,8 @@ assert!((*cache)[PrototypeList::Constructor::%(id)s as usize].is_null());
                               interface.get());
 """ % {"id": name, "name": str_to_const_array(name)})
 
-        if len(self.descriptor.prototypeChain) == 1:
+        parentName = self.descriptor.getParentName()
+        if not parentName:
             if self.descriptor.interface.getExtendedAttribute("ExceptionClass"):
                 getPrototypeProto = "prototype_proto.set(JS_GetErrorPrototype(cx))"
             elif self.descriptor.interface.isIteratorInterface():
@@ -2757,7 +2758,7 @@ assert!((*cache)[PrototypeList::Constructor::%(id)s as usize].is_null());
                 getPrototypeProto = "prototype_proto.set(JS_GetObjectPrototype(cx, global))"
         else:
             getPrototypeProto = ("%s::GetProtoObject(cx, global, prototype_proto.handle_mut())" %
-                                 toBindingNamespace(self.descriptor.getParentName()))
+                                 toBindingNamespace(parentName))
 
         code = [CGGeneric("""\
 rooted!(in(cx) let mut prototype_proto = ptr::null_mut());
@@ -3255,12 +3256,7 @@ class CGPerSignatureCall(CGThing):
         return "argc"
 
     def getArguments(self):
-        def process(arg, i):
-            argVal = "arg" + str(i)
-            if arg.type.isGeckoInterface() and not arg.type.unroll().inner.isCallback():
-                argVal += ".r()"
-            return argVal
-        return [(a, process(a, i)) for (i, a) in enumerate(self.arguments)]
+        return [(a, process_arg("arg" + str(i), a)) for (i, a) in enumerate(self.arguments)]
 
     def isFallible(self):
         return 'infallible' not in self.extendedAttributes
@@ -4650,12 +4646,7 @@ class CGProxySpecialOperation(CGPerSignatureCall):
             self.cgRoot.prepend(CGGeneric("rooted!(in(cx) let value = desc.value);"))
 
     def getArguments(self):
-        def process(arg):
-            argVal = arg.identifier.name
-            if arg.type.isGeckoInterface() and not arg.type.unroll().inner.isCallback():
-                argVal += ".r()"
-            return argVal
-        args = [(a, process(a)) for a in self.arguments]
+        args = [(a, process_arg(a.identifier.name, a)) for a in self.arguments]
         return args
 
     def wrap_return_value(self):
@@ -5514,9 +5505,7 @@ def generate_imports(config, cgthings, descriptors, callbacks=None, dictionaries
         'dom::bindings::iterable::Iterable',
         'dom::bindings::iterable::IteratorType',
         'dom::bindings::js::JS',
-        'dom::bindings::js::OptionalRootedReference',
         'dom::bindings::js::Root',
-        'dom::bindings::js::RootedRcReference',
         'dom::bindings::js::RootedReference',
         'dom::bindings::namespace::NamespaceObjectClass',
         'dom::bindings::namespace::create_namespace_object',
@@ -6772,6 +6761,15 @@ class CGIterableMethodGenerator(CGGeneric):
 
 def camel_to_upper_snake(s):
     return "_".join(m.group(0).upper() for m in re.finditer("[A-Z][a-z]*", s))
+
+
+def process_arg(expr, arg):
+    if arg.type.isGeckoInterface() and not arg.type.unroll().inner.isCallback():
+        if arg.type.nullable() or arg.type.isSequence() or arg.optional:
+            expr += ".r()"
+        else:
+            expr = "&" + expr
+    return expr
 
 
 class GlobalGenRoots():

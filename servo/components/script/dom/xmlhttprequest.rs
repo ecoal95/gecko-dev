@@ -28,6 +28,8 @@ use dom::globalscope::GlobalScope;
 use dom::headers::is_forbidden_header_name;
 use dom::htmlformelement::{encode_multipart_form_data, generate_boundary};
 use dom::progressevent::ProgressEvent;
+use dom::servoparser::html::{ParseContext, parse_html};
+use dom::servoparser::xml::{self, parse_xml};
 use dom::window::Window;
 use dom::workerglobalscope::WorkerGlobalScope;
 use dom::xmlhttprequesteventtarget::XMLHttpRequestEventTarget;
@@ -53,8 +55,6 @@ use net_traits::CoreResourceMsg::Fetch;
 use net_traits::request::{CredentialsMode, Destination, RequestInit, RequestMode};
 use net_traits::trim_http_whitespace;
 use network_listener::{NetworkListener, PreInvoke};
-use parse::html::{ParseContext, parse_html};
-use parse::xml::{self, parse_xml};
 use script_runtime::ScriptChan;
 use std::ascii::AsciiExt;
 use std::borrow::ToOwned;
@@ -306,7 +306,7 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
              username: Option<USVString>, password: Option<USVString>) -> ErrorResult {
         // Step 1
         if let Some(window) = Root::downcast::<Window>(self.global()) {
-            if !window.Document().r().is_fully_active() {
+            if !window.Document().is_fully_active() {
                 return Err(Error::InvalidState);
             }
         }
@@ -1111,7 +1111,7 @@ impl XMLHttpRequest {
         // Step 3, 4
         let bytes = self.response.borrow().to_vec();
         let blob = Blob::new(&self.global(), BlobImpl::new_from_bytes(bytes), mime);
-        self.response_blob.set(Some(blob.r()));
+        self.response_blob.set(Some(&blob));
         blob
     }
 
@@ -1156,7 +1156,7 @@ impl XMLHttpRequest {
         // Step 9
         temp_doc.set_encoding(charset);
         // Step 13
-        self.response_xml.set(Some(temp_doc.r()));
+        self.response_xml.set(Some(&temp_doc));
         return self.response_xml.get();
     }
 
@@ -1199,7 +1199,7 @@ impl XMLHttpRequest {
         let decoded = charset.decode(&self.response.borrow(), DecoderTrap::Replace).unwrap();
         let document = self.new_doc(IsHTMLDocument::HTMLDocument);
         // TODO: Disable scripting while parsing
-        parse_html(document.r(),
+        parse_html(&document,
                    DOMString::from(decoded),
                    wr.get_url(),
                    ParseContext::Owner(Some(wr.pipeline_id())));
@@ -1212,7 +1212,7 @@ impl XMLHttpRequest {
         let decoded = charset.decode(&self.response.borrow(), DecoderTrap::Replace).unwrap();
         let document = self.new_doc(IsHTMLDocument::NonHTMLDocument);
         // TODO: Disable scripting while parsing
-        parse_xml(document.r(),
+        parse_xml(&document,
                   DOMString::from(decoded),
                   wr.get_url(),
                   xml::ParseContext::Owner(Some(wr.pipeline_id())));
@@ -1223,7 +1223,6 @@ impl XMLHttpRequest {
         let wr = self.global();
         let win = wr.as_window();
         let doc = win.Document();
-        let doc = doc.r();
         let docloader = DocumentLoader::new(&*doc.loader());
         let base = wr.get_url();
         let parsed_url = match base.join(&self.ResponseURL().0) {

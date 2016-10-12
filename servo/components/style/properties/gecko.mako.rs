@@ -23,7 +23,7 @@ use gecko_bindings::bindings::{Gecko_SetNullImageValue, Gecko_SetGradientImageVa
 use gecko_bindings::bindings::{Gecko_EnsureImageLayersLength, Gecko_CreateGradient};
 use gecko_bindings::bindings::{Gecko_CopyImageValueFrom, Gecko_CopyFontFamilyFrom};
 use gecko_bindings::bindings::{Gecko_FontFamilyList_AppendGeneric, Gecko_FontFamilyList_AppendNamed};
-use gecko_bindings::bindings::{Gecko_FontFamilyList_Clear, Gecko_InitializeImageLayer};
+use gecko_bindings::bindings::{Gecko_FontFamilyList_Clear};
 use gecko_bindings::bindings::ServoComputedValuesBorrowedOrNull;
 use gecko_bindings::structs;
 use gecko_bindings::sugar::ns_style_coord::{CoordDataValue, CoordData, CoordDataMut};
@@ -451,7 +451,7 @@ impl Debug for ${style_struct.gecko_struct_name} {
     # These live in an nsFont member in Gecko. Should be straightforward to do manually.
     force_stub += ["font-kerning", "font-variant"]
     # These have unusual representations in gecko.
-    force_stub += ["list-style-type", "text-overflow"]
+    force_stub += ["list-style-type"]
     # In a nsTArray, have to be done manually, but probably not too much work
     # (the "filling them", not the "making them work")
     force_stub += ["animation-name", "animation-duration",
@@ -468,8 +468,6 @@ impl Debug for ${style_struct.gecko_struct_name} {
                    # transition
                    "transition-duration", "transition-timing-function",
                    "transition-property", "transition-delay",
-
-                   "column-count", # column
                    ]
 
     # Types used with predefined_type()-defined properties that we can auto-generate.
@@ -951,9 +949,12 @@ fn static_assert() {
         image_layers_field = "mImage" if shorthand == "background" else "mMask"
     %>
     pub fn copy_${shorthand}_${name}_from(&mut self, other: &Self) {
+        use gecko_bindings::structs::nsStyleImageLayers_LayerType as LayerType;
+
         unsafe {
             Gecko_EnsureImageLayersLength(&mut self.gecko.${image_layers_field},
-                                          other.gecko.${image_layers_field}.mLayers.len());
+                                          other.gecko.${image_layers_field}.mLayers.len(),
+                                          LayerType::${shorthand.title()});
         }
         for (layer, other) in self.gecko.${image_layers_field}.mLayers.iter_mut()
                                   .zip(other.gecko.${image_layers_field}.mLayers.iter())
@@ -967,8 +968,11 @@ fn static_assert() {
 
     pub fn set_${shorthand}_${name}(&mut self,
                                     v: longhands::${shorthand}_${name}::computed_value::T) {
+        use gecko_bindings::structs::nsStyleImageLayers_LayerType as LayerType;
+
         unsafe {
-          Gecko_EnsureImageLayersLength(&mut self.gecko.${image_layers_field}, v.0.len());
+          Gecko_EnsureImageLayersLength(&mut self.gecko.${image_layers_field}, v.0.len(),
+                                        LayerType::${shorthand.title()});
         }
 
         self.gecko.${image_layers_field}.${field_name}Count = v.0.len() as u32;
@@ -1034,6 +1038,8 @@ fn static_assert() {
     </%self:simple_image_array_property>
 
     pub fn copy_${shorthand}_position_from(&mut self, other: &Self) {
+        use gecko_bindings::structs::nsStyleImageLayers_LayerType as LayerType;
+
         self.gecko.${image_layers_field}.mPositionXCount
                 = cmp::min(1, other.gecko.${image_layers_field}.mPositionXCount);
         self.gecko.${image_layers_field}.mPositionYCount
@@ -1042,7 +1048,8 @@ fn static_assert() {
             other.gecko.${image_layers_field}.mLayers.mFirstElement.mPosition;
         unsafe {
             Gecko_EnsureImageLayersLength(&mut self.gecko.${image_layers_field},
-                                          other.gecko.${image_layers_field}.mLayers.len());
+                                          other.gecko.${image_layers_field}.mLayers.len(),
+                                          LayerType::${shorthand.title()});
         }
         for (layer, other) in self.gecko.${image_layers_field}.mLayers.iter_mut()
                                   .zip(other.gecko.${image_layers_field}.mLayers.iter())
@@ -1079,8 +1086,11 @@ fn static_assert() {
 
     pub fn set_${shorthand}_position(&mut self,
                                      v: longhands::${shorthand}_position::computed_value::T) {
+        use gecko_bindings::structs::nsStyleImageLayers_LayerType as LayerType;
+
         unsafe {
-          Gecko_EnsureImageLayersLength(&mut self.gecko.${image_layers_field}, v.0.len());
+          Gecko_EnsureImageLayersLength(&mut self.gecko.${image_layers_field}, v.0.len(),
+                                        LayerType::${shorthand.title()});
         }
 
         self.gecko.${image_layers_field}.mPositionXCount = v.0.len() as u32;
@@ -1180,8 +1190,8 @@ fn static_assert() {
         use gecko_bindings::structs::{NS_STYLE_GRADIENT_SIZE_CLOSEST_SIDE, NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER};
         use gecko_bindings::structs::{NS_STYLE_GRADIENT_SIZE_FARTHEST_SIDE, NS_STYLE_GRADIENT_SIZE_EXPLICIT_SIZE};
         use gecko_bindings::structs::nsStyleCoord;
-        use values::computed::{Image, Gradient, GradientKind, GradientShape, Length, LengthOrKeyword};
-        use values::computed::{LengthOrPercentage, LengthOrPercentageOrKeyword};
+        use values::computed::{Image, Gradient, GradientKind, GradientShape, LengthOrKeyword};
+        use values::computed::LengthOrPercentageOrKeyword;
         use values::specified::AngleOrCorner;
         use values::specified::{HorizontalDirection, SizeKeyword, VerticalDirection};
         use cssparser::Color as CSSColor;
@@ -1346,10 +1356,8 @@ fn static_assert() {
                 Gecko_SetNullImageValue(&mut image.mImage)
             }
             // XXXManishearth clear mSourceURI for masks
-            Gecko_EnsureImageLayersLength(&mut self.gecko.${image_layers_field}, images.0.len());
-            for image in &mut self.gecko.${image_layers_field}.mLayers {
-                Gecko_InitializeImageLayer(image, LayerType::${shorthand.title()});
-            }
+            Gecko_EnsureImageLayersLength(&mut self.gecko.${image_layers_field}, images.0.len(),
+                                          LayerType::${shorthand.title()});
         }
 
         self.gecko.${image_layers_field}.mImageCount = images.0.len() as u32;
@@ -1620,8 +1628,6 @@ fn static_assert() {
     <%call expr="impl_coord_copy('letter_spacing', 'mLetterSpacing')"></%call>
 
     pub fn set_word_spacing(&mut self, v: longhands::word_spacing::computed_value::T) {
-        use values::computed::LengthOrPercentage::*;
-
         match v.0 {
             Some(lop) => self.gecko.mWordSpacing.set(lop),
             // https://drafts.csswg.org/css-text-3/#valdef-word-spacing-normal
@@ -1634,7 +1640,7 @@ fn static_assert() {
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="Text"
-                  skip_longhands="text-decoration-color text-decoration-line"
+                  skip_longhands="text-decoration-color text-decoration-line text-overflow"
                   skip_additionals="*">
 
     ${impl_color("text_decoration_color", "mTextDecorationColor", need_clone=True)}
@@ -1654,6 +1660,62 @@ fn static_assert() {
     }
 
     ${impl_simple_copy('text_decoration_line', 'mTextDecorationLine')}
+
+
+    fn clear_overflow_sides_if_string(&mut self) {
+        use gecko_bindings::structs::nsStyleTextOverflowSide;
+        use nsstring::nsString;
+        fn clear_if_string(side: &mut nsStyleTextOverflowSide) {
+            if side.mType == structs::NS_STYLE_TEXT_OVERFLOW_STRING as u8 {
+                side.mString.assign(&nsString::new());
+                side.mType = structs::NS_STYLE_TEXT_OVERFLOW_CLIP as u8;
+            }
+        }
+        clear_if_string(&mut self.gecko.mTextOverflow.mLeft);
+        clear_if_string(&mut self.gecko.mTextOverflow.mRight);
+    }
+    pub fn set_text_overflow(&mut self, v: longhands::text_overflow::computed_value::T) {
+        use gecko_bindings::structs::nsStyleTextOverflowSide;
+        use properties::longhands::text_overflow::{SpecifiedValue, Side};
+
+        fn set(side: &mut nsStyleTextOverflowSide, value: &Side) {
+            use nsstring::nsCString;
+            let ty = match *value {
+                Side::Clip => structs::NS_STYLE_TEXT_OVERFLOW_CLIP,
+                Side::Ellipsis => structs::NS_STYLE_TEXT_OVERFLOW_ELLIPSIS,
+                Side::String(ref s) => {
+                    side.mString.assign_utf8(&nsCString::from(&**s));
+                    structs::NS_STYLE_TEXT_OVERFLOW_STRING
+                }
+            };
+            side.mType = ty as u8;
+        }
+
+        self.clear_overflow_sides_if_string();
+        if v.second.is_none() {
+            self.gecko.mTextOverflow.mLogicalDirections = true;
+        }
+
+        let SpecifiedValue { ref first, ref second } = v;
+        let second = second.as_ref().unwrap_or(&first);
+
+        set(&mut self.gecko.mTextOverflow.mLeft, first);
+        set(&mut self.gecko.mTextOverflow.mRight, second);
+    }
+
+    pub fn copy_text_overflow_from(&mut self, other: &Self) {
+        use gecko_bindings::structs::nsStyleTextOverflowSide;
+        fn set(side: &mut nsStyleTextOverflowSide, other: &nsStyleTextOverflowSide) {
+            if other.mType == structs::NS_STYLE_TEXT_OVERFLOW_STRING as u8 {
+                side.mString.assign(&other.mString)
+            }
+            side.mType = other.mType
+        }
+        self.clear_overflow_sides_if_string();
+        set(&mut self.gecko.mTextOverflow.mLeft, &other.gecko.mTextOverflow.mLeft);
+        set(&mut self.gecko.mTextOverflow.mRight, &other.gecko.mTextOverflow.mRight);
+        self.gecko.mTextOverflow.mLogicalDirections = other.gecko.mTextOverflow.mLogicalDirections;
+    }
 
     #[inline]
     pub fn has_underline(&self) -> bool {
@@ -1911,7 +1973,7 @@ clip-path
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="Column"
-                  skip_longhands="column-width">
+                  skip_longhands="column-width column-count">
 
     pub fn set_column_width(&mut self, v: longhands::column_width::computed_value::T) {
         match v.0 {
@@ -1921,6 +1983,17 @@ clip-path
     }
 
     ${impl_coord_copy('column_width', 'mColumnWidth')}
+
+    pub fn set_column_count(&mut self, v: longhands::column_count::computed_value::T) {
+        use gecko_bindings::structs::{NS_STYLE_COLUMN_COUNT_AUTO, nsStyleColumn_kMaxColumnCount};
+
+        self.gecko.mColumnCount = match v.0 {
+            Some(number) => cmp::min(number, nsStyleColumn_kMaxColumnCount),
+            None => NS_STYLE_COLUMN_COUNT_AUTO
+        };
+    }
+
+    ${impl_simple_copy('column_count', 'mColumnCount')}
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="Counters"
