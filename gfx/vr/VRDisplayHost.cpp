@@ -19,7 +19,7 @@ using namespace mozilla;
 using namespace mozilla::gfx;
 using namespace mozilla::layers;
 
-VRDisplayHost::VRDisplayHost(VRDisplayType aType)
+VRDisplayHost::VRDisplayHost(VRDeviceType aType)
   : mInputFrameID(0)
 {
   MOZ_COUNT_CTOR(VRDisplayHost);
@@ -72,6 +72,12 @@ VRDisplayHost::SubmitFrame(VRLayerParent* aLayer, const int32_t& aInputFrameID,
   PTextureParent* aTexture, const gfx::Rect& aLeftEyeRect,
   const gfx::Rect& aRightEyeRect)
 {
+  // aInputFrameID is no longer controlled by content with the WebVR 1.1 API
+  // update; however, we will later use this code to enable asynchronous
+  // submission of multiple layers to be composited.  This will enable
+  // us to build browser UX that remains responsive even when content does
+  // not consistently submit frames.
+
   int32_t inputFrameID = aInputFrameID;
   if (inputFrameID == 0) {
     inputFrameID = mInputFrameID;
@@ -137,4 +143,16 @@ VRDisplayHost::CheckClearDisplayInfoDirty()
   }
   mLastUpdateDisplayInfo = mDisplayInfo;
   return true;
+}
+
+VRControllerHost::VRControllerHost(VRDeviceType aType)
+{
+  MOZ_COUNT_CTOR(VRControllerHost);
+  mControllerInfo.mType = aType;
+  mControllerInfo.mControllerID = VRDisplayManager::AllocateDisplayID();
+}
+
+VRControllerHost::~VRControllerHost()
+{
+  MOZ_COUNT_DTOR(VRControllerHost);
 }

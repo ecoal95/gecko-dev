@@ -345,7 +345,6 @@ class BuildOptionParser(object):
         'asan': 'builds/releng_sub_%s_configs/%s_asan.py',
         'asan-tc': 'builds/releng_sub_%s_configs/%s_asan_tc.py',
         'tsan': 'builds/releng_sub_%s_configs/%s_tsan.py',
-        'b2g-debug': 'b2g/releng_sub_%s_configs/%s_debug.py',
         'cross-debug': 'builds/releng_sub_%s_configs/%s_cross_debug.py',
         'cross-opt': 'builds/releng_sub_%s_configs/%s_cross_opt.py',
         'debug': 'builds/releng_sub_%s_configs/%s_debug.py',
@@ -354,10 +353,7 @@ class BuildOptionParser(object):
         'nostylo-and-debug': 'builds/releng_sub_%s_configs/%s_nostylo_and_debug.py',
         'nostylo': 'builds/releng_sub_%s_configs/%s_nostylo.py',
         'stat-and-debug': 'builds/releng_sub_%s_configs/%s_stat_and_debug.py',
-        'mulet': 'builds/releng_sub_%s_configs/%s_mulet.py',
         'code-coverage': 'builds/releng_sub_%s_configs/%s_code_coverage.py',
-        'graphene': 'builds/releng_sub_%s_configs/%s_graphene.py',
-        'horizon': 'builds/releng_sub_%s_configs/%s_horizon.py',
         'source': 'builds/releng_sub_%s_configs/%s_source.py',
         'api-15-gradle-dependencies': 'builds/releng_sub_%s_configs/%s_api_15_gradle_dependencies.py',
         'api-15': 'builds/releng_sub_%s_configs/%s_api_15.py',
@@ -821,7 +817,7 @@ or run without that action (ie: --no-{action})"
             return self.repo_path
         c = self.config
 
-        # unlike b2g, we actually supply the repo in mozharness so if it's in
+        # we actually supply the repo in mozharness so if it's in
         #  the config, we use that (automation does not require it in
         # buildbot props)
         if not c.get('repo_path'):
@@ -1156,8 +1152,6 @@ or run without that action (ie: --no-{action})"
          This method is used both to figure out what revision to check out and
          to figure out what revision *was* checked out.
         """
-        # this is basically a copy from b2g_build.py
-        # TODO get b2g_build.py to use this version of query_revision
         revision = None
         if 'revision' in self.buildbot_properties:
             revision = self.buildbot_properties['revision']
@@ -1995,7 +1989,7 @@ or run without that action (ie: --no-{action})"
         # Contains the url to a manifest describing the test packages required
         # for each unittest harness.
         # For the moment this property is only set on desktop builds. Android
-        # and b2g builds find the packages manifest based on the upload
+        # builds find the packages manifest based on the upload
         # directory of the installer.
         test_packages_url = self.query_buildbot_property('testPackagesUrl')
         pgo_build = c.get('pgo_build', False) or self._compile_against_pgo()

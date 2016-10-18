@@ -131,7 +131,7 @@ FindAnimationsForCompositor(const nsIFrame* aFrame,
     MOZ_ASSERT(effect && effect->GetAnimation());
     Animation* animation = effect->GetAnimation();
 
-    if (!animation->IsPlaying()) {
+    if (!animation->IsPlayableOnCompositor()) {
       continue;
     }
 
@@ -148,7 +148,7 @@ FindAnimationsForCompositor(const nsIFrame* aFrame,
       return false;
     }
 
-    if (!effect->HasAnimationOfProperty(aProperty)) {
+    if (!effect->HasEffectiveAnimationOfProperty(aProperty)) {
       continue;
     }
 
@@ -175,6 +175,11 @@ EffectCompositor::RequestRestyle(dom::Element* aElement,
 {
   if (!mPresContext) {
     // Pres context will be null after the effect compositor is disconnected.
+    return;
+  }
+
+  // Ignore animations on orphaned elements.
+  if (!aElement->IsInComposedDoc()) {
     return;
   }
 
@@ -417,7 +422,11 @@ EffectCompositor::AddStyleUpdatesTo(RestyleTracker& aTracker)
     nsTArray<PseudoElementHashEntry::KeyType> elementsToRestyle(
       elementSet.Count());
     for (auto iter = elementSet.Iter(); !iter.Done(); iter.Next()) {
-      elementsToRestyle.AppendElement(iter.Key());
+      // Skip animations on elements that have been orphaned since they
+      // requested a restyle.
+      if (iter.Key().mElement->IsInComposedDoc()) {
+        elementsToRestyle.AppendElement(iter.Key());
+      }
     }
 
     for (auto& pseudoElem : elementsToRestyle) {

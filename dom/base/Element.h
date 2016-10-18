@@ -136,9 +136,8 @@ class EventStateManager;
 namespace dom {
 
 class Animation;
-class CustomElementsRegistry;
+class CustomElementRegistry;
 class Link;
-class UndoManager;
 class DOMRect;
 class DOMRectList;
 class DestinationInsertionPointList;
@@ -427,7 +426,7 @@ private:
   friend class ::nsFocusManager;
 
   // Allow CusomtElementRegistry to call AddStates.
-  friend class CustomElementsRegistry;
+  friend class CustomElementRegistry;
 
   // Also need to allow Link to call UpdateLinkState.
   friend class Link;
@@ -748,17 +747,15 @@ public:
       aError.Throw(NS_ERROR_DOM_INVALID_POINTER_ERR);
       return;
     }
-    nsIPresShell::PointerCaptureInfo* pointerCaptureInfo = nullptr;
-    if (nsIPresShell::gPointerCaptureList->Get(aPointerId, &pointerCaptureInfo) &&
-        pointerCaptureInfo && pointerCaptureInfo->mPendingContent == this) {
+    if (HasPointerCapture(aPointerId)) {
       nsIPresShell::ReleasePointerCapturingContent(aPointerId);
     }
   }
   bool HasPointerCapture(long aPointerId)
   {
-    nsIPresShell::PointerCaptureInfo* pointerCaptureInfo = nullptr;
-    if (nsIPresShell::gPointerCaptureList->Get(aPointerId, &pointerCaptureInfo) &&
-        pointerCaptureInfo && pointerCaptureInfo->mPendingContent == this) {
+    nsIPresShell::PointerCaptureInfo* pointerCaptureInfo =
+      nsIPresShell::GetPointerCaptureInfo(aPointerId);
+    if (pointerCaptureInfo && pointerCaptureInfo->mPendingContent == this) {
       return true;
     }
     return false;
@@ -869,20 +866,6 @@ public:
   }
 
   void GetGridFragments(nsTArray<RefPtr<Grid>>& aResult);
-
-  virtual already_AddRefed<UndoManager> GetUndoManager()
-  {
-    return nullptr;
-  }
-
-  virtual bool UndoScope()
-  {
-    return false;
-  }
-
-  virtual void SetUndoScope(bool aUndoScope, ErrorResult& aError)
-  {
-  }
 
   already_AddRefed<Animation>
   Animate(JSContext* aContext,
