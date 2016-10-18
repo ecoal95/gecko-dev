@@ -1004,8 +1004,8 @@ impl ScriptThread {
                 devtools::handle_get_children(&context, id, node_id, reply),
             DevtoolScriptControlMsg::GetLayout(id, node_id, reply) =>
                 devtools::handle_get_layout(&context, id, node_id, reply),
-            DevtoolScriptControlMsg::GetCachedMessages(pipeline_id, message_types, reply) =>
-                devtools::handle_get_cached_messages(pipeline_id, message_types, reply),
+            DevtoolScriptControlMsg::GetCachedMessages(id, message_types, reply) =>
+                devtools::handle_get_cached_messages(id, message_types, reply),
             DevtoolScriptControlMsg::ModifyAttribute(id, node_id, modifications) =>
                 devtools::handle_modify_attribute(&context, id, node_id, modifications),
             DevtoolScriptControlMsg::WantsLiveNotifications(id, to_send) => {
@@ -1015,14 +1015,14 @@ impl ScriptThread {
                 };
                 devtools::handle_wants_live_notifications(window.upcast(), to_send)
             },
-            DevtoolScriptControlMsg::SetTimelineMarkers(_pipeline_id, marker_types, reply) =>
-                devtools::handle_set_timeline_markers(&context, marker_types, reply),
-            DevtoolScriptControlMsg::DropTimelineMarkers(_pipeline_id, marker_types) =>
-                devtools::handle_drop_timeline_markers(&context, marker_types),
-            DevtoolScriptControlMsg::RequestAnimationFrame(pipeline_id, name) =>
-                devtools::handle_request_animation_frame(&context, pipeline_id, name),
-            DevtoolScriptControlMsg::Reload(pipeline_id) =>
-                devtools::handle_reload(&context, pipeline_id),
+            DevtoolScriptControlMsg::SetTimelineMarkers(id, marker_types, reply) =>
+                devtools::handle_set_timeline_markers(&context, id, marker_types, reply),
+            DevtoolScriptControlMsg::DropTimelineMarkers(id, marker_types) =>
+                devtools::handle_drop_timeline_markers(&context, id, marker_types),
+            DevtoolScriptControlMsg::RequestAnimationFrame(id, name) =>
+                devtools::handle_request_animation_frame(&context, id, name),
+            DevtoolScriptControlMsg::Reload(id) =>
+                devtools::handle_reload(&context, id),
         }
     }
 
@@ -1143,7 +1143,6 @@ impl ScriptThread {
             new_pipeline_id,
             frame_type,
             load_data,
-            paint_chan,
             pipeline_port,
             layout_to_constellation_chan,
             content_process_shutdown_chan,
@@ -1160,7 +1159,6 @@ impl ScriptThread {
             layout_pair: layout_pair,
             pipeline_port: pipeline_port,
             constellation_chan: layout_to_constellation_chan,
-            paint_chan: paint_chan,
             script_chan: self.control_chan.clone(),
             image_cache_thread: self.image_cache_thread.clone(),
             content_process_shutdown_chan: content_process_shutdown_chan,
@@ -1729,7 +1727,6 @@ impl ScriptThread {
         });
 
         let loader = DocumentLoader::new_with_threads(self.resource_threads.clone(),
-                                                      Some(browsing_context.pipeline_id()),
                                                       Some(incomplete.url.clone()));
 
         let is_html_document = match metadata.content_type {

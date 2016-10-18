@@ -62,7 +62,7 @@ extern crate heapsize;
 #[allow(unused_extern_crates)]
 #[macro_use]
 extern crate lazy_static;
-extern crate libc;
+#[cfg(feature = "gecko")] extern crate libc;
 #[macro_use]
 extern crate log;
 #[allow(unused_extern_crates)]
@@ -73,6 +73,7 @@ extern crate num_integer;
 extern crate num_traits;
 #[cfg(feature = "gecko")] extern crate num_cpus;
 extern crate ordered_float;
+extern crate owning_ref;
 extern crate parking_lot;
 extern crate quickersort;
 extern crate rand;
@@ -112,6 +113,7 @@ pub mod keyframes;
 pub mod logical_geometry;
 pub mod matching;
 pub mod media_queries;
+pub mod owning_handle;
 pub mod parallel;
 pub mod parser;
 pub mod refcell;

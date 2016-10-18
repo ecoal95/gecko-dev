@@ -17,20 +17,28 @@ use gecko_bindings::bindings::Gecko_Construct_${style_struct.gecko_ffi_name};
 use gecko_bindings::bindings::Gecko_CopyConstruct_${style_struct.gecko_ffi_name};
 use gecko_bindings::bindings::Gecko_Destroy_${style_struct.gecko_ffi_name};
 % endfor
-use gecko_bindings::bindings::{Gecko_CopyMozBindingFrom, Gecko_CopyListStyleTypeFrom};
-use gecko_bindings::bindings::{Gecko_SetMozBinding, Gecko_SetListStyleType};
-use gecko_bindings::bindings::{Gecko_SetNullImageValue, Gecko_SetGradientImageValue};
-use gecko_bindings::bindings::{Gecko_EnsureImageLayersLength, Gecko_CreateGradient};
-use gecko_bindings::bindings::{Gecko_CopyImageValueFrom, Gecko_CopyFontFamilyFrom};
-use gecko_bindings::bindings::{Gecko_FontFamilyList_AppendGeneric, Gecko_FontFamilyList_AppendNamed};
-use gecko_bindings::bindings::{Gecko_FontFamilyList_Clear};
+use gecko_bindings::bindings::Gecko_CopyFontFamilyFrom;
+use gecko_bindings::bindings::Gecko_CopyImageValueFrom;
+use gecko_bindings::bindings::Gecko_CopyListStyleTypeFrom;
+use gecko_bindings::bindings::Gecko_CopyMozBindingFrom;
+use gecko_bindings::bindings::Gecko_CreateGradient;
+use gecko_bindings::bindings::Gecko_EnsureImageLayersLength;
+use gecko_bindings::bindings::Gecko_FontFamilyList_AppendGeneric;
+use gecko_bindings::bindings::Gecko_FontFamilyList_AppendNamed;
+use gecko_bindings::bindings::Gecko_FontFamilyList_Clear;
+use gecko_bindings::bindings::Gecko_SetGradientImageValue;
+use gecko_bindings::bindings::Gecko_SetListStyleType;
+use gecko_bindings::bindings::Gecko_SetMozBinding;
+use gecko_bindings::bindings::Gecko_SetNullImageValue;
 use gecko_bindings::bindings::ServoComputedValuesBorrowedOrNull;
 use gecko_bindings::structs;
 use gecko_bindings::sugar::ns_style_coord::{CoordDataValue, CoordData, CoordDataMut};
 use gecko_bindings::sugar::ownership::HasArcFFI;
-use gecko::values::{StyleCoordHelpers, GeckoStyleCoordConvertible, convert_nscolor_to_rgba};
+use gecko::values::convert_nscolor_to_rgba;
 use gecko::values::convert_rgba_to_nscolor;
+use gecko::values::GeckoStyleCoordConvertible;
 use gecko::values::round_border_to_device_pixels;
+use gecko::values::StyleCoordHelpers;
 use logical_geometry::WritingMode;
 use properties::CascadePropertyFn;
 use properties::longhands;
@@ -449,7 +457,7 @@ impl Debug for ${style_struct.gecko_struct_name} {
     # These are currently being shuffled to a different style struct on the gecko side.
     force_stub += ["backface-visibility", "transform-box", "transform-style"]
     # These live in an nsFont member in Gecko. Should be straightforward to do manually.
-    force_stub += ["font-kerning", "font-variant"]
+    force_stub += ["font-variant"]
     # These have unusual representations in gecko.
     force_stub += ["list-style-type"]
     # In a nsTArray, have to be done manually, but probably not too much work
@@ -739,7 +747,7 @@ fn static_assert() {
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="Font"
-    skip_longhands="font-family font-stretch font-style font-size font-weight"
+    skip_longhands="font-family font-kerning font-stretch font-style font-size font-weight"
     skip_additionals="*">
 
     pub fn set_font_family(&mut self, v: longhands::font_family::computed_value::T) {
@@ -789,6 +797,11 @@ fn static_assert() {
     pub fn clone_font_size(&self) -> longhands::font_size::computed_value::T {
         Au(self.gecko.mSize)
     }
+
+    <% kerning_keyword = Keyword("font-kerning", "auto normal none",
+                                 gecko_constant_prefix='NS_FONT_KERNING') %>
+
+    ${impl_keyword('font_kerning', 'mFont.kerning', kerning_keyword, need_clone=False)}
 
     <% stretch_keyword = Keyword("font-stretch",
                                  "normal ultra-condensed extra-condensed condensed " +
@@ -888,7 +901,7 @@ fn static_assert() {
 
     #[allow(non_snake_case)]
     pub fn set__moz_binding(&mut self, v: longhands::_moz_binding::computed_value::T) {
-        use properties::longhands::_moz_binding::SpecifiedValue as BindingValue;
+        use properties::longhands::_moz_binding::computed_value::T as BindingValue;
         match v {
             BindingValue::None => debug_assert!(self.gecko.mBinding.mRawPtr.is_null()),
             BindingValue::Url(ref url, ref extra_data) => {
@@ -896,9 +909,9 @@ fn static_assert() {
                     Gecko_SetMozBinding(&mut self.gecko,
                                         url.as_str().as_ptr(),
                                         url.as_str().len() as u32,
-                                        extra_data.base.as_raw(),
-                                        extra_data.referrer.as_raw(),
-                                        extra_data.principal.as_raw());
+                                        extra_data.base.get(),
+                                        extra_data.referrer.get(),
+                                        extra_data.principal.get());
                 }
             }
         }
@@ -1448,7 +1461,7 @@ fn static_assert() {
     </%self:simple_image_array_property>
 </%self:impl_trait>
 
-<%self:impl_trait style_struct_name="List" skip_longhands="list-style-type" skip_additionals="*">
+<%self:impl_trait style_struct_name="List" skip_longhands="list-style-type quotes" skip_additionals="*">
 
     ${impl_keyword_setter("list_style_type", "__LIST_STYLE_TYPE__",
                            data.longhands_by_name["list-style-type"].keyword)}
@@ -1456,6 +1469,27 @@ fn static_assert() {
         unsafe {
             Gecko_CopyListStyleTypeFrom(&mut self.gecko, &other.gecko);
         }
+    }
+
+    pub fn set_quotes(&mut self, other: longhands::quotes::computed_value::T) {
+        use gecko_bindings::bindings::Gecko_NewStyleQuoteValues;
+        use gecko_bindings::sugar::refptr::UniqueRefPtr;
+        use nsstring::nsCString;
+
+        let mut refptr = unsafe {
+            UniqueRefPtr::from_addrefed(Gecko_NewStyleQuoteValues(other.0.len() as u32))
+        };
+
+        for (servo, gecko) in other.0.into_iter().zip(refptr.mQuotePairs.iter_mut()) {
+            gecko.first.assign_utf8(&nsCString::from(&*servo.0));
+            gecko.second.assign_utf8(&nsCString::from(&*servo.1));
+        }
+
+        unsafe { self.gecko.mQuotes.set_move(refptr.get()) }
+    }
+
+    pub fn copy_quotes_from(&mut self, other: &Self) {
+        unsafe { self.gecko.mQuotes.set(&other.gecko.mQuotes); }
     }
 
 </%self:impl_trait>
