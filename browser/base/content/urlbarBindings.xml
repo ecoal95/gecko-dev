@@ -371,8 +371,19 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             return;
           }
 
-          // Do the command of the selected one-off if it's not an engine.
+          // Determine whether to use the selected one-off search button.  In
+          // one-off search buttons parlance, "selected" means that the button
+          // has been navigated to via the keyboard.  So we want to use it if
+          // the triggering event is not a mouse click -- i.e., it's a Return
+          // key -- or if the one-off was mouse-clicked.
           let selectedOneOff = this.popup.oneOffSearchButtons.selectedButton;
+          if (selectedOneOff &&
+              isMouseEvent &&
+              event.originalTarget != selectedOneOff) {
+            selectedOneOff = null;
+          }
+
+          // Do the command of the selected one-off if it's not an engine.
           if (selectedOneOff && !selectedOneOff.engine) {
             selectedOneOff.doCommand();
             return;
@@ -1248,6 +1259,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
             // open the search results according to the clicking subtlety
             var where = whereToOpenLink(aEvent, false, true);
+            let params = {};
 
             // But open ctrl/cmd clicks on autocomplete items in a new background tab.
             let modifier = this.AppConstants.platform == "macosx" ?
@@ -1255,10 +1267,10 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
                            aEvent.ctrlKey;
             if (where == "tab" && (aEvent instanceof MouseEvent) &&
                 (aEvent.button == 1 || modifier))
-              where = "tab-background";
+              params.inBackground = true;
 
-            searchBar.doSearch(search, where);
-            if (where == "tab-background")
+            searchBar.doSearch(search, where, null, params);
+            if (where == "tab" && params.inBackground)
               searchBar.focus();
             else
               searchBar.value = search;
@@ -1713,17 +1725,8 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
            should show in their labels and include in their url attributes. -->
       <property name="overrideSearchEngineName" readonly="true">
         <getter><![CDATA[
-          // When building the popup, autocomplete reuses an item at index i if
-          // that item's url attribute matches the controller's value at index
-          // i, but only if overrideSearchEngineName matches the engine in the
-          // url attribute.  To absolutely avoid reusing items that shouldn't be
-          // reused, always return a non-null name here by falling back to the
-          // current engine.
-          let engine =
-            (this.oneOffSearchButtons.selectedButton &&
-             this.oneOffSearchButtons.selectedButton.engine) ||
-             Services.search.currentEngine;
-          return engine ? engine.name : null;
+          let button = this.oneOffSearchButtons.selectedButton;
+          return button && button.engine && button.engine.name;
         ]]></getter>
       </property>
 

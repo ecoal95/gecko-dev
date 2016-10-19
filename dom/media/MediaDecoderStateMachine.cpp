@@ -188,7 +188,6 @@ class MediaDecoderStateMachine::StateObject
 {
 public:
   virtual ~StateObject() {}
-  virtual void Enter() {}; // Entry action.
   virtual void Exit() {};  // Exit action.
   virtual void Step() {}   // Perform a 'cycle' of this state object.
   virtual State GetState() const = 0;
@@ -234,24 +233,29 @@ public:
   // Note this function will delete the current state object.
   // Don't access members to avoid UAF after this call.
   template <class S, typename... Ts>
-  void SetState(Ts&&... aArgs)
+  auto SetState(Ts&&... aArgs)
+    -> decltype(DeclVal<S>().Enter(Forward<Ts>(aArgs)...))
   {
     // keep mMaster in a local object because mMaster will become invalid after
     // the current state object is deleted.
     auto master = mMaster;
 
-    UniquePtr<StateObject> s = MakeUnique<S>(master, Forward<Ts>(aArgs)...);
-    if (master->mState == s->GetState() &&
-        master->mState != DECODER_STATE_SEEKING) {
-      return;
-    }
+    auto s = new S(master);
+
+    MOZ_ASSERT(master->mState != s->GetState() ||
+               master->mState == DECODER_STATE_SEEKING);
 
     SLOG("change state to: %s", ToStateStr(s->GetState()));
 
     Exit();
+
+    // Note |aArgs| might reference data members of |this|. We need to keep
+    // |this| alive until |s->Enter()| returns.
+    UniquePtr<StateObject> deathGrip(master->mStateObj.release());
+
     master->mState = s->GetState();
-    master->mStateObj = Move(s); // Will delete |this|!
-    master->mStateObj->Enter();
+    master->mStateObj.reset(s);
+    return s->Enter(Forward<Ts>(aArgs)...);
   }
 
 protected:
@@ -266,7 +270,7 @@ class MediaDecoderStateMachine::DecodeMetadataState
 public:
   explicit DecodeMetadataState(Master* aPtr) : StateObject(aPtr) {}
 
-  void Enter() override
+  void Enter()
   {
     MOZ_ASSERT(!mMetadataRequest.Exists());
     SLOG("Dispatching AsyncReadMetadata");
@@ -332,6 +336,8 @@ class MediaDecoderStateMachine::WaitForCDMState
 public:
   explicit WaitForCDMState(Master* aPtr) : StateObject(aPtr) {}
 
+  void Enter(bool aPendingDormant) { mPendingDormant = aPendingDormant; }
+
   State GetState() const override
   {
     return DECODER_STATE_WAIT_FOR_CDM;
@@ -348,6 +354,9 @@ public:
     mMaster->mQueuedSeek.mTarget = aTarget;
     return mMaster->mQueuedSeek.mPromise.Ensure(__func__);
   }
+
+private:
+  bool mPendingDormant = false;
 };
 
 class MediaDecoderStateMachine::DormantState
@@ -356,7 +365,7 @@ class MediaDecoderStateMachine::DormantState
 public:
   explicit DormantState(Master* aPtr) : StateObject(aPtr) {}
 
-  void Enter() override
+  void Enter()
   {
     if (mMaster->IsPlaying()) {
       mMaster->StopPlayback();
@@ -387,7 +396,7 @@ class MediaDecoderStateMachine::DecodingFirstFrameState
 public:
   explicit DecodingFirstFrameState(Master* aPtr) : StateObject(aPtr) {}
 
-  void Enter() override;
+  void Enter();
 
   State GetState() const override
   {
@@ -428,7 +437,7 @@ class MediaDecoderStateMachine::DecodingState
 public:
   explicit DecodingState(Master* aPtr) : StateObject(aPtr) {}
 
-  void Enter() override;
+  void Enter();
 
   void Exit() override
   {
@@ -580,11 +589,12 @@ class MediaDecoderStateMachine::SeekingState
   : public MediaDecoderStateMachine::StateObject
 {
 public:
-  explicit SeekingState(Master* aPtr, SeekJob aSeekJob)
-    : StateObject(aPtr), mSeekJob(Move(aSeekJob)) {}
+  explicit SeekingState(Master* aPtr) : StateObject(aPtr) {}
 
-  void Enter() override
+  RefPtr<MediaDecoder::SeekPromise> Enter(SeekJob aSeekJob)
   {
+    mSeekJob = Move(aSeekJob);
+
     // SeekTask will register its callbacks to MediaDecoderReaderWrapper.
     mMaster->CancelMediaDecoderReaderWrapperCallback();
 
@@ -640,6 +650,7 @@ public:
              }));
 
     MOZ_ASSERT(!mMaster->mQueuedSeek.Exists());
+    return mSeekJob.mPromise.Ensure(__func__);
   }
 
   void Exit() override
@@ -729,7 +740,7 @@ class MediaDecoderStateMachine::BufferingState
 public:
   explicit BufferingState(Master* aPtr) : StateObject(aPtr) {}
 
-  void Enter() override
+  void Enter()
   {
     if (mMaster->IsPlaying()) {
       mMaster->StopPlayback();
@@ -788,7 +799,7 @@ class MediaDecoderStateMachine::CompletedState
 public:
   explicit CompletedState(Master* aPtr) : StateObject(aPtr) {}
 
-  void Enter() override
+  void Enter()
   {
     mMaster->ScheduleStateMachine();
   }
@@ -865,7 +876,7 @@ class MediaDecoderStateMachine::ShutdownState
 public:
   explicit ShutdownState(Master* aPtr) : StateObject(aPtr) {}
 
-  void Enter() override;
+  RefPtr<ShutdownPromise> Enter();
 
   void Exit() override
   {
@@ -918,14 +929,7 @@ RefPtr<ShutdownPromise>
 MediaDecoderStateMachine::
 StateObject::HandleShutdown()
 {
-  auto master = mMaster;
-  SetState<ShutdownState>();
-
-  return master->mReader->Shutdown()
-    ->Then(master->OwnerThread(), __func__, master,
-           &MediaDecoderStateMachine::FinishShutdown,
-           &MediaDecoderStateMachine::FinishShutdown)
-    ->CompletionPromise();
+  return SetState<ShutdownState>();
 }
 
 void
@@ -980,30 +984,22 @@ DecodeMetadataState::OnMetadataRead(MetadataHolder* aMetadata)
     mMaster->EnqueueLoadedMetadataEvent();
   }
 
-  if (mPendingDormant) {
-    // No need to store mQueuedSeek because we are at position 0.
-    SetState<DormantState>();
-    return;
-  }
-
   if (waitingForCDM) {
     // Metadata parsing was successful but we're still waiting for CDM caps
     // to become available so that we can build the correct decryptor/decoder.
-    SetState<WaitForCDMState>();
-    return;
+    SetState<WaitForCDMState>(mPendingDormant);
+  } else if (mPendingDormant) {
+    SetState<DormantState>();
+  } else {
+    SetState<DecodingFirstFrameState>();
   }
-
-  SetState<DecodingFirstFrameState>();
 }
 
 bool
 MediaDecoderStateMachine::
 WaitForCDMState::HandleDormant(bool aDormant)
 {
-  if (aDormant) {
-    // No need to store mQueuedSeek because we are at position 0.
-    SetState<DormantState>();
-  }
+  mPendingDormant = aDormant;
   return true;
 }
 
@@ -1012,12 +1008,8 @@ MediaDecoderStateMachine::
 DormantState::HandleDormant(bool aDormant)
 {
   if (!aDormant) {
-    // Exit dormant state. Check if we need the CDMProxy to start decoding.
-    if (Info().IsEncrypted() && !mMaster->mCDMProxy) {
-      SetState<WaitForCDMState>();
-    } else {
-      SetState<DecodingFirstFrameState>();
-    }
+    MOZ_ASSERT(!Info().IsEncrypted() || mMaster->mCDMProxy);
+    SetState<DecodingFirstFrameState>();
   }
   return true;
 }
@@ -1026,7 +1018,11 @@ bool
 MediaDecoderStateMachine::
 WaitForCDMState::HandleCDMProxyReady()
 {
-  SetState<DecodingFirstFrameState>();
+  if (mPendingDormant) {
+    SetState<DormantState>();
+  } else {
+    SetState<DecodingFirstFrameState>();
+  }
   return true;
 }
 
@@ -1074,9 +1070,7 @@ DecodingFirstFrameState::HandleSeek(SeekTarget aTarget)
   SLOG("Changed state to SEEKING (to %lld)", aTarget.GetTime().ToMicroseconds());
   SeekJob seekJob;
   seekJob.mTarget = aTarget;
-  RefPtr<MediaDecoder::SeekPromise> p = seekJob.mPromise.Ensure(__func__);
-  SetState<SeekingState>(Move(seekJob));
-  return p.forget();
+  return SetState<SeekingState>(Move(seekJob));
 }
 
 void
@@ -1131,9 +1125,7 @@ DecodingState::HandleSeek(SeekTarget aTarget)
   SLOG("Changed state to SEEKING (to %lld)", aTarget.GetTime().ToMicroseconds());
   SeekJob seekJob;
   seekJob.mTarget = aTarget;
-  RefPtr<MediaDecoder::SeekPromise> p = seekJob.mPromise.Ensure(__func__);
-  SetState<SeekingState>(Move(seekJob));
-  return p.forget();
+  return SetState<SeekingState>(Move(seekJob));
 }
 
 bool
@@ -1215,9 +1207,7 @@ SeekingState::HandleSeek(SeekTarget aTarget)
   SLOG("Changed state to SEEKING (to %lld)", aTarget.GetTime().ToMicroseconds());
   SeekJob seekJob;
   seekJob.mTarget = aTarget;
-  RefPtr<MediaDecoder::SeekPromise> p = seekJob.mPromise.Ensure(__func__);
-  SetState<SeekingState>(Move(seekJob));
-  return p.forget();
+  return SetState<SeekingState>(Move(seekJob));
 }
 
 void
@@ -1366,9 +1356,7 @@ BufferingState::HandleSeek(SeekTarget aTarget)
   SLOG("Changed state to SEEKING (to %lld)", aTarget.GetTime().ToMicroseconds());
   SeekJob seekJob;
   seekJob.mTarget = aTarget;
-  RefPtr<MediaDecoder::SeekPromise> p = seekJob.mPromise.Ensure(__func__);
-  SetState<SeekingState>(Move(seekJob));
-  return p.forget();
+  return SetState<SeekingState>(Move(seekJob));
 }
 
 RefPtr<MediaDecoder::SeekPromise>
@@ -1379,12 +1367,10 @@ CompletedState::HandleSeek(SeekTarget aTarget)
   SLOG("Changed state to SEEKING (to %lld)", aTarget.GetTime().ToMicroseconds());
   SeekJob seekJob;
   seekJob.mTarget = aTarget;
-  RefPtr<MediaDecoder::SeekPromise> p = seekJob.mPromise.Ensure(__func__);
-  SetState<SeekingState>(Move(seekJob));
-  return p.forget();
+  return SetState<SeekingState>(Move(seekJob));
 }
 
-void
+RefPtr<ShutdownPromise>
 MediaDecoderStateMachine::
 ShutdownState::Enter()
 {
@@ -1444,6 +1430,12 @@ ShutdownState::Enter()
 
   // Shut down the watch manager to stop further notifications.
   master->mWatchManager.Shutdown();
+
+  return Reader()->Shutdown()
+    ->Then(OwnerThread(), __func__, master,
+           &MediaDecoderStateMachine::FinishShutdown,
+           &MediaDecoderStateMachine::FinishShutdown)
+    ->CompletionPromise();
 }
 
 #define INIT_WATCHABLE(name, val) \
@@ -1465,7 +1457,6 @@ MediaDecoderStateMachine::MediaDecoderStateMachine(MediaDecoder* aDecoder,
   mDispatchedStateMachine(false),
   mDelayedScheduler(mTaskQueue),
   INIT_WATCHABLE(mState, DECODER_STATE_DECODING_METADATA),
-  mStateObj(new DecodeMetadataState(this)),
   mCurrentFrameID(0),
   INIT_WATCHABLE(mObservedDuration, TimeUnit()),
   mFragmentEndTime(-1),
@@ -1952,7 +1943,11 @@ nsresult MediaDecoderStateMachine::Init(MediaDecoder* aDecoder)
 
   RefPtr<MediaDecoderStateMachine> self = this;
   OwnerThread()->Dispatch(NS_NewRunnableFunction([self] () {
-    self->mStateObj->Enter();
+    MOZ_ASSERT(self->mState == DECODER_STATE_DECODING_METADATA);
+    MOZ_ASSERT(!self->mStateObj);
+    auto s = new DecodeMetadataState(self);
+    self->mStateObj.reset(s);
+    s->Enter();
   }));
 
   return NS_OK;
@@ -2306,11 +2301,10 @@ void MediaDecoderStateMachine::VisibilityChanged()
                                  MediaDecoderEventVisibility::Suppressed,
                                  true /* aVideoOnly */);
 
-    RefPtr<MediaDecoder::SeekPromise> p = seekJob.mPromise.Ensure(__func__);
-    p->Then(AbstractThread::MainThread(), __func__,
-            [start, info, hw](){ ReportRecoveryTelemetry(start, info, hw); },
-            [](){});
-    mStateObj->SetState<SeekingState>(Move(seekJob));
+    mStateObj->SetState<SeekingState>(Move(seekJob))->Then(
+      AbstractThread::MainThread(), __func__,
+      [start, info, hw](){ ReportRecoveryTelemetry(start, info, hw); },
+      [](){});
   }
 }
 
@@ -3153,7 +3147,12 @@ MediaDecoderStateMachine::DumpDebugInfo()
       mAudioCompleted.Ref(), mVideoCompleted.Ref());
   });
 
-  OwnerThread()->DispatchStateChange(r.forget());
+  // Since the task is run asynchronously, it is possible other tasks get first
+  // and change the object states before we print them. Therefore we want to
+  // dispatch this task immediately without waiting for the tail dispatching
+  // phase so object states are less likely to change before being printed.
+  OwnerThread()->Dispatch(r.forget(),
+    AbstractThread::AssertDispatchSuccess, AbstractThread::TailDispatch);
 }
 
 void MediaDecoderStateMachine::AddOutputStream(ProcessedMediaStream* aStream,
