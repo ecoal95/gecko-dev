@@ -2999,10 +2999,6 @@ protected:
   uint32_t mDummy;
 #endif
 
-  // Whether this document has (or will have, once we have a pres shell) a
-  // Gecko- or Servo-backed style system.
-  mozilla::StyleBackendType mStyleBackendType;
-
   // True if BIDI is enabled.
   bool mBidiEnabled : 1;
   // True if a MathML element has ever been owned by this document.
@@ -3168,6 +3164,10 @@ protected:
   };
 
   Tri mAllowXULXBL;
+
+  // Whether this document has (or will have, once we have a pres shell) a
+  // Gecko- or Servo-backed style system.
+  mozilla::StyleBackendType mStyleBackendType;
 
 #ifdef DEBUG
   /**
