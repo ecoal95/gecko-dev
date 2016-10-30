@@ -33,6 +33,7 @@
 #include "nsWeakReference.h"
 #include "Units.h"
 #include "nsIWidget.h"
+#include "nsIPartialSHistory.h"
 
 class nsFrameLoader;
 class nsIFrameLoader;
@@ -355,14 +356,16 @@ public:
   virtual bool DeallocPDatePickerParent(PDatePickerParent* aDatePicker) override;
 
   virtual PDocAccessibleParent*
-  AllocPDocAccessibleParent(PDocAccessibleParent*, const uint64_t&) override;
+  AllocPDocAccessibleParent(PDocAccessibleParent*, const uint64_t&,
+                            const uint32_t&) override;
 
   virtual bool DeallocPDocAccessibleParent(PDocAccessibleParent*) override;
 
   virtual bool
   RecvPDocAccessibleConstructor(PDocAccessibleParent* aDoc,
                                 PDocAccessibleParent* aParentDoc,
-                                const uint64_t& aParentID) override;
+                                const uint64_t& aParentID,
+                                const uint32_t& aMsaaID) override;
 
   /**
    * Return the top level doc accessible parent for this tab.
@@ -574,14 +577,13 @@ public:
   RecvInvokeDragSession(nsTArray<IPCDataTransfer>&& aTransfers,
                         const uint32_t& aAction,
                         const OptionalShmem& aVisualDnDData,
-                        const uint32_t& aWidth, const uint32_t& aHeight,
                         const uint32_t& aStride, const uint8_t& aFormat,
-                        const int32_t& aDragAreaX, const int32_t& aDragAreaY) override;
+                        const LayoutDeviceIntRect& aDragRect) override;
 
   void AddInitialDnDDataTo(DataTransfer* aDataTransfer);
 
-  void TakeDragVisualization(RefPtr<mozilla::gfx::SourceSurface>& aSurface,
-                             int32_t& aDragAreaX, int32_t& aDragAreaY);
+  bool TakeDragVisualization(RefPtr<mozilla::gfx::SourceSurface>& aSurface,
+                             LayoutDeviceIntRect* aDragRect);
 
   layout::RenderFrameParent* GetRenderFrame();
 
@@ -630,6 +632,10 @@ protected:
 
   virtual bool RecvAudioChannelActivityNotification(const uint32_t& aAudioChannel,
                                                     const bool& aActive) override;
+
+  virtual bool RecvNotifySessionHistoryChange(const uint32_t& aCount) override;
+
+  virtual bool RecvRequestCrossBrowserNavigation(const uint32_t& aGlobalIndex) override;
 
   ContentCacheInParent mContentCache;
 
@@ -685,8 +691,8 @@ private:
   nsTArray<nsTArray<IPCDataTransferItem>> mInitialDataTransferItems;
 
   RefPtr<gfx::DataSourceSurface> mDnDVisualization;
-  int32_t mDragAreaX;
-  int32_t mDragAreaY;
+  bool mDragValid;
+  LayoutDeviceIntRect mDragRect;
 
   // When true, the TabParent is initialized without child side's request.
   // When false, the TabParent is initialized by window.open() from child side.

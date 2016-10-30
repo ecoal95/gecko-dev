@@ -271,12 +271,15 @@ const kEventConstructors = {
                                                          return new KeyboardEvent(aName, aProps);
                                                        },
                                              },
-  MediaEncryptedEvent:                          { create: function (aName, aProps) {
+  MediaEncryptedEvent:                       { create: function (aName, aProps) {
                                                          return new MediaEncryptedEvent(aName, aProps);
                                                        },
                                              },
-  MediaKeyMessageEvent:                          { create: function (aName, aProps) {
-                                                         return new MediaKeyMessageEvent(aName, aProps);
+  MediaKeyMessageEvent:                      { create: function (aName, aProps) {
+                                                         return new MediaKeyMessageEvent(aName, {
+                                                           messageType: "license-request",
+                                                           message: new ArrayBuffer(0)
+                                                         });
                                                        },
                                              },
   MediaStreamEvent:                          { create: function (aName, aProps) {
@@ -330,14 +333,6 @@ const kEventConstructors = {
                                              },
   MozMmsEvent:                               { create: function (aName, aProps) {
                                                          return new MozMmsEvent(aName, aProps);
-                                                       },
-                                             },
-  MozNFCPeerEvent:                           { create: function (aName, aProps) {
-                                                         return new MozNFCPeerEvent(aName, aProps);
-                                                       },
-                                             },
-  MozNFCTagEvent:                            { create: function (aName, aProps) {
-                                                         return new MozNFCTagEvent(aName, aProps);
                                                        },
                                              },
   MozOtaStatusEvent:                         { create: function (aName, aProps) {

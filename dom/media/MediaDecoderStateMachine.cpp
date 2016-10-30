@@ -215,7 +215,17 @@ public:
 
   virtual RefPtr<ShutdownPromise> HandleShutdown();
 
+  virtual void HandleVideoSuspendTimeout() = 0;
+
+  virtual void HandleResumeVideoDecoding();
+
+  virtual void HandlePlayStateChanged(MediaDecoder::PlayState aPlayState) {}
+
   virtual void DumpDebugInfo() {}
+
+private:
+  template <class S, typename R, typename... As>
+  auto ReturnTypeHelper(R(S::*)(As...)) -> R;
 
 protected:
   using Master = MediaDecoderStateMachine;
@@ -224,17 +234,20 @@ protected:
   MediaResource* Resource() const { return mMaster->mResource; }
   MediaDecoderReaderWrapper* Reader() const { return mMaster->mReader; }
   const MediaInfo& Info() const { return mMaster->Info(); }
+  bool IsExpectingMoreData() const
+  {
+    // We are expecting more data if either the resource states so, or if we
+    // have a waiting promise pending (such as with non-MSE EME).
+    return Resource()->IsExpectingMoreData() ||
+           (Reader()->IsWaitForDataSupported() &&
+            (Reader()->IsWaitingAudioData() || Reader()->IsWaitingVideoData()));
+  }
 
-public:
-  // TODO: this function is public because VisibilityChanged() calls it.
-  // We should handle visibility changes in state objects so this function
-  // can be made protected again.
-  //
   // Note this function will delete the current state object.
   // Don't access members to avoid UAF after this call.
   template <class S, typename... Ts>
-  auto SetState(Ts&&... aArgs)
-    -> decltype(DeclVal<S>().Enter(Forward<Ts>(aArgs)...))
+  auto SetState(Ts... aArgs)
+    -> decltype(ReturnTypeHelper(&S::Enter))
   {
     // keep mMaster in a local object because mMaster will become invalid after
     // the current state object is deleted.
@@ -249,21 +262,25 @@ public:
 
     Exit();
 
-    // Note |aArgs| might reference data members of |this|. We need to keep
-    // |this| alive until |s->Enter()| returns.
-    UniquePtr<StateObject> deathGrip(master->mStateObj.release());
-
     master->mState = s->GetState();
     master->mStateObj.reset(s);
-    return s->Enter(Forward<Ts>(aArgs)...);
+    return s->Enter(Move(aArgs)...);
   }
 
-protected:
   // Take a raw pointer in order not to change the life cycle of MDSM.
   // It is guaranteed to be valid by MDSM.
   Master* mMaster;
 };
 
+/**
+ * Purpose: decode metadata like duration and dimensions of the media resource.
+ *
+ * Transition to other states when decoding metadata is done:
+ *   SHUTDOWN if failing to decode metadata.
+ *   WAIT_FOR_CDM if the media is encrypted and CDM is not available.
+ *   DORMANT if any pending dormant request.
+ *   DECODING_FIRSTFRAME otherwise.
+ */
 class MediaDecoderStateMachine::DecodeMetadataState
   : public MediaDecoderStateMachine::StateObject
 {
@@ -272,6 +289,7 @@ public:
 
   void Enter()
   {
+    MOZ_ASSERT(!mMaster->mVideoDecodeSuspended);
     MOZ_ASSERT(!mMetadataRequest.Exists());
     SLOG("Dispatching AsyncReadMetadata");
 
@@ -312,6 +330,17 @@ public:
     return MediaDecoder::SeekPromise::CreateAndReject(true, __func__);
   }
 
+  void HandleVideoSuspendTimeout() override
+  {
+    // Do nothing since no decoders are created yet.
+  }
+
+  void HandleResumeVideoDecoding() override
+  {
+    // We never suspend video decoding in this state.
+    MOZ_ASSERT(false, "Shouldn't have suspended video decoding.");
+  }
+
 private:
   void OnMetadataRead(MetadataHolder* aMetadata);
 
@@ -330,13 +359,31 @@ private:
   bool mPendingDormant = false;
 };
 
+/**
+ * Purpose: wait for the CDM to start decoding.
+ *
+ * Transition to other states when CDM is ready:
+ *   DORMANT if any pending dormant request.
+ *   DECODING_FIRSTFRAME otherwise.
+ */
 class MediaDecoderStateMachine::WaitForCDMState
   : public MediaDecoderStateMachine::StateObject
 {
 public:
   explicit WaitForCDMState(Master* aPtr) : StateObject(aPtr) {}
 
-  void Enter(bool aPendingDormant) { mPendingDormant = aPendingDormant; }
+  void Enter(bool aPendingDormant)
+  {
+    MOZ_ASSERT(!mMaster->mVideoDecodeSuspended);
+    mPendingDormant = aPendingDormant;
+  }
+
+  void Exit() override
+  {
+    // mPendingSeek is either moved in HandleCDMProxyReady() or should be
+    // rejected here before transition to SHUTDOWN.
+    mPendingSeek.RejectIfExists(__func__);
+  }
 
   State GetState() const override
   {
@@ -350,28 +397,54 @@ public:
   RefPtr<MediaDecoder::SeekPromise> HandleSeek(SeekTarget aTarget) override
   {
     SLOG("Not Enough Data to seek at this stage, queuing seek");
-    mMaster->mQueuedSeek.RejectIfExists(__func__);
-    mMaster->mQueuedSeek.mTarget = aTarget;
-    return mMaster->mQueuedSeek.mPromise.Ensure(__func__);
+    mPendingSeek.RejectIfExists(__func__);
+    mPendingSeek.mTarget = aTarget;
+    return mPendingSeek.mPromise.Ensure(__func__);
+  }
+
+  void HandleVideoSuspendTimeout() override
+  {
+    // Do nothing since no decoders are created yet.
+  }
+
+  void HandleResumeVideoDecoding() override
+  {
+    // We never suspend video decoding in this state.
+    MOZ_ASSERT(false, "Shouldn't have suspended video decoding.");
   }
 
 private:
   bool mPendingDormant = false;
+  SeekJob mPendingSeek;
 };
 
+/**
+ * Purpose: release decoder resources to save memory and hardware resources.
+ *
+ * Transition to:
+ *   DECODING_FIRSTFRAME when being asked to exit dormant.
+ */
 class MediaDecoderStateMachine::DormantState
   : public MediaDecoderStateMachine::StateObject
 {
 public:
   explicit DormantState(Master* aPtr) : StateObject(aPtr) {}
 
-  void Enter()
+  void Enter(SeekJob aPendingSeek)
   {
+    mPendingSeek = Move(aPendingSeek);
     if (mMaster->IsPlaying()) {
       mMaster->StopPlayback();
     }
     mMaster->Reset();
     mMaster->mReader->ReleaseResources();
+  }
+
+  void Exit() override
+  {
+    // mPendingSeek is either moved in HandleDormant() or should be rejected
+    // here before transition to SHUTDOWN.
+    mPendingSeek.RejectIfExists(__func__);
   }
 
   State GetState() const override
@@ -384,19 +457,48 @@ public:
   RefPtr<MediaDecoder::SeekPromise> HandleSeek(SeekTarget aTarget) override
   {
     SLOG("Not Enough Data to seek at this stage, queuing seek");
-    mMaster->mQueuedSeek.RejectIfExists(__func__);
-    mMaster->mQueuedSeek.mTarget = aTarget;
-    return mMaster->mQueuedSeek.mPromise.Ensure(__func__);
+    mPendingSeek.RejectIfExists(__func__);
+    mPendingSeek.mTarget = aTarget;
+    return mPendingSeek.mPromise.Ensure(__func__);
   }
+
+  void HandleVideoSuspendTimeout() override
+  {
+    // Do nothing since we've released decoders in Enter().
+  }
+
+  void HandleResumeVideoDecoding() override
+  {
+    // Do nothing since we won't resume decoding until exiting dormant.
+  }
+
+private:
+  SeekJob mPendingSeek;
 };
 
+/**
+ * Purpose: decode the 1st audio and video frames to fire the 'loadeddata' event.
+ *
+ * Transition to:
+ *   DORMANT if any dormant request.
+ *   SHUTDOWN if any decode error.
+ *   SEEKING if any pending seek and seek is possible.
+ *   DECODING when the 'loadeddata' event is fired.
+ */
 class MediaDecoderStateMachine::DecodingFirstFrameState
   : public MediaDecoderStateMachine::StateObject
 {
 public:
   explicit DecodingFirstFrameState(Master* aPtr) : StateObject(aPtr) {}
 
-  void Enter();
+  void Enter(SeekJob aPendingSeek);
+
+  void Exit() override
+  {
+    // mPendingSeek is either moved before transition to SEEKING or DORMANT,
+    // or should be rejected here before transition to SHUTDOWN.
+    mPendingSeek.RejectIfExists(__func__);
+  }
 
   State GetState() const override
   {
@@ -425,12 +527,37 @@ public:
 
   RefPtr<MediaDecoder::SeekPromise> HandleSeek(SeekTarget aTarget) override;
 
+  bool HandleDormant(bool aDormant) override;
+
+  void HandleVideoSuspendTimeout() override
+  {
+    // Do nothing for we need to decode the 1st video frame to get the dimensions.
+  }
+
+  void HandleResumeVideoDecoding() override
+  {
+    // We never suspend video decoding in this state.
+    MOZ_ASSERT(false, "Shouldn't have suspended video decoding.");
+  }
+
 private:
   // Notify FirstFrameLoaded if having decoded first frames and
   // transition to SEEKING if there is any pending seek, or DECODING otherwise.
   void MaybeFinishDecodeFirstFrame();
+
+  SeekJob mPendingSeek;
 };
 
+/**
+ * Purpose: decode audio/video data for playback.
+ *
+ * Transition to:
+ *   DORMANT if any dormant request.
+ *   SEEKING if any seek request.
+ *   SHUTDOWN if any decode error.
+ *   BUFFERING if playback can't continue due to lack of decoded data.
+ *   COMPLETED when having decoded all audio/video data.
+ */
 class MediaDecoderStateMachine::DecodingState
   : public MediaDecoderStateMachine::StateObject
 {
@@ -506,6 +633,23 @@ public:
     // MediaSink is changed. Schedule Step() to check if we can start playback.
     mMaster->ScheduleStateMachine();
     return true;
+  }
+
+  void HandleVideoSuspendTimeout() override
+  {
+    if (mMaster->HasVideo()) {
+      mMaster->mVideoDecodeSuspended = true;
+      mMaster->mOnPlaybackEvent.Notify(MediaEventType::EnterVideoSuspend);
+      Reader()->SetVideoBlankDecode(true);
+    }
+  }
+
+  void HandlePlayStateChanged(MediaDecoder::PlayState aPlayState) override
+  {
+    if (aPlayState == MediaDecoder::PLAY_STATE_PLAYING) {
+      // Schedule Step() to check if we can start playback.
+      mMaster->ScheduleStateMachine();
+    }
   }
 
   void DumpDebugInfo() override
@@ -585,6 +729,16 @@ private:
   bool mIsPrerolling = true;
 };
 
+/**
+ * Purpose: seek to a particular new playback position.
+ *
+ * Transition to:
+ *   DORMANT if any dormant request.
+ *   SEEKING if any new seek request.
+ *   SHUTDOWN if seek failed.
+ *   COMPLETED if the new playback position is the end of the media resource.
+ *   DECODING otherwise.
+ */
 class MediaDecoderStateMachine::SeekingState
   : public MediaDecoderStateMachine::StateObject
 {
@@ -594,6 +748,15 @@ public:
   RefPtr<MediaDecoder::SeekPromise> Enter(SeekJob aSeekJob)
   {
     mSeekJob = Move(aSeekJob);
+
+    // Always switch off the blank decoder otherwise we might become visible
+    // in the middle of seeking and won't have a valid video frame to show
+    // when seek is done.
+    if (mMaster->mVideoDecodeSuspended) {
+      mMaster->mVideoDecodeSuspended = false;
+      mMaster->mOnPlaybackEvent.Notify(MediaEventType::ExitVideoSuspend);
+      Reader()->SetVideoBlankDecode(false);
+    }
 
     // SeekTask will register its callbacks to MediaDecoderReaderWrapper.
     mMaster->CancelMediaDecoderReaderWrapperCallback();
@@ -649,7 +812,6 @@ public:
                OnSeekTaskRejected(aValue);
              }));
 
-    MOZ_ASSERT(!mMaster->mQueuedSeek.Exists());
     return mSeekJob.mPromise.Ensure(__func__);
   }
 
@@ -683,6 +845,17 @@ public:
   }
 
   RefPtr<MediaDecoder::SeekPromise> HandleSeek(SeekTarget aTarget) override;
+
+  void HandleVideoSuspendTimeout() override
+  {
+    // Do nothing since we want a valid video frame to show when seek is done.
+  }
+
+  void HandleResumeVideoDecoding() override
+  {
+    // We set mVideoDecodeSuspended to false in Enter().
+    MOZ_ASSERT(false, "Shouldn't have suspended video decoding.");
+  }
 
 private:
   void OnSeekTaskResolved(const SeekTaskResolveValue& aValue)
@@ -734,6 +907,16 @@ private:
   RefPtr<SeekTask> mSeekTask;
 };
 
+/**
+ * Purpose: stop playback until enough data is decoded to continue playback.
+ *
+ * Transition to:
+ *   DORMANT if any dormant request.
+ *   SEEKING if any seek request.
+ *   SHUTDOWN if any decode error.
+ *   COMPLETED when having decoded all audio/video data.
+ *   DECODING when having decoded enough data to continue playback.
+ */
 class MediaDecoderStateMachine::BufferingState
   : public MediaDecoderStateMachine::StateObject
 {
@@ -785,6 +968,15 @@ public:
 
   RefPtr<MediaDecoder::SeekPromise> HandleSeek(SeekTarget aTarget) override;
 
+  void HandleVideoSuspendTimeout() override
+  {
+    if (mMaster->HasVideo()) {
+      mMaster->mVideoDecodeSuspended = true;
+      mMaster->mOnPlaybackEvent.Notify(MediaEventType::EnterVideoSuspend);
+      Reader()->SetVideoBlankDecode(true);
+    }
+  }
+
 private:
   TimeStamp mBufferingStart;
 
@@ -793,6 +985,13 @@ private:
   const uint32_t mBufferingWait = 15;
 };
 
+/**
+ * Purpose: play all the decoded data and fire the 'ended' event.
+ *
+ * Transition to:
+ *   DORMANT if any dormant request.
+ *   SEEKING if any seek request.
+ */
 class MediaDecoderStateMachine::CompletedState
   : public MediaDecoderStateMachine::StateObject
 {
@@ -801,6 +1000,9 @@ public:
 
   void Enter()
   {
+    // We've decoded all samples. We don't need decoders anymore.
+    Reader()->ReleaseResources();
+
     mMaster->ScheduleStateMachine();
   }
 
@@ -866,10 +1068,32 @@ public:
     return true;
   }
 
+  void HandleVideoSuspendTimeout() override
+  {
+    // Do nothing since no decoding is going on.
+  }
+
+  void HandlePlayStateChanged(MediaDecoder::PlayState aPlayState) override
+  {
+    if (aPlayState == MediaDecoder::PLAY_STATE_PLAYING) {
+      // Schedule Step() to check if we can start playback.
+      mMaster->ScheduleStateMachine();
+    }
+  }
+
 private:
   bool mSentPlaybackEndedEvent = false;
 };
 
+/**
+ * Purpose: release all resources allocated by MDSM.
+ *
+ * Transition to:
+ *   None since this is the final state.
+ *
+ * Transition from:
+ *   Any states other than SHUTDOWN.
+ */
 class MediaDecoderStateMachine::ShutdownState
   : public MediaDecoderStateMachine::StateObject
 {
@@ -904,6 +1128,16 @@ public:
     MOZ_DIAGNOSTIC_ASSERT(false, "Already shutting down.");
     return nullptr;
   }
+
+  void HandleVideoSuspendTimeout() override
+  {
+    MOZ_DIAGNOSTIC_ASSERT(false, "Already shutting down.");
+  }
+
+  void HandleResumeVideoDecoding() override
+  {
+    MOZ_DIAGNOSTIC_ASSERT(false, "Already shutting down.");
+  }
 };
 
 bool
@@ -913,15 +1147,14 @@ StateObject::HandleDormant(bool aDormant)
   if (!aDormant) {
     return true;
   }
-  mMaster->mQueuedSeek.mTarget =
-    SeekTarget(mMaster->mCurrentPosition,
-               SeekTarget::Accurate,
-               MediaDecoderEventVisibility::Suppressed);
+  SeekJob seekJob;
+  seekJob.mTarget = SeekTarget(mMaster->mCurrentPosition,
+                               SeekTarget::Accurate,
+                               MediaDecoderEventVisibility::Suppressed);
   // SeekJob asserts |mTarget.IsValid() == !mPromise.IsEmpty()| so we
   // need to create the promise even it is not used at all.
-  RefPtr<MediaDecoder::SeekPromise> unused =
-    mMaster->mQueuedSeek.mPromise.Ensure(__func__);
-  SetState<DormantState>();
+  RefPtr<MediaDecoder::SeekPromise> unused = seekJob.mPromise.Ensure(__func__);
+  SetState<DormantState>(Move(seekJob));
   return true;
 }
 
@@ -930,6 +1163,78 @@ MediaDecoderStateMachine::
 StateObject::HandleShutdown()
 {
   return SetState<ShutdownState>();
+}
+
+static void
+ReportRecoveryTelemetry(const TimeStamp& aRecoveryStart,
+                        const MediaInfo& aMediaInfo,
+                        bool aIsHardwareAccelerated)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  if (!aMediaInfo.HasVideo()) {
+    return;
+  }
+
+  // Keyed by audio+video or video alone, hardware acceleration,
+  // and by a resolution range.
+  nsCString key(aMediaInfo.HasAudio() ? "AV" : "V");
+  key.AppendASCII(aIsHardwareAccelerated ? "(hw)," : ",");
+  static const struct { int32_t mH; const char* mRes; } sResolutions[] = {
+    {  240, "0-240" },
+    {  480, "241-480" },
+    {  720, "481-720" },
+    { 1080, "721-1080" },
+    { 2160, "1081-2160" }
+  };
+  const char* resolution = "2161+";
+  int32_t height = aMediaInfo.mVideo.mImage.height;
+  for (const auto& res : sResolutions) {
+    if (height <= res.mH) {
+      resolution = res.mRes;
+      break;
+    }
+  }
+  key.AppendASCII(resolution);
+
+  TimeDuration duration = TimeStamp::Now() - aRecoveryStart;
+  double duration_ms = duration.ToMilliseconds();
+  Telemetry::Accumulate(Telemetry::VIDEO_SUSPEND_RECOVERY_TIME_MS,
+                        key,
+                        uint32_t(duration_ms + 0.5));
+  Telemetry::Accumulate(Telemetry::VIDEO_SUSPEND_RECOVERY_TIME_MS,
+                        NS_LITERAL_CSTRING("All"),
+                        uint32_t(duration_ms + 0.5));
+}
+
+void
+MediaDecoderStateMachine::
+StateObject::HandleResumeVideoDecoding()
+{
+  MOZ_ASSERT(mMaster->mVideoDecodeSuspended);
+
+  // Start counting recovery time from right now.
+  TimeStamp start = TimeStamp::Now();
+
+  // Local reference to mInfo, so that it will be copied in the lambda below.
+  auto& info = Info();
+  bool hw = Reader()->VideoIsHardwareAccelerated();
+
+  // Start video-only seek to the current time.
+  SeekJob seekJob;
+
+  const SeekTarget::Type type = mMaster->HasAudio()
+                                ? SeekTarget::Type::Accurate
+                                : SeekTarget::Type::PrevSyncPoint;
+
+  seekJob.mTarget = SeekTarget(mMaster->GetMediaTime(),
+                               type,
+                               MediaDecoderEventVisibility::Suppressed,
+                               true /* aVideoOnly */);
+
+  SetState<SeekingState>(Move(seekJob))->Then(
+    AbstractThread::MainThread(), __func__,
+    [start, info, hw](){ ReportRecoveryTelemetry(start, info, hw); },
+    [](){});
 }
 
 void
@@ -989,9 +1294,9 @@ DecodeMetadataState::OnMetadataRead(MetadataHolder* aMetadata)
     // to become available so that we can build the correct decryptor/decoder.
     SetState<WaitForCDMState>(mPendingDormant);
   } else if (mPendingDormant) {
-    SetState<DormantState>();
+    SetState<DormantState>(SeekJob{});
   } else {
-    SetState<DecodingFirstFrameState>();
+    SetState<DecodingFirstFrameState>(SeekJob{});
   }
 }
 
@@ -1009,7 +1314,7 @@ DormantState::HandleDormant(bool aDormant)
 {
   if (!aDormant) {
     MOZ_ASSERT(!Info().IsEncrypted() || mMaster->mCDMProxy);
-    SetState<DecodingFirstFrameState>();
+    SetState<DecodingFirstFrameState>(Move(mPendingSeek));
   }
   return true;
 }
@@ -1019,22 +1324,22 @@ MediaDecoderStateMachine::
 WaitForCDMState::HandleCDMProxyReady()
 {
   if (mPendingDormant) {
-    SetState<DormantState>();
+    SetState<DormantState>(Move(mPendingSeek));
   } else {
-    SetState<DecodingFirstFrameState>();
+    SetState<DecodingFirstFrameState>(Move(mPendingSeek));
   }
   return true;
 }
 
 void
 MediaDecoderStateMachine::
-DecodingFirstFrameState::Enter()
+DecodingFirstFrameState::Enter(SeekJob aPendingSeek)
 {
   // Handle pending seek.
-  if (mMaster->mQueuedSeek.Exists() &&
+  if (aPendingSeek.Exists() &&
       (mMaster->mSentFirstFrameLoadedEvent ||
        Reader()->ForceZeroStartTime())) {
-    SetState<SeekingState>(Move(mMaster->mQueuedSeek));
+    SetState<SeekingState>(Move(aPendingSeek));
     return;
   }
 
@@ -1043,6 +1348,10 @@ DecodingFirstFrameState::Enter()
     SetState<DecodingState>();
     return;
   }
+
+  MOZ_ASSERT(!mMaster->mVideoDecodeSuspended);
+
+  mPendingSeek = Move(aPendingSeek);
 
   // Dispatch tasks to decode first frames.
   mMaster->DispatchDecodeTasksIfNeeded();
@@ -1058,19 +1367,29 @@ DecodingFirstFrameState::HandleSeek(SeekTarget aTarget)
 
   if (!Reader()->ForceZeroStartTime()) {
     SLOG("Not Enough Data to seek at this stage, queuing seek");
-    mMaster->mQueuedSeek.RejectIfExists(__func__);
-    mMaster->mQueuedSeek.mTarget = aTarget;
-    return mMaster->mQueuedSeek.mPromise.Ensure(__func__);
+    mPendingSeek.RejectIfExists(__func__);
+    mPendingSeek.mTarget = aTarget;
+    return mPendingSeek.mPromise.Ensure(__func__);
   }
 
   // Since ForceZeroStartTime() is true, we should've transitioned to SEEKING
-  // in Enter() if there is any queued seek.
-  MOZ_ASSERT(!mMaster->mQueuedSeek.Exists());
+  // in Enter() if there is any pending seek.
+  MOZ_ASSERT(!mPendingSeek.Exists());
 
   SLOG("Changed state to SEEKING (to %lld)", aTarget.GetTime().ToMicroseconds());
   SeekJob seekJob;
   seekJob.mTarget = aTarget;
   return SetState<SeekingState>(Move(seekJob));
+}
+
+bool
+MediaDecoderStateMachine::
+DecodingFirstFrameState::HandleDormant(bool aDormant)
+{
+  if (aDormant) {
+    SetState<DormantState>(Move(mPendingSeek));
+  }
+  return true;
 }
 
 void
@@ -1086,8 +1405,8 @@ DecodingFirstFrameState::MaybeFinishDecodeFirstFrame()
 
   mMaster->FinishDecodeFirstFrame();
 
-  if (mMaster->mQueuedSeek.Exists()) {
-    SetState<SeekingState>(Move(mMaster->mQueuedSeek));
+  if (mPendingSeek.Exists()) {
+    SetState<SeekingState>(Move(mPendingSeek));
   } else {
     SetState<DecodingState>();
   }
@@ -1098,9 +1417,14 @@ MediaDecoderStateMachine::
 DecodingState::Enter()
 {
   MOZ_ASSERT(mMaster->mSentFirstFrameLoadedEvent);
-  // Pending seek should've been handled by DECODING_FIRSTFRAME before
-  // transitioning to DECODING.
-  MOZ_ASSERT(!mMaster->mQueuedSeek.Exists());
+
+  if (!mMaster->mIsVisible &&
+      !mMaster->mVideoDecodeSuspendTimer.IsScheduled() &&
+      !mMaster->mVideoDecodeSuspended) {
+    // If we are not visible and the timer is not schedule, it means the timer
+    // has timed out and we should suspend video decoding now if necessary.
+    HandleVideoSuspendTimeout();
+  }
 
   if (mMaster->CheckIfDecodeComplete()) {
     SetState<CompletedState>();
@@ -1121,7 +1445,6 @@ RefPtr<MediaDecoder::SeekPromise>
 MediaDecoderStateMachine::
 DecodingState::HandleSeek(SeekTarget aTarget)
 {
-  mMaster->mQueuedSeek.RejectIfExists(__func__);
   SLOG("Changed state to SEEKING (to %lld)", aTarget.GetTime().ToMicroseconds());
   SeekJob seekJob;
   seekJob.mTarget = aTarget;
@@ -1158,14 +1481,11 @@ DecodingState::MaybeStartBuffering()
     return;
   }
 
-  // No more data to download. No need to enter buffering.
-  if (!Resource()->IsExpectingMoreData()) {
-    return;
-  }
-
   bool shouldBuffer;
   if (Reader()->UseBufferingHeuristics()) {
-    shouldBuffer = mMaster->HasLowDecodedData() && mMaster->HasLowBufferedData();
+    shouldBuffer = IsExpectingMoreData() &&
+                   mMaster->HasLowDecodedData() &&
+                   mMaster->HasLowBufferedData();
   } else {
     MOZ_ASSERT(Reader()->IsWaitForDataSupported());
     shouldBuffer =
@@ -1184,7 +1504,6 @@ SeekingState::HandleDormant(bool aDormant)
   if (!aDormant) {
     return true;
   }
-  MOZ_ASSERT(!mMaster->mQueuedSeek.Exists());
   MOZ_ASSERT(mSeekJob.Exists());
   // Because both audio and video decoders are going to be reset in this
   // method later, we treat a VideoOnly seek task as a normal Accurate
@@ -1194,8 +1513,7 @@ SeekingState::HandleDormant(bool aDormant)
     mSeekJob.mTarget.SetType(SeekTarget::Accurate);
     mSeekJob.mTarget.SetVideoOnly(false);
   }
-  mMaster->mQueuedSeek = Move(mSeekJob);
-  SetState<DormantState>();
+  SetState<DormantState>(Move(mSeekJob));
   return true;
 }
 
@@ -1203,7 +1521,6 @@ RefPtr<MediaDecoder::SeekPromise>
 MediaDecoderStateMachine::
 SeekingState::HandleSeek(SeekTarget aTarget)
 {
-  mMaster->mQueuedSeek.RejectIfExists(__func__);
   SLOG("Changed state to SEEKING (to %lld)", aTarget.GetTime().ToMicroseconds());
   SeekJob seekJob;
   seekJob.mTarget = aTarget;
@@ -1306,7 +1623,7 @@ BufferingState::Step()
     if ((isLiveStream || !mMaster->CanPlayThrough()) &&
         elapsed < TimeDuration::FromSeconds(mBufferingWait * mMaster->mPlaybackRate) &&
         mMaster->HasLowBufferedData(mBufferingWait * USECS_PER_S) &&
-        Resource()->IsExpectingMoreData()) {
+        IsExpectingMoreData()) {
       SLOG("Buffering: wait %ds, timeout in %.3lfs",
            mBufferingWait, mBufferingWait - elapsed.ToSeconds());
       mMaster->ScheduleStateMachineIn(USECS_PER_S);
@@ -1352,7 +1669,6 @@ RefPtr<MediaDecoder::SeekPromise>
 MediaDecoderStateMachine::
 BufferingState::HandleSeek(SeekTarget aTarget)
 {
-  mMaster->mQueuedSeek.RejectIfExists(__func__);
   SLOG("Changed state to SEEKING (to %lld)", aTarget.GetTime().ToMicroseconds());
   SeekJob seekJob;
   seekJob.mTarget = aTarget;
@@ -1363,7 +1679,6 @@ RefPtr<MediaDecoder::SeekPromise>
 MediaDecoderStateMachine::
 CompletedState::HandleSeek(SeekTarget aTarget)
 {
-  mMaster->mQueuedSeek.RejectIfExists(__func__);
   SLOG("Changed state to SEEKING (to %lld)", aTarget.GetTime().ToMicroseconds());
   SeekJob seekJob;
   seekJob.mTarget = aTarget;
@@ -1379,7 +1694,6 @@ ShutdownState::Enter()
   master->mIsShutdown = true;
   master->mDelayedScheduler.Reset();
   master->mBufferedUpdateRequest.DisconnectIfExists();
-  master->mQueuedSeek.RejectIfExists(__func__);
 
   // Shutdown happens while decode timer is active, we need to disconnect and
   // dispose of the timer.
@@ -2170,75 +2484,15 @@ void MediaDecoderStateMachine::PlayStateChanged()
 
   if (mPlayState != MediaDecoder::PLAY_STATE_PLAYING) {
     mVideoDecodeSuspendTimer.Reset();
-    return;
-  }
-
-  // Once we start playing, we don't want to minimize our prerolling, as we
-  // assume the user is likely to want to keep playing in future. This needs to
-  // happen before we invoke StartDecoding().
-  if (mMinimizePreroll) {
+  } else if (mMinimizePreroll) {
+    // Once we start playing, we don't want to minimize our prerolling, as we
+    // assume the user is likely to want to keep playing in future. This needs to
+    // happen before we invoke StartDecoding().
     mMinimizePreroll = false;
     DispatchDecodeTasksIfNeeded();
   }
 
-  // Some state transitions still happen synchronously on the main thread. So
-  // if the main thread invokes Play() and then Seek(), the seek will initiate
-  // synchronously on the main thread, and the asynchronous PlayInternal task
-  // will arrive when it's no longer valid. The proper thing to do is to move
-  // all state transitions to the state machine task queue, but for now we just
-  // make sure that none of the possible main-thread state transitions (Seek(),
-  // SetDormant(), and Shutdown()) have not occurred.
-  if (mState != DECODER_STATE_DECODING &&
-      mState != DECODER_STATE_DECODING_FIRSTFRAME &&
-      mState != DECODER_STATE_BUFFERING &&
-      mState != DECODER_STATE_COMPLETED)
-  {
-    DECODER_LOG("Unexpected state - Bailing out of PlayInternal()");
-    return;
-  }
-
-  ScheduleStateMachine();
-}
-
-static void
-ReportRecoveryTelemetry(const TimeStamp& aRecoveryStart,
-                        const MediaInfo& aMediaInfo,
-                        bool aIsHardwareAccelerated)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  if (!aMediaInfo.HasVideo()) {
-    return;
-  }
-
-  // Keyed by audio+video or video alone, hardware acceleration,
-  // and by a resolution range.
-  nsCString key(aMediaInfo.HasAudio() ? "AV" : "V");
-  key.AppendASCII(aIsHardwareAccelerated ? "(hw)," : ",");
-  static const struct { int32_t mH; const char* mRes; } sResolutions[] = {
-    {  240, "0-240" },
-    {  480, "241-480" },
-    {  720, "481-720" },
-    { 1080, "721-1080" },
-    { 2160, "1081-2160" }
-  };
-  const char* resolution = "2161+";
-  int32_t height = aMediaInfo.mVideo.mImage.height;
-  for (const auto& res : sResolutions) {
-    if (height <= res.mH) {
-      resolution = res.mRes;
-      break;
-    }
-  }
-  key.AppendASCII(resolution);
-
-  TimeDuration duration = TimeStamp::Now() - aRecoveryStart;
-  double duration_ms = duration.ToMilliseconds();
-  Telemetry::Accumulate(Telemetry::VIDEO_SUSPEND_RECOVERY_TIME_MS,
-                        key,
-                        uint32_t(duration_ms + 0.5));
-  Telemetry::Accumulate(Telemetry::VIDEO_SUSPEND_RECOVERY_TIME_MS,
-                        NS_LITERAL_CSTRING("All"),
-                        uint32_t(duration_ms + 0.5));
+  mStateObj->HandlePlayStateChanged(mPlayState);
 }
 
 void MediaDecoderStateMachine::VisibilityChanged()
@@ -2247,10 +2501,6 @@ void MediaDecoderStateMachine::VisibilityChanged()
   DECODER_LOG("VisibilityChanged: mIsVisible=%d, "
               "mVideoDecodeSuspended=%c, mIsReaderSuspended=%d",
               mIsVisible.Ref(), mVideoDecodeSuspended ? 'T' : 'F', mIsReaderSuspended.Ref());
-
-  if (mInfo.isNothing() || !HasVideo()) {
-    return;
-  }
 
   // Start timer to trigger suspended decoding state when going invisible.
   if (!mIsVisible) {
@@ -2269,42 +2519,7 @@ void MediaDecoderStateMachine::VisibilityChanged()
   mVideoDecodeSuspendTimer.Reset();
 
   if (mVideoDecodeSuspended) {
-    mVideoDecodeSuspended = false;
-    mOnPlaybackEvent.Notify(MediaEventType::ExitVideoSuspend);
-    mReader->SetVideoBlankDecode(false);
-
-    if (mIsReaderSuspended) {
-      return;
-    }
-
-    // If an existing seek is in flight don't bother creating a new
-    // one to catch up.
-    if (mState == DECODER_STATE_SEEKING || mQueuedSeek.Exists()) {
-      return;
-    }
-
-    // Start counting recovery time from right now.
-    TimeStamp start = TimeStamp::Now();
-    // Local reference to mInfo, so that it will be copied in the lambda below.
-    auto& info = Info();
-    bool hw = mReader->VideoIsHardwareAccelerated();
-
-    // Start video-only seek to the current time.
-    SeekJob seekJob;
-
-    const SeekTarget::Type type = HasAudio()
-                                  ? SeekTarget::Type::Accurate
-                                  : SeekTarget::Type::PrevSyncPoint;
-
-    seekJob.mTarget = SeekTarget(GetMediaTime(),
-                                 type,
-                                 MediaDecoderEventVisibility::Suppressed,
-                                 true /* aVideoOnly */);
-
-    mStateObj->SetState<SeekingState>(Move(seekJob))->Then(
-      AbstractThread::MainThread(), __func__,
-      [start, info, hw](){ ReportRecoveryTelemetry(start, info, hw); },
-      [](){});
+    mStateObj->HandleResumeVideoDecoding();
   }
 }
 
@@ -3233,9 +3448,7 @@ MediaDecoderStateMachine::OnSuspendTimerResolved()
 {
   DECODER_LOG("OnSuspendTimerResolved");
   mVideoDecodeSuspendTimer.CompleteRequest();
-  mVideoDecodeSuspended = true;
-  mOnPlaybackEvent.Notify(MediaEventType::EnterVideoSuspend);
-  mReader->SetVideoBlankDecode(true);
+  mStateObj->HandleVideoSuspendTimeout();
 }
 
 void

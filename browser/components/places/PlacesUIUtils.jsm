@@ -958,9 +958,9 @@ this.PlacesUIUtils = {
     if (where == "window") {
       // There is no browser window open, thus open a new one.
       var uriList = PlacesUtils.toISupportsString(urls.join("|"));
-      var args = Cc["@mozilla.org/supports-array;1"].
-                  createInstance(Ci.nsISupportsArray);
-      args.AppendElement(uriList);
+      var args = Cc["@mozilla.org/array;1"].
+                  createInstance(Ci.nsIMutableArray);
+      args.appendElement(uriList, /*weak =*/ false);
       browserWindow = Services.ww.openWindow(aWindow,
                                              "chrome://browser/content/browser.xul",
                                              null, "chrome,dialog=no,all", args);
@@ -980,7 +980,7 @@ this.PlacesUIUtils = {
 
     PlacesUtils.livemarks.getLivemark({id: aNode.itemId})
       .then(aLivemark => {
-        urlsToOpen = [];
+        let urlsToOpen = [];
 
         let nodes = aLivemark.getNodesForContainer(aNode);
         for (let node of nodes) {

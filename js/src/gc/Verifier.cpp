@@ -175,7 +175,7 @@ gc::GCRuntime::startVerifyPreBarriers()
     if (verifyPreData || isIncrementalGCInProgress())
         return;
 
-    if (!IsIncrementalGCSafe(rt))
+    if (IsIncrementalGCUnsafe(rt) != AbortReason::None)
         return;
 
     number++;
@@ -345,7 +345,7 @@ gc::GCRuntime::endVerifyPreBarriers()
     verifyPreData = nullptr;
     incrementalState = State::NotActive;
 
-    if (!compartmentCreated && IsIncrementalGCSafe(rt)) {
+    if (!compartmentCreated && IsIncrementalGCUnsafe(rt) == AbortReason::None) {
         CheckEdgeTracer cetrc(rt);
 
         /* Start after the roots. */
@@ -535,7 +535,7 @@ CheckHeapTracer::check(AutoLockForExclusiveAccess& lock)
         return;
 
     if (failures) {
-        fprintf(stderr, "Heap check: %zu failure(s) out of %" PRIu32 " pointers checked\n",
+        fprintf(stderr, "Heap check: %" PRIuSIZE " failure(s) out of %" PRIu32 " pointers checked\n",
                 failures, visited.count());
     }
     MOZ_RELEASE_ASSERT(failures == 0);

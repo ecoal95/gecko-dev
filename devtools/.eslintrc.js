@@ -37,7 +37,6 @@ module.exports = {
     // devtools coding style.
 
     // Rules from the mozilla plugin
-    "mozilla/mark-test-function-used": 1,
     "mozilla/no-aArgs": 1,
     "mozilla/no-cpows-in-tests": 2,
     "mozilla/no-single-arg-cu-import": 2,
@@ -146,8 +145,8 @@ module.exports = {
     "indent": [2, 2, {"SwitchCase": 1}],
     // Enforces spacing between keys and values in object literal properties.
     "key-spacing": [2, {"beforeColon": false, "afterColon": true}],
-    // Allow mixed 'LF' and 'CRLF' as linebreaks.
-    "linebreak-style": 0,
+    // Enforces unix style line breaks.
+    "linebreak-style": [2, "unix"],
     // Don't enforce the maximum depth that blocks can be nested. The complexity
     // rule is a better rule to check this.
     "max-depth": 0,

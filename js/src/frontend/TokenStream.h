@@ -237,18 +237,9 @@ struct Token
     }
 };
 
-struct CompileError {
-    JSErrorReport report;
-    char* message;
-    CompileError() : message(nullptr) {}
-    ~CompileError();
+class CompileError : public JSErrorReport {
+public:
     void throwError(JSContext* cx);
-
-  private:
-    // CompileError owns raw allocated memory, so disable assignment and copying
-    // for safety.
-    void operator=(const CompileError&) = delete;
-    CompileError(const CompileError&) = delete;
 };
 
 // Ideally, tokenizing would be entirely independent of context.  But the
@@ -366,6 +357,7 @@ class MOZ_STACK_CLASS TokenStream
     bool isEOF() const { return flags.isEOF; }
     bool sawOctalEscape() const { return flags.sawOctalEscape; }
     bool hadError() const { return flags.hadError; }
+    void clearSawOctalEscape() { flags.sawOctalEscape = false; }
 
     // TokenStream-specific error reporters.
     bool reportError(unsigned errorNumber, ...);

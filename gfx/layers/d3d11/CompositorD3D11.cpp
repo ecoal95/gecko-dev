@@ -19,6 +19,7 @@
 #include "gfxPrefs.h"
 #include "gfxConfig.h"
 #include "gfxCrashReporterUtils.h"
+#include "gfxUtils.h"
 #include "mozilla/gfx/StackArray.h"
 #include "mozilla/Services.h"
 #include "mozilla/widget/WinCompositorWidget.h"
@@ -187,6 +188,7 @@ CompositorD3D11::Initialize(nsCString* const out_failureReason)
 
   mDevice = DeviceManagerDx::Get()->GetCompositorDevice();
   if (!mDevice) {
+    gfxCriticalNote << "[D3D11] failed to get compositor device.";
     *out_failureReason = "FEATURE_FAILURE_D3D11_NO_DEVICE";
     return false;
   }
@@ -888,6 +890,9 @@ CompositorD3D11::DrawQuad(const gfx::Rect& aRect,
         return;
       }
 
+      float* yuvToRgb = gfxUtils::Get4x3YuvColorMatrix(ycbcrEffect->mYUVColorSpace);
+      memcpy(&mPSConstants.yuvColorMatrix, yuvToRgb, sizeof(mPSConstants.yuvColorMatrix));
+
       TextureSourceD3D11* sourceY  = source->GetSubSource(Y)->AsSourceD3D11();
       TextureSourceD3D11* sourceCb = source->GetSubSource(Cb)->AsSourceD3D11();
       TextureSourceD3D11* sourceCr = source->GetSubSource(Cr)->AsSourceD3D11();
@@ -975,9 +980,16 @@ CompositorD3D11::BeginFrame(const nsIntRegion& aInvalidRegion,
   // this is important because resizing our buffers when mimised will fail and
   // cause a crash when we're restored.
   NS_ASSERTION(mHwnd, "Couldn't find an HWND when initialising?");
-  if (::IsIconic(mHwnd) || mDevice->GetDeviceRemovedReason() != S_OK) {
+  if (::IsIconic(mHwnd)) {
     // We are not going to render, and not going to call EndFrame so we have to
     // read-unlock our textures to prevent them from accumulating.
+    ReadUnlockTextures();
+    *aRenderBoundsOut = IntRect();
+    return;
+  }
+
+  if (mDevice->GetDeviceRemovedReason() != S_OK) {
+    gfxCriticalNote << "GFX: D3D11 skip BeginFrame with device-removed.";
     ReadUnlockTextures();
     *aRenderBoundsOut = IntRect();
     return;
@@ -1072,6 +1084,13 @@ CompositorD3D11::EndFrame()
 {
   if (!mDefaultRT) {
     Compositor::EndFrame();
+    return;
+  }
+
+  if (mDevice->GetDeviceRemovedReason() != S_OK) {
+    gfxCriticalNote << "GFX: D3D11 skip EndFrame with device-removed.";
+    Compositor::EndFrame();
+    mCurrentRT = nullptr;
     return;
   }
 

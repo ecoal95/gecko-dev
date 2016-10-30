@@ -34,10 +34,6 @@
 #include "ScaledFontFontconfig.h"
 #endif
 
-#ifdef XP_DARWIN
-#include "DrawTargetCG.h"
-#endif
-
 #ifdef WIN32
 #include "DrawTargetD2D1.h"
 #include "ScaledFontDWrite.h"
@@ -319,17 +315,6 @@ Factory::CreateDrawTarget(BackendType aBackend, const IntSize &aSize, SurfaceFor
       }
       break;
     }
-#elif defined XP_DARWIN
-  case BackendType::COREGRAPHICS:
-  case BackendType::COREGRAPHICS_ACCELERATED:
-    {
-      RefPtr<DrawTargetCG> newTarget;
-      newTarget = new DrawTargetCG();
-      if (newTarget->Init(aBackend, aSize, aFormat)) {
-        retVal = newTarget;
-      }
-      break;
-    }
 #endif
 #ifdef USE_SKIA
   case BackendType::SKIA:
@@ -397,17 +382,9 @@ Factory::CreateDrawTargetForData(BackendType aBackend,
     {
       RefPtr<DrawTargetSkia> newTarget;
       newTarget = new DrawTargetSkia();
-      newTarget->Init(aData, aSize, aStride, aFormat, aUninitialized);
-      retVal = newTarget;
-      break;
-    }
-#endif
-#ifdef XP_DARWIN
-  case BackendType::COREGRAPHICS:
-    {
-      RefPtr<DrawTargetCG> newTarget = new DrawTargetCG();
-      if (newTarget->Init(aBackend, aData, aSize, aStride, aFormat))
-        return newTarget.forget();
+      if (newTarget->Init(aData, aSize, aStride, aFormat, aUninitialized)) {
+        retVal = newTarget;
+      }
       break;
     }
 #endif
@@ -458,11 +435,9 @@ Factory::DoesBackendSupportDataDrawtarget(BackendType aType)
   case BackendType::DIRECT2D1_1:
   case BackendType::RECORDING:
   case BackendType::NONE:
-  case BackendType::COREGRAPHICS_ACCELERATED:
   case BackendType::BACKEND_LAST:
     return false;
   case BackendType::CAIRO:
-  case BackendType::COREGRAPHICS:
   case BackendType::SKIA:
     return true;
   }
@@ -475,12 +450,7 @@ Factory::GetMaxSurfaceSize(BackendType aType)
 {
   switch (aType) {
   case BackendType::CAIRO:
-  case BackendType::COREGRAPHICS:
     return DrawTargetCairo::GetMaxSurfaceSize();
-#ifdef XP_MACOSX
-  case BackendType::COREGRAPHICS_ACCELERATED:
-    return DrawTargetCG::GetMaxSurfaceSize();
-#endif
 #ifdef USE_SKIA
   case BackendType::SKIA:
     return DrawTargetSkia::GetMaxSurfaceSize();
@@ -734,6 +704,18 @@ Factory::CreateDrawTargetSkiaWithGrContext(GrContext* aGrContext,
 
 #endif // USE_SKIA_GPU
 
+#ifdef USE_SKIA
+already_AddRefed<DrawTarget>
+Factory::CreateDrawTargetWithSkCanvas(SkCanvas* aCanvas)
+{
+  RefPtr<DrawTargetSkia> newTarget = new DrawTargetSkia();
+  if (!newTarget->Init(aCanvas)) {
+    return nullptr;
+  }
+  return newTarget.forget();
+}
+#endif
+
 void
 Factory::PurgeAllCaches()
 {
@@ -777,36 +759,6 @@ Factory::CreateSourceSurfaceForCairoSurface(cairo_surface_t* aSurface, const Int
 #endif
 }
 
-#ifdef XP_DARWIN
-already_AddRefed<DrawTarget>
-Factory::CreateDrawTargetForCairoCGContext(CGContextRef cg, const IntSize& aSize)
-{
-  if (!AllowedSurfaceSize(aSize)) {
-    gfxCriticalError(LoggerOptionsBasedOnSize(aSize)) << "Failed to allocate a surface due to invalid size (CG) " << aSize;
-    return nullptr;
-  }
-
-  RefPtr<DrawTarget> retVal;
-
-  RefPtr<DrawTargetCG> newTarget = new DrawTargetCG();
-
-  if (newTarget->Init(cg, aSize)) {
-    retVal = newTarget;
-  }
-
-  if (mRecorder && retVal) {
-    return MakeAndAddRef<DrawTargetRecording>(mRecorder, retVal);
-  }
-  return retVal.forget();
-}
-
-already_AddRefed<GlyphRenderingOptions>
-Factory::CreateCGGlyphRenderingOptions(const Color &aFontSmoothingBackgroundColor)
-{
-  return MakeAndAddRef<GlyphRenderingOptionsCG>(aFontSmoothingBackgroundColor);
-}
-#endif
-
 already_AddRefed<DataSourceSurface>
 Factory::CreateWrappingDataSourceSurface(uint8_t *aData,
                                          int32_t aStride,
@@ -829,6 +781,14 @@ Factory::CreateWrappingDataSourceSurface(uint8_t *aData,
 
   return newSurf.forget();
 }
+
+#ifdef XP_DARWIN
+already_AddRefed<GlyphRenderingOptions>
+Factory::CreateCGGlyphRenderingOptions(const Color &aFontSmoothingBackgroundColor)
+{
+  return MakeAndAddRef<GlyphRenderingOptionsCG>(aFontSmoothingBackgroundColor);
+}
+#endif
 
 already_AddRefed<DataSourceSurface>
 Factory::CreateDataSourceSurface(const IntSize &aSize,

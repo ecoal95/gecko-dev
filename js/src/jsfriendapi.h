@@ -121,8 +121,10 @@ enum {
     JS_TELEMETRY_GC_SLOW_PHASE,
     JS_TELEMETRY_GC_MMU_50,
     JS_TELEMETRY_GC_RESET,
+    JS_TELEMETRY_GC_RESET_REASON,
     JS_TELEMETRY_GC_INCREMENTAL_DISABLED,
     JS_TELEMETRY_GC_NON_INCREMENTAL,
+    JS_TELEMETRY_GC_NON_INCREMENTAL_REASON,
     JS_TELEMETRY_GC_SCC_SWEEP_TOTAL_MS,
     JS_TELEMETRY_GC_SCC_SWEEP_MAX_PAUSE_MS,
     JS_TELEMETRY_GC_MINOR_REASON,
@@ -1450,9 +1452,9 @@ struct MOZ_STACK_CLASS JS_FRIEND_API(ErrorReport)
         return reportp;
     }
 
-    const char* message()
+    const JS::ConstUTF8CharsZ toStringResult()
     {
-        return message_;
+        return toStringResult_;
     }
 
   private:
@@ -1471,15 +1473,8 @@ struct MOZ_STACK_CLASS JS_FRIEND_API(ErrorReport)
     // We may have a provided JSErrorReport, so need a way to represent that.
     JSErrorReport* reportp;
 
-    // And we may have a message.
-    const char* message_;
-
     // Or we may need to synthesize a JSErrorReport one of our own.
     JSErrorReport ownedReport;
-
-    // Or a message of our own.  If this is non-null, we need to clean up both
-    // it and ownedReport.
-    char* ownedMessage;
 
     // And we have a string to maybe keep alive that has pointers into
     // it from ownedReport.
@@ -1491,14 +1486,14 @@ struct MOZ_STACK_CLASS JS_FRIEND_API(ErrorReport)
     // And we need to root our exception value.
     JS::RootedObject exnObject;
 
-    // And possibly some byte storage for our message_.
-    JSAutoByteString bytesStorage;
-
     // And for our filename.
     JSAutoByteString filename;
 
-    // True if we need to free message_ and the stuff in ownedReport
-    bool ownsMessageAndReport;
+    // We may have a result of error.toString().
+    // FIXME: We should not call error.toString(), since it could have side
+    //        effect (see bug 633623).
+    JS::ConstUTF8CharsZ toStringResult_;
+    JSAutoByteString toStringResultBytesStorage;
 };
 
 /* Implemented in vm/StructuredClone.cpp. */

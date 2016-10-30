@@ -46,7 +46,6 @@ MessageEvent::MessageEvent(EventTarget* aOwner,
                            WidgetEvent* aEvent)
   : Event(aOwner, aPresContext, aEvent)
   , mData(JS::UndefinedValue())
-  , mPortsSet(false)
 {
 }
 
@@ -66,7 +65,6 @@ void
 MessageEvent::GetData(JSContext* aCx, JS::MutableHandle<JS::Value> aData,
                       ErrorResult& aRv)
 {
-  JS::ExposeValueToActiveJS(mData);
   aData.set(mData);
   if (!JS_WrapValue(aCx, aData)) {
     aRv.Throw(NS_ERROR_FAILURE);
@@ -121,13 +119,8 @@ MessageEvent::Constructor(EventTarget* aEventTarget,
 
   mozilla::HoldJSObjects(event.get());
 
-  if (aParam.mOrigin.WasPassed()) {
-    event->mOrigin = aParam.mOrigin.Value();
-  }
-
-  if (aParam.mLastEventId.WasPassed()) {
-    event->mLastEventId = aParam.mLastEventId.Value();
-  }
+  event->mOrigin = aParam.mOrigin;
+  event->mLastEventId = aParam.mLastEventId;
 
   if (!aParam.mSource.IsNull()) {
     if (aParam.mSource.Value().IsWindow()) {
@@ -139,10 +132,7 @@ MessageEvent::Constructor(EventTarget* aEventTarget,
     MOZ_ASSERT(event->mWindowSource || event->mPortSource);
   }
 
-  if (aParam.mPorts.WasPassed() && !aParam.mPorts.Value().IsNull()) {
-    event->mPorts.AppendElements(aParam.mPorts.Value().Value());
-    event->mPortsSet = true;
-  }
+  event->mPorts.AppendElements(aParam.mPorts);
 
   return event.forget();
 }
@@ -154,7 +144,7 @@ MessageEvent::InitMessageEvent(JSContext* aCx, const nsAString& aType,
                                const nsAString& aOrigin,
                                const nsAString& aLastEventId,
                                const Nullable<WindowProxyOrMessagePort>& aSource,
-                               const Nullable<Sequence<OwningNonNull<MessagePort>>>& aPorts)
+                               const Sequence<OwningNonNull<MessagePort>>& aPorts)
 {
   Event::InitEvent(aType, aCanBubble, aCancelable);
   mData = aData;
@@ -175,39 +165,14 @@ MessageEvent::InitMessageEvent(JSContext* aCx, const nsAString& aType,
   }
 
   mPorts.Clear();
-  mPortsSet = false;
-
-  if (!aPorts.IsNull()) {
-    mPorts.AppendElements(aPorts.Value());
-    mPortsSet = true;
-  }
-
+  mPorts.AppendElements(aPorts);
   MessageEventBinding::ClearCachedPortsValue(this);
 }
 
 void
-MessageEvent::GetPorts(Nullable<nsTArray<RefPtr<MessagePort>>>& aPorts)
+MessageEvent::GetPorts(nsTArray<RefPtr<MessagePort>>& aPorts)
 {
-  if (!mPortsSet) {
-    aPorts.SetNull();
-    return;
-  }
-
-  aPorts.SetValue(mPorts);
-}
-
-void
-MessageEvent::SetPorts(nsTArray<RefPtr<MessagePort>>&& aPorts)
-{
-  MOZ_ASSERT(mPorts.IsEmpty() && !mPortsSet);
-  mPorts = Move(aPorts);
-  mPortsSet = true;
-}
-
-void
-MessageEvent::SetSource(mozilla::dom::MessagePort* aPort)
-{
-  mPortSource = aPort;
+  aPorts = mPorts;
 }
 
 } // namespace dom

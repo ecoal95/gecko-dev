@@ -5,6 +5,7 @@ Cu.import("resource://gre/modules/PlacesUtils.jsm");
 Cu.import("resource://gre/modules/PlacesSyncUtils.jsm");
 Cu.import("resource://gre/modules/BookmarkJSONUtils.jsm");
 Cu.import("resource://gre/modules/Log.jsm");
+Cu.import("resource://services-sync/constants.js");
 Cu.import("resource://services-sync/engines.js");
 Cu.import("resource://services-sync/engines/bookmarks.js");
 Cu.import("resource://services-sync/service.js");
@@ -16,15 +17,28 @@ initTestLogging("Trace");
 
 Service.engineManager.register(BookmarksEngine);
 
+function* assertChildGuids(folderGuid, expectedChildGuids, message) {
+  let tree = yield PlacesUtils.promiseBookmarksTree(folderGuid);
+  let childGuids = tree.children.map(child => child.guid);
+  deepEqual(childGuids, expectedChildGuids, message);
+}
+
 add_task(function* test_change_during_sync() {
   _("Ensure that we track changes made during a sync.");
 
-  let engine = new BookmarksEngine(Service);
-  let store  = engine._store;
+  let engine  = new BookmarksEngine(Service);
+  let store   = engine._store;
+  let tracker = engine._tracker;
   let server = serverForFoo(engine);
   new SyncTestingInfrastructure(server.server);
 
   let collection = server.user("foo").collection("bookmarks");
+
+  let bz_id = PlacesUtils.bookmarks.insertBookmark(
+    PlacesUtils.bookmarksMenuFolderId, Utils.makeURI("https://bugzilla.mozilla.org/"),
+    PlacesUtils.bookmarks.DEFAULT_INDEX, "Bugzilla");
+  let bz_guid = yield PlacesUtils.promiseItemGuid(bz_id);
+    _(`Bugzilla GUID: ${bz_guid}`);
 
   Svc.Obs.notify("weave:engine:start-tracking");
 
@@ -42,21 +56,41 @@ add_task(function* test_change_during_sync() {
 
     // Sync is synchronous, so, to simulate a bookmark change made during a
     // sync, we create a server record that adds a bookmark as a side effect.
-    let bmk2_guid = "get-firefox1";
-    let bmk3_id = -1;
+    let bmk2_guid = "get-firefox1"; // New child of Folder 1, created remotely.
+    let bmk3_id = -1; // New child of Folder 1, created locally during sync.
+    let folder2_guid = "folder2-1111"; // New folder, created remotely.
+    let tagQuery_guid = "tag-query111"; // New tag query child of Folder 2, created remotely.
+    let bmk4_guid = "example-org1"; // New tagged child of Folder 2, created remotely.
     {
-      let localRecord = new Bookmark("bookmarks", bmk2_guid);
-      localRecord.bmkUri        = "http://getfirefox.com/";
-      localRecord.description   = "Firefox is awesome.";
-      localRecord.title         = "Get Firefox!";
-      localRecord.tags          = ["firefox", "awesome", "browser"];
-      localRecord.keyword       = "awesome";
-      localRecord.loadInSidebar = false;
-      localRecord.parentName    = "Folder 1";
-      localRecord.parentid      = folder1_guid;
+      // An existing record changed on the server that should not trigger
+      // another sync when applied.
+      let bzBmk = new Bookmark("bookmarks", bz_guid);
+      bzBmk.bmkUri      = "https://bugzilla.mozilla.org/";
+      bzBmk.description = "New description";
+      bzBmk.title       = "Bugzilla";
+      bzBmk.tags        = ["new", "tags"];
+      bzBmk.parentName  = "Bookmarks Toolbar";
+      bzBmk.parentid    = "toolbar";
+      collection.insert(bz_guid, encryptPayload(bzBmk.cleartext));
 
-      let remoteRecord = collection.insert(bmk2_guid, encryptPayload(localRecord.cleartext));
-      remoteRecord.get = function get() {
+      let remoteFolder = new BookmarkFolder("bookmarks", folder2_guid);
+      remoteFolder.title      = "Folder 2";
+      remoteFolder.children   = [bmk4_guid, tagQuery_guid];
+      remoteFolder.parentName = "Bookmarks Menu";
+      remoteFolder.parentid   = "menu";
+      collection.insert(folder2_guid, encryptPayload(remoteFolder.cleartext));
+
+      let localFxBmk = new Bookmark("bookmarks", bmk2_guid);
+      localFxBmk.bmkUri        = "http://getfirefox.com/";
+      localFxBmk.description   = "Firefox is awesome.";
+      localFxBmk.title         = "Get Firefox!";
+      localFxBmk.tags          = ["firefox", "awesome", "browser"];
+      localFxBmk.keyword       = "awesome";
+      localFxBmk.loadInSidebar = false;
+      localFxBmk.parentName    = "Folder 1";
+      localFxBmk.parentid      = folder1_guid;
+      let remoteFxBmk = collection.insert(bmk2_guid, encryptPayload(localFxBmk.cleartext));
+      remoteFxBmk.get = function get() {
         _("Inserting bookmark into local store");
         bmk3_id = PlacesUtils.bookmarks.insertBookmark(
           folder1_id, Utils.makeURI("https://mozilla.org/"),
@@ -64,16 +98,36 @@ add_task(function* test_change_during_sync() {
 
         return ServerWBO.prototype.get.apply(this, arguments);
       };
+
+      // A tag query referencing a nonexistent tag folder, which we should
+      // create locally when applying the record.
+      let localTagQuery = new BookmarkQuery("bookmarks", tagQuery_guid);
+      localTagQuery.bmkUri     = "place:type=7&folder=999";
+      localTagQuery.title      = "Taggy tags";
+      localTagQuery.folderName = "taggy";
+      localTagQuery.parentName = "Folder 2";
+      localTagQuery.parentid   = folder2_guid;
+      collection.insert(tagQuery_guid, encryptPayload(localTagQuery.cleartext));
+
+      // A bookmark that should appear in the results for the tag query.
+      let localTaggedBmk = new Bookmark("bookmarks", bmk4_guid);
+      localTaggedBmk.bmkUri     = "https://example.org";
+      localTaggedBmk.title      = "Tagged bookmark";
+      localTaggedBmk.tags       = ["taggy"];
+      localTaggedBmk.parentName = "Folder 2";
+      localTaggedBmk.parentid   = folder2_guid;
+      collection.insert(bmk4_guid, encryptPayload(localTaggedBmk.cleartext));
     }
 
-    {
-      let tree = yield PlacesUtils.promiseBookmarksTree(folder1_guid);
-      let childGuids = tree.children.map(child => child.guid);
-      deepEqual(childGuids, [bmk1_guid], "Folder should have 1 child before first sync");
-    }
+    yield* assertChildGuids(folder1_guid, [bmk1_guid], "Folder should have 1 child before first sync");
 
     _("Perform first sync");
-    yield sync_engine_and_validate_telem(engine, false);
+    {
+      let changes = engine.pullNewChanges();
+      deepEqual(changes.ids().sort(), [folder1_guid, bmk1_guid, "toolbar"].sort(),
+        "Should track bookmark and folder created before first sync");
+      yield sync_engine_and_validate_telem(engine, false);
+    }
 
     let bmk2_id = store.idForGUID(bmk2_guid);
     let bmk3_guid = store.GUIDForId(bmk3_id);
@@ -86,23 +140,30 @@ add_task(function* test_change_during_sync() {
       ok(!collection.wbo(bmk3_guid),
         "Bookmark created during first sync shouldn't be uploaded yet");
 
-      let tree = yield PlacesUtils.promiseBookmarksTree(folder1_guid);
-      let childGuids = tree.children.map(child => child.guid);
-      deepEqual(childGuids, [bmk1_guid, bmk3_guid, bmk2_guid],
-        "Folder should have 3 children after first sync");
+      yield* assertChildGuids(folder1_guid, [bmk1_guid, bmk3_guid, bmk2_guid],
+        "Folder 1 should have 3 children after first sync");
+      yield* assertChildGuids(folder2_guid, [bmk4_guid, tagQuery_guid],
+        "Folder 2 should have 2 children after first sync");
+      let taggedURIs = PlacesUtils.tagging.getURIsForTag("taggy");
+      equal(taggedURIs.length, 1, "Should have 1 tagged URI");
+      equal(taggedURIs[0].spec, "https://example.org/",
+        "Synced tagged bookmark should appear in tagged URI list");
     }
 
     _("Perform second sync");
-    yield sync_engine_and_validate_telem(engine, false);
-
     {
+      let changes = engine.pullNewChanges();
+      deepEqual(changes.ids().sort(), [bmk3_guid, folder1_guid].sort(),
+        "Should track bookmark added during last sync and its parent");
+      yield sync_engine_and_validate_telem(engine, false);
+
       ok(collection.wbo(bmk3_guid),
         "Bookmark created during first sync should be uploaded during second sync");
 
-      let tree = yield PlacesUtils.promiseBookmarksTree(folder1_guid);
-      let childGuids = tree.children.map(child => child.guid);
-      deepEqual(childGuids, [bmk1_guid, bmk3_guid, bmk2_guid],
-        "Folder should have same children after second sync");
+      yield* assertChildGuids(folder1_guid, [bmk1_guid, bmk3_guid, bmk2_guid],
+        "Folder 1 should have same children after second sync");
+      yield* assertChildGuids(folder2_guid, [bmk4_guid, tagQuery_guid],
+        "Folder 2 should have same children after second sync");
     }
   } finally {
     store.wipe();
@@ -575,6 +636,9 @@ add_task(function* test_misreconciled_root() {
 
   _("Applying record.");
   engine._processIncoming({
+    getBatched() {
+      return this.get();
+    },
     get: function () {
       this.recordHandler(encrypted);
       return {success: true}

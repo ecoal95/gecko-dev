@@ -127,7 +127,8 @@ function transformPacket(packet) {
         parameters,
         messageText,
         stacktrace: message.stacktrace ? message.stacktrace : null,
-        frame
+        frame,
+        userProvidedStyles: message.styles,
       });
     }
 
@@ -163,6 +164,7 @@ function transformPacket(packet) {
         messageText: pageError.errorMessage,
         stacktrace: pageError.stacktrace ? pageError.stacktrace : null,
         frame,
+        exceptionDocURL: pageError.exceptionDocURL,
       });
     }
 
@@ -181,6 +183,7 @@ function transformPacket(packet) {
     default: {
       let {
         exceptionMessage: messageText,
+        exceptionDocURL,
         result: parameters
       } = packet;
 
@@ -191,6 +194,7 @@ function transformPacket(packet) {
         level,
         messageText,
         parameters,
+        exceptionDocURL,
       });
     }
   }

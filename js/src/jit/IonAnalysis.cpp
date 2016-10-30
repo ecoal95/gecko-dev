@@ -6,6 +6,8 @@
 
 #include "jit/IonAnalysis.h"
 
+#include "mozilla/SizePrintfMacros.h"
+
 #include "jit/AliasAnalysis.h"
 #include "jit/BaselineInspector.h"
 #include "jit/BaselineJIT.h"
@@ -445,9 +447,10 @@ jit::PruneUnusedBranches(MIRGenerator* mir, MIRGraph& graph)
                 shouldBailout = false;
 
             JitSpew(JitSpew_Prune, "info: block %d,"
-                    " predCount: %lu, domInst: %lu, span: %lu, effectful: %lu, "
-                    " isLoopExit: %s, numSuccessorsOfPred: %lu."
-                    " (score: %lu, shouldBailout: %s)",
+                    " predCount: %" PRIuSIZE ", domInst: %" PRIuSIZE
+                    ", span: %" PRIuSIZE ", effectful: %" PRIuSIZE ", "
+                    " isLoopExit: %s, numSuccessorsOfPred: %" PRIuSIZE "."
+                    " (score: %" PRIuSIZE ", shouldBailout: %s)",
                     block->id(), predCount, numDominatedInst, branchSpan, numEffectfulInst,
                     isLoopExit ? "true" : "false", numSuccessorsOfPreds,
                     score, shouldBailout ? "true" : "false");
@@ -2029,8 +2032,24 @@ IsRegExpHoistableCall(MCall* call, MDefinition* def)
 }
 
 static bool
-CanCompareWithoutToPrimitive(MCompare* compare, MDefinition* def)
+CanCompareRegExp(MCompare* compare, MDefinition* def)
 {
+    MDefinition* value;
+    if (compare->lhs() == def) {
+        value = compare->rhs();
+    } else {
+        MOZ_ASSERT(compare->rhs() == def);
+        value = compare->lhs();
+    }
+
+    // Comparing two regexp that weren't cloned will give different result
+    // than if they were cloned.
+    if (value->mightBeType(MIRType::Object))
+        return false;
+
+    // Make sure @@toPrimitive is not called which could notice
+    // the difference between a not cloned/cloned regexp.
+
     JSOp op = compare->jsop();
     // Strict equality comparison won't invoke @@toPrimitive.
     if (op == JSOP_STRICTEQ || op == JSOP_STRICTNE)
@@ -2043,14 +2062,6 @@ CanCompareWithoutToPrimitive(MCompare* compare, MDefinition* def)
     }
 
     // Loose equality comparison can invoke @@toPrimitive.
-    MDefinition* value;
-    if (compare->lhs() == def) {
-        value = compare->rhs();
-    } else {
-        MOZ_ASSERT(compare->rhs() == def);
-        value = compare->lhs();
-    }
-
     if (value->mightBeType(MIRType::Boolean) || value->mightBeType(MIRType::String) ||
         value->mightBeType(MIRType::Int32) ||
         value->mightBeType(MIRType::Double) || value->mightBeType(MIRType::Float32) ||
@@ -2116,7 +2127,7 @@ IsRegExpHoistable(MIRGenerator* mir, MDefinition* regexp, MDefinitionVector& wor
             } else if (useDef->isLoadFixedSlot() || useDef->isTypeOf()) {
                 continue;
             } else if (useDef->isCompare()) {
-                if (CanCompareWithoutToPrimitive(useDef->toCompare(), def))
+                if (CanCompareRegExp(useDef->toCompare(), def))
                     continue;
             }
             // Instructions that modifies `lastIndex` property.
@@ -4098,7 +4109,7 @@ jit::AnalyzeNewScriptDefiniteProperties(JSContext* cx, JSFunction* fun,
         return false;
 
     CompileInfo info(script, fun,
-                     /* osrPc = */ nullptr, /* constructing = */ false,
+                     /* osrPc = */ nullptr,
                      Analysis_DefiniteProperties,
                      script->needsArgsObj(),
                      inlineScriptTree);
@@ -4333,7 +4344,7 @@ jit::AnalyzeArgumentsUsage(JSContext* cx, JSScript* scriptArg)
     }
 
     CompileInfo info(script, script->functionNonDelazifying(),
-                     /* osrPc = */ nullptr, /* constructing = */ false,
+                     /* osrPc = */ nullptr,
                      Analysis_ArgumentsUsage,
                      /* needsArgsObj = */ true,
                      inlineScriptTree);
