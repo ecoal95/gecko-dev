@@ -123,7 +123,9 @@
 ${helpers.single_keyword("font-style",
                          "normal italic oblique",
                          gecko_constant_prefix="NS_FONT_STYLE",
+                         gecko_ffi_name="mFont.style",
                          animatable=False)}
+
 ${helpers.single_keyword("font-variant",
                          "normal small-caps",
                          animatable=False)}
@@ -342,16 +344,84 @@ ${helpers.single_keyword("font-variant",
     }
 </%helpers:longhand>
 
+<%helpers:longhand products="gecko" name="font-synthesis" animatable="False">
+    use cssparser::ToCss;
+    use std::fmt;
+    use values::LocalToCss;
+    use values::computed::ComputedValueAsSpecified;
+    use values::NoViewportPercentage;
+
+    impl ComputedValueAsSpecified for SpecifiedValue {}
+    impl NoViewportPercentage for SpecifiedValue {}
+
+    pub mod computed_value {
+        pub use super::SpecifiedValue as T;
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+    pub struct SpecifiedValue {
+        pub weight: bool,
+        pub style: bool,
+    }
+
+    impl ToCss for computed_value::T {
+        fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+            if self.weight && self.style {
+                dest.write_str("weight style")
+            } else if self.style {
+                dest.write_str("style")
+            } else if self.weight {
+                dest.write_str("weight")
+            } else {
+                dest.write_str("none")
+            }
+        }
+    }
+
+    #[inline]
+    pub fn get_initial_value() -> computed_value::T {
+        SpecifiedValue { weight: true, style: true }
+    }
+
+    pub fn parse(_context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
+        let mut result = SpecifiedValue { weight: false, style: false };
+        match_ignore_ascii_case! {try!(input.expect_ident()),
+            "none" => Ok(result),
+            "weight" => {
+                result.weight = true;
+                if input.try(|input| input.expect_ident_matching("style")).is_ok() {
+                    result.style = true;
+                }
+                Ok(result)
+            },
+            "style" => {
+                result.style = true;
+                if input.try(|input| input.expect_ident_matching("weight")).is_ok() {
+                    result.weight = true;
+                }
+                Ok(result)
+            },
+            _ => Err(())
+        }
+    }
+</%helpers:longhand>
+
 // FIXME: This prop should be animatable
 ${helpers.single_keyword("font-stretch",
                          "normal ultra-condensed extra-condensed condensed \
                           semi-condensed semi-expanded expanded extra-expanded \
                           ultra-expanded",
+                         gecko_ffi_name="mFont.stretch",
+                         gecko_constant_prefix="NS_FONT_STRETCH",
+                         cast_type='i16',
                          animatable=False)}
 
 ${helpers.single_keyword("font-kerning",
                          "auto none normal",
                          products="gecko",
+                         gecko_ffi_name="mFont.kerning",
+                         gecko_constant_prefix="NS_FONT_KERNING",
                          animatable=False)}
 
 ${helpers.single_keyword("font-variant-position",
@@ -361,3 +431,156 @@ ${helpers.single_keyword("font-variant-position",
                          gecko_constant_prefix="NS_FONT_VARIANT_POSITION",
                          animatable=False)}
 
+<%helpers:longhand name="font-feature-settings" products="none" animatable="False">
+    use cssparser::ToCss;
+    use std::fmt;
+    use values::NoViewportPercentage;
+    use values::computed::ComputedValueAsSpecified;
+    pub use self::computed_value::T as SpecifiedValue;
+
+    impl ComputedValueAsSpecified for SpecifiedValue {}
+    impl NoViewportPercentage for SpecifiedValue {}
+
+    pub mod computed_value {
+        use cssparser::ToCss;
+        use cssparser::Parser;
+        use std::fmt;
+
+        #[derive(Debug, Clone, PartialEq)]
+        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        pub enum T {
+            Normal,
+            Tag(Vec<FeatureTagValue>)
+        }
+
+        #[derive(Debug, Clone, PartialEq)]
+        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        pub struct FeatureTagValue {
+            pub tag: String,
+            pub value: i32
+        }
+
+        impl ToCss for T {
+            fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+                match *self {
+                    T::Normal => dest.write_str("normal"),
+                    T::Tag(ref ftvs) => {
+                        let mut iter = ftvs.iter();
+                        // handle head element
+                        try!(iter.next().unwrap().to_css(dest));
+                        // handle tail, precede each with a delimiter
+                        for ftv in iter {
+                            try!(dest.write_str(", "));
+                            try!(ftv.to_css(dest));
+                        }
+                        Ok(())
+                    }
+                }
+            }
+        }
+
+        impl ToCss for FeatureTagValue {
+            fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+                match self.value {
+                    1 => write!(dest, "\"{}\"", self.tag),
+                    0 => write!(dest, "\"{}\" off", self.tag),
+                    x => write!(dest, "\"{}\" {}", self.tag, x)
+                }
+            }
+        }
+
+        impl FeatureTagValue {
+            /// https://www.w3.org/TR/css-fonts-3/#propdef-font-feature-settings
+            /// <string> [ on | off | <integer> ]
+            pub fn parse(input: &mut Parser) -> Result<FeatureTagValue, ()> {
+                let tag = try!(input.expect_string());
+
+                // allowed strings of length 4 containing chars: <U+20, U+7E>
+                if tag.len() != 4 ||
+                   tag.chars().any(|c| c < ' ' || c > '~')
+                {
+                    return Err(())
+                }
+
+                if let Ok(value) = input.try(|input| input.expect_integer()) {
+                    // handle integer, throw if it is negative
+                    if value >= 0 {
+                        Ok(FeatureTagValue { tag: tag.into_owned(), value: value })
+                    } else {
+                        Err(())
+                    }
+                } else if let Ok(_) = input.try(|input| input.expect_ident_matching("on")) {
+                    // on is an alias for '1'
+                    Ok(FeatureTagValue { tag: tag.into_owned(), value: 1 })
+                } else if let Ok(_) = input.try(|input| input.expect_ident_matching("off")) {
+                    // off is an alias for '0'
+                    Ok(FeatureTagValue { tag: tag.into_owned(), value: 0 })
+                } else {
+                    // empty value is an alias for '1'
+                    Ok(FeatureTagValue { tag:tag.into_owned(), value: 1 })
+                }
+            }
+        }
+    }
+
+    #[inline]
+    pub fn get_initial_value() -> computed_value::T {
+        computed_value::T::Normal
+    }
+
+    /// normal | <feature-tag-value>#
+    pub fn parse(_context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
+        if input.try(|input| input.expect_ident_matching("normal")).is_ok() {
+            Ok(computed_value::T::Normal)
+        } else {
+            input.parse_comma_separated(computed_value::FeatureTagValue::parse)
+                 .map(computed_value::T::Tag)
+        }
+    }
+</%helpers:longhand>
+
+// https://www.w3.org/TR/css-fonts-3/#propdef-font-language-override
+<%helpers:longhand name="font-language-override" products="none" animatable="False">
+    use values::NoViewportPercentage;
+    use values::computed::ComputedValueAsSpecified;
+    pub use self::computed_value::T as SpecifiedValue;
+
+    impl ComputedValueAsSpecified for SpecifiedValue {}
+    impl NoViewportPercentage for SpecifiedValue {}
+
+    pub mod computed_value {
+        use cssparser::ToCss;
+        use std::fmt;
+
+        impl ToCss for T {
+            fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+                match *self {
+                    T::Normal => dest.write_str("normal"),
+                    T::Override(ref lang) => write!(dest, "\"{}\"", lang),
+                }
+            }
+        }
+
+        #[derive(Clone, Debug, PartialEq)]
+        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        pub enum T {
+            Normal,
+            Override(String),
+        }
+    }
+
+    #[inline]
+    pub fn get_initial_value() -> computed_value::T {
+        computed_value::T::Normal
+    }
+
+    pub fn parse(_context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
+        if input.try(|input| input.expect_ident_matching("normal")).is_ok() {
+            Ok(SpecifiedValue::Normal)
+        } else {
+            input.expect_string().map(|cow| {
+                SpecifiedValue::Override(cow.into_owned())
+            })
+        }
+    }
+</%helpers:longhand>

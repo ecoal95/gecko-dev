@@ -84,6 +84,16 @@ impl HTMLSelectElement {
                            HTMLSelectElementBinding::Wrap)
     }
 
+    // https://html.spec.whatwg.org/multipage/#the-select-element:concept-form-reset-control
+    pub fn reset(&self) {
+        let node = self.upcast::<Node>();
+        for opt in node.traverse_preorder().filter_map(Root::downcast::<HTMLOptionElement>) {
+            opt.set_selectedness(opt.DefaultSelected());
+            opt.set_dirtiness(false);
+        }
+        self.ask_for_reset();
+    }
+
     // https://html.spec.whatwg.org/multipage/#ask-for-a-reset
     pub fn ask_for_reset(&self) {
         if self.Multiple() {
@@ -287,6 +297,36 @@ impl HTMLSelectElementMethods for HTMLSelectElement {
         // Reset remaining <option> elements
         for opt in opt_iter {
             opt.set_selectedness(false);
+        }
+    }
+
+    // https://html.spec.whatwg.org/multipage/#dom-select-selectedindex
+    fn SelectedIndex(&self) -> i32 {
+        self.upcast::<Node>()
+            .traverse_preorder()
+            .filter_map(Root::downcast::<HTMLOptionElement>)
+            .enumerate()
+            .filter(|&(_, ref opt_elem)| opt_elem.Selected())
+            .map(|(i, _)| i as i32)
+            .next()
+            .unwrap_or(-1)
+    }
+
+    // https://html.spec.whatwg.org/multipage/#dom-select-selectedindex
+    fn SetSelectedIndex(&self, index: i32) {
+        let mut opt_iter = self.upcast::<Node>()
+                               .traverse_preorder()
+                               .filter_map(Root::downcast::<HTMLOptionElement>);
+        for opt in opt_iter.by_ref().take(index as usize) {
+            opt.set_selectedness(false);
+        }
+        if let Some(opt) = opt_iter.next() {
+            opt.set_selectedness(true);
+            opt.set_dirtiness(true);
+            // Reset remaining <option> elements
+            for opt in opt_iter {
+                opt.set_selectedness(false);
+            }
         }
     }
 }

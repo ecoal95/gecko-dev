@@ -38,10 +38,10 @@ use dom::window::{ReflowReason, Window};
 use ipc_channel::ipc;
 use js::jsapi::{JSAutoCompartment, JSContext, MutableHandleValue};
 use js::jsval::{NullValue, UndefinedValue};
-use msg::constellation_msg::{FrameType, FrameId, LoadData, PipelineId, TraversalDirection};
+use msg::constellation_msg::{FrameType, FrameId, PipelineId, TraversalDirection};
 use net_traits::response::HttpsState;
 use script_layout_interface::message::ReflowQueryType;
-use script_traits::{IFrameLoadInfo, MozBrowserEvent, ScriptMsg as ConstellationMsg};
+use script_traits::{IFrameLoadInfo, LoadData, MozBrowserEvent, ScriptMsg as ConstellationMsg};
 use script_traits::IFrameSandboxState::{IFrameSandboxed, IFrameUnsandboxed};
 use std::cell::Cell;
 use string_cache::Atom;
@@ -543,6 +543,11 @@ impl HTMLIFrameElementMethods for HTMLIFrameElement {
     make_getter!(Height, "height");
     // https://html.spec.whatwg.org/multipage/#dom-dim-height
     make_dimension_setter!(SetHeight, "height");
+
+    // https://html.spec.whatwg.org/multipage/#other-elements,-attributes-and-apis:attr-iframe-frameborder
+    make_getter!(FrameBorder, "frameborder");
+    // https://html.spec.whatwg.org/multipage/#other-elements,-attributes-and-apis:attr-iframe-frameborder
+    make_setter!(SetFrameBorder, "frameborder");
 
     // check-tidy: no specs after this line
     fn SetMozprivatebrowsing(&self, value: bool) {

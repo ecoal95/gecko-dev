@@ -23,7 +23,6 @@ pub mod color;
 pub mod print_tree;
 
 use range::RangeIndex;
-use std::fmt::{self, Debug, Formatter};
 use std::sync::atomic::{ATOMIC_USIZE_INIT, AtomicUsize, Ordering};
 
 /// The next ID that will be used for a special stacking context.
@@ -78,56 +77,6 @@ pub enum ScrollPolicy {
     Scrollable,
     /// These layers do not scroll when the parent receives a scrolling message.
     FixedPosition,
-}
-
-#[derive(Clone, PartialEq, Eq, Copy, Hash, Deserialize, Serialize, HeapSizeOf)]
-pub struct LayerId(
-    /// The type of the layer. This serves to differentiate layers that share fragments.
-    LayerType,
-    /// The identifier for this layer's fragment, derived from the fragment memory address.
-    usize,
-    /// An index for identifying companion layers, synthesized to ensure that
-    /// content on top of this layer's fragment has the proper rendering order.
-    usize
-);
-
-impl Debug for LayerId {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        let LayerId(layer_type, id, companion) = *self;
-        let type_string = match layer_type {
-            LayerType::FragmentBody => "-FragmentBody",
-            LayerType::OverflowScroll => "-OverflowScroll",
-            LayerType::BeforePseudoContent => "-BeforePseudoContent",
-            LayerType::AfterPseudoContent => "-AfterPseudoContent",
-        };
-
-        write!(f, "{}{}-{}", id, type_string, companion)
-    }
-}
-
-impl LayerId {
-    /// FIXME(#2011, pcwalton): This is unfortunate. Maybe remove this in the future.
-    pub fn null() -> LayerId {
-        LayerId(LayerType::FragmentBody, 0, 0)
-    }
-
-    pub fn new_of_type(layer_type: LayerType, fragment_id: usize) -> LayerId {
-        LayerId(layer_type, fragment_id, 0)
-    }
-
-    pub fn companion_layer_id(&self) -> LayerId {
-        let LayerId(layer_type, id, companion) = *self;
-        LayerId(layer_type, id, companion + 1)
-    }
-
-    pub fn original(&self) -> LayerId {
-        let LayerId(layer_type, id, _) = *self;
-        LayerId(layer_type, id, 0)
-    }
-
-    pub fn kind(&self) -> LayerType {
-        self.0
-    }
 }
 
 /// A newtype struct for denoting the age of messages; prevents race conditions.
@@ -210,6 +159,58 @@ impl StackingContextId {
     #[inline]
     pub fn is_special(&self) -> bool {
         (self.0 & !SPECIAL_STACKING_CONTEXT_ID_MASK) == 0
+    }
+}
+
+/// A unique ID for every scrolling root.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, HeapSizeOf, PartialEq, Serialize)]
+pub struct ScrollRootId(
+    /// The identifier for this StackingContext, derived from the Flow's memory address
+    /// and fragment type.  As a space optimization, these are combined into a single word.
+    pub usize
+);
+
+impl ScrollRootId {
+    /// Returns a new stacking context ID for a special stacking context.
+    fn next_special_id() -> usize {
+        // We shift this left by 2 to make room for the fragment type ID.
+        ((NEXT_SPECIAL_STACKING_CONTEXT_ID.fetch_add(1, Ordering::SeqCst) + 1) << 2) &
+            SPECIAL_STACKING_CONTEXT_ID_MASK
+    }
+
+    #[inline]
+    pub fn new_of_type(id: usize, fragment_type: FragmentType) -> ScrollRootId {
+        debug_assert_eq!(id & (fragment_type as usize), 0);
+        if fragment_type == FragmentType::FragmentBody {
+            ScrollRootId(id)
+        } else {
+            ScrollRootId(ScrollRootId::next_special_id() | (fragment_type as usize))
+        }
+    }
+
+    /// Returns the stacking context ID for the outer document/layout root.
+    #[inline]
+    pub fn root() -> ScrollRootId {
+        ScrollRootId(0)
+    }
+
+    /// Returns true if this is a special stacking context.
+    ///
+    /// A special stacking context is a stacking context that is one of (a) the outer stacking
+    /// context of an element with `overflow: scroll`; (b) generated content; (c) both (a) and (b).
+    #[inline]
+    pub fn is_special(&self) -> bool {
+        (self.0 & !SPECIAL_STACKING_CONTEXT_ID_MASK) == 0
+    }
+
+    #[inline]
+    pub fn id(&self) -> usize {
+        self.0 & !3
+    }
+
+    #[inline]
+    pub fn fragment_type(&self) -> FragmentType {
+        FragmentType::from_usize(self.0 & 3)
     }
 }
 

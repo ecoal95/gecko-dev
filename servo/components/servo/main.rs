@@ -20,7 +20,6 @@
 #[cfg(target_os = "android")]
 #[macro_use]
 extern crate android_glue;
-#[cfg(not(target_os = "android"))]
 extern crate backtrace;
 // The window backed by glutin
 extern crate glutin_app as app;
@@ -256,13 +255,6 @@ extern {
     fn app_dummy() -> libc::c_void;
 }
 
-
-// This macro must be used at toplevel because it defines a nested
-// module, but macros can only accept identifiers - not paths -
-// preventing the expansion of this macro within the android module
-// without use of an additionl stub method or other hackery.
-#[cfg(target_os = "android")]
-android_start!(main);
 
 #[cfg(target_os = "android")]
 mod android {

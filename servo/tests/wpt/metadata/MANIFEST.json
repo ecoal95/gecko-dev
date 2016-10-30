@@ -37715,7 +37715,9 @@
     ]
   },
   "local_changes": {
-    "deleted": [],
+    "deleted": [
+      "url/url-domainToUnicode.html"
+    ],
     "deleted_reftests": {},
     "items": {
       "reftest": {
@@ -37761,6 +37763,18 @@
           {
             "path": "html/semantics/forms/the-select-element/common-HTMLOptionsCollection-add.html",
             "url": "/html/semantics/forms/the-select-element/common-HTMLOptionsCollection-add.html"
+          }
+        ],
+        "html/semantics/forms/the-select-element/selected-index.html": [
+          {
+            "path": "html/semantics/forms/the-select-element/selected-index.html",
+            "url": "/html/semantics/forms/the-select-element/selected-index.html"
+          }
+        ],
+        "html/webappapis/scripting/events/uncompiled_event_handler_with_scripting_disabled.html": [
+          {
+            "path": "html/webappapis/scripting/events/uncompiled_event_handler_with_scripting_disabled.html",
+            "url": "/html/webappapis/scripting/events/uncompiled_event_handler_with_scripting_disabled.html"
           }
         ]
       }

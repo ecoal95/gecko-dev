@@ -17,6 +17,7 @@ use flow::{Flow, FlowClass, OpaqueFlow, mut_base, FragmentationContext};
 use flow_ref::{self, FlowRef};
 use fragment::{Fragment, FragmentBorderBoxIterator, Overflow};
 use gfx::display_list::StackingContext;
+use gfx_traits::ScrollRootId;
 use gfx_traits::print_tree::PrintTree;
 use std::cmp::{min, max};
 use std::fmt;
@@ -41,7 +42,7 @@ pub struct MulticolColumnFlow {
 impl MulticolFlow {
     pub fn from_fragment(fragment: Fragment, float_kind: Option<FloatKind>) -> MulticolFlow {
         MulticolFlow {
-            block_flow: BlockFlow::from_fragment(fragment, float_kind),
+            block_flow: BlockFlow::from_fragment_and_float_kind(fragment, float_kind),
             column_pitch: Au(0),
         }
     }
@@ -50,7 +51,7 @@ impl MulticolFlow {
 impl MulticolColumnFlow {
     pub fn from_fragment(fragment: Fragment) -> MulticolColumnFlow {
         MulticolColumnFlow {
-            block_flow: BlockFlow::from_fragment(fragment, None),
+            block_flow: BlockFlow::from_fragment(fragment),
         }
     }
 }
@@ -185,8 +186,10 @@ impl Flow for MulticolFlow {
         self.block_flow.build_display_list(state);
     }
 
-    fn collect_stacking_contexts(&mut self, parent: &mut StackingContext) {
-        self.block_flow.collect_stacking_contexts(parent);
+    fn collect_stacking_contexts(&mut self,
+                                 parent: &mut StackingContext,
+                                 parent_scroll_root_id: ScrollRootId) {
+        self.block_flow.collect_stacking_contexts(parent, parent_scroll_root_id);
     }
 
     fn repair_style(&mut self, new_style: &Arc<ServoComputedValues>) {
@@ -267,8 +270,10 @@ impl Flow for MulticolColumnFlow {
         self.block_flow.build_display_list(state);
     }
 
-    fn collect_stacking_contexts(&mut self, parent: &mut StackingContext) {
-        self.block_flow.collect_stacking_contexts(parent);
+    fn collect_stacking_contexts(&mut self,
+                                 parent: &mut StackingContext,
+                                 parent_scroll_root_id: ScrollRootId) {
+        self.block_flow.collect_stacking_contexts(parent, parent_scroll_root_id);
     }
 
     fn repair_style(&mut self, new_style: &Arc<ServoComputedValues>) {

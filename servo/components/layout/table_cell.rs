@@ -15,6 +15,7 @@ use euclid::{Point2D, Rect, SideOffsets2D, Size2D};
 use flow::{self, Flow, FlowClass, IS_ABSOLUTELY_POSITIONED, OpaqueFlow};
 use fragment::{Fragment, FragmentBorderBoxIterator, Overflow};
 use gfx::display_list::StackingContext;
+use gfx_traits::ScrollRootId;
 use gfx_traits::print_tree::PrintTree;
 use layout_debug;
 use model::MaybeAuto;
@@ -46,10 +47,19 @@ pub struct TableCellFlow {
 }
 
 impl TableCellFlow {
+    pub fn from_fragment(fragment: Fragment) -> TableCellFlow {
+        TableCellFlow {
+            block_flow: BlockFlow::from_fragment(fragment),
+            collapsed_borders: CollapsedBordersForCell::new(),
+            column_span: 1,
+            visible: true,
+        }
+    }
+
     pub fn from_node_fragment_and_visibility_flag<N: ThreadSafeLayoutNode>(
             node: &N, fragment: Fragment, visible: bool) -> TableCellFlow {
         TableCellFlow {
-            block_flow: BlockFlow::from_fragment(fragment, None),
+            block_flow: BlockFlow::from_fragment(fragment),
             collapsed_borders: CollapsedBordersForCell::new(),
             column_span: node.get_colspan(),
             visible: visible,
@@ -247,8 +257,10 @@ impl Flow for TableCellFlow {
         self.block_flow.build_display_list_for_block(state, border_painting_mode)
     }
 
-    fn collect_stacking_contexts(&mut self, parent: &mut StackingContext) {
-        self.block_flow.collect_stacking_contexts(parent);
+    fn collect_stacking_contexts(&mut self,
+                                 parent: &mut StackingContext,
+                                 parent_scroll_root_id: ScrollRootId) {
+        self.block_flow.collect_stacking_contexts(parent, parent_scroll_root_id);
     }
 
     fn repair_style(&mut self, new_style: &Arc<ServoComputedValues>) {

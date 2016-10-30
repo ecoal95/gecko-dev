@@ -11,22 +11,22 @@ use euclid::{Point2D, Size2D};
 use euclid::point::TypedPoint2D;
 use euclid::scale_factor::ScaleFactor;
 use euclid::size::TypedSize2D;
-use gfx_traits::{DevicePixel, LayerPixel, StackingContextId};
-use gfx_traits::{Epoch, FrameTreeId, FragmentType, LayerId};
+use gfx_traits::{DevicePixel, LayerPixel, ScrollRootId};
+use gfx_traits::{Epoch, FrameTreeId, FragmentType};
 use gleam::gl;
 use gleam::gl::types::{GLint, GLsizei};
 use image::{DynamicImage, ImageFormat, RgbImage};
 use ipc_channel::ipc::{self, IpcSender, IpcSharedMemory};
 use ipc_channel::router::ROUTER;
-use msg::constellation_msg::{Image, PixelFormat, Key, KeyModifiers, KeyState};
-use msg::constellation_msg::{LoadData, TraversalDirection, PipelineId};
-use msg::constellation_msg::{PipelineIndex, PipelineNamespaceId, WindowSizeType};
+use msg::constellation_msg::{Key, KeyModifiers, KeyState};
+use msg::constellation_msg::{PipelineId, PipelineIndex, PipelineNamespaceId, TraversalDirection};
+use net_traits::image::base::{Image, PixelFormat};
 use profile_traits::mem::{self, Reporter, ReporterRequest};
 use profile_traits::time::{self, ProfilerCategory, profile};
 use script_traits::{AnimationState, AnimationTickType, ConstellationControlMsg};
-use script_traits::{ConstellationMsg, LayoutControlMsg, MouseButton, MouseEventType};
-use script_traits::{StackingContextScrollState, TouchpadPressurePhase, TouchEventType};
-use script_traits::{TouchId, WindowSizeData};
+use script_traits::{ConstellationMsg, LayoutControlMsg, LoadData, MouseButton};
+use script_traits::{MouseEventType, StackingContextScrollState};
+use script_traits::{TouchpadPressurePhase, TouchEventType, TouchId, WindowSizeData, WindowSizeType};
 use script_traits::CompositorEvent::{self, MouseMoveEvent, MouseButtonEvent, TouchEvent, TouchpadPressureEvent};
 use std::collections::HashMap;
 use std::fs::File;
@@ -74,13 +74,13 @@ impl ConvertPipelineIdFromWebRender for webrender_traits::PipelineId {
     }
 }
 
-trait ConvertStackingContextFromWebRender {
-    fn from_webrender(&self) -> StackingContextId;
+trait ConvertScrollRootIdFromWebRender {
+    fn from_webrender(&self) -> ScrollRootId;
 }
 
-impl ConvertStackingContextFromWebRender for webrender_traits::ServoStackingContextId {
-    fn from_webrender(&self) -> StackingContextId {
-        StackingContextId::new_of_type(self.1, self.0.from_webrender())
+impl ConvertScrollRootIdFromWebRender for webrender_traits::ServoScrollRootId {
+    fn from_webrender(&self) -> ScrollRootId {
+        ScrollRootId(self.0)
     }
 }
 
@@ -354,6 +354,17 @@ impl webrender_traits::RenderNotifier for RenderNotifier {
     }
 }
 
+// Used to dispatch functions from webrender to the main thread's event loop.
+struct CompositorThreadDispatcher {
+    compositor_proxy: Box<CompositorProxy>
+}
+
+impl webrender_traits::RenderDispatcher for CompositorThreadDispatcher {
+    fn dispatch(&self, f: Box<Fn() + Send>) {
+        self.compositor_proxy.send(Msg::Dispatch(f));
+    }
+}
+
 impl<Window: WindowMethods> IOCompositor<Window> {
     fn new(window: Rc<Window>, state: InitialCompositorState)
            -> IOCompositor<Window> {
@@ -425,6 +436,15 @@ impl<Window: WindowMethods> IOCompositor<Window> {
         let render_notifier = RenderNotifier::new(compositor_proxy_for_webrender,
                                                   compositor.constellation_chan.clone());
         compositor.webrender.set_render_notifier(Box::new(render_notifier));
+
+        if cfg!(target_os = "windows") {
+            // Used to dispatch functions from webrender to the main thread's event loop.
+            // Required to allow WGL GLContext sharing in Windows.
+            let dispatcher = Box::new(CompositorThreadDispatcher {
+                compositor_proxy: compositor.channel_to_self.clone_compositor_proxy()
+            });
+            compositor.webrender.set_main_thread_dispatcher(dispatcher);
+        }
 
         // Set the size of the root layer.
         compositor.update_zoom_transform();
@@ -503,9 +523,9 @@ impl<Window: WindowMethods> IOCompositor<Window> {
                 self.title_for_main_frame();
             }
 
-            (Msg::ScrollFragmentPoint(pipeline_id, layer_id, point, _),
+            (Msg::ScrollFragmentPoint(pipeline_id, point, _),
              ShutdownState::NotShuttingDown) => {
-                self.scroll_fragment_to_point(pipeline_id, layer_id, point);
+                self.scroll_fragment_to_point(pipeline_id, point);
             }
 
             (Msg::MoveTo(point),
@@ -578,6 +598,9 @@ impl<Window: WindowMethods> IOCompositor<Window> {
 
             (Msg::CreatePng(reply), ShutdownState::NotShuttingDown) => {
                 let res = self.composite_specific_target(CompositeTarget::WindowAndPng);
+                if let Err(ref e) = res {
+                    info!("Error retrieving PNG: {:?}", e);
+                }
                 let img = res.unwrap_or(None);
                 if let Err(e) = reply.send(img) {
                     warn!("Sending reply to create png failed ({}).", e);
@@ -637,6 +660,12 @@ impl<Window: WindowMethods> IOCompositor<Window> {
                     self.composition_request = CompositionRequest::CompositeNow(
                         CompositingReason::NewWebRenderScrollFrame);
                 }
+            }
+
+            (Msg::Dispatch(func), ShutdownState::NotShuttingDown) => {
+                // The functions sent here right now are really dumb, so they can't panic.
+                // But if we start running more complex code here, we should really catch panic here.
+                func();
             }
 
             // When we are shutting_down, we need to avoid performing operations
@@ -767,7 +796,6 @@ impl<Window: WindowMethods> IOCompositor<Window> {
 
     fn scroll_fragment_to_point(&mut self,
                                 _pipeline_id: PipelineId,
-                                _layer_id: LayerId,
                                 _point: Point2D<f32>) {
         println!("TODO: Support scroll_fragment_to_point again");
     }
@@ -1284,7 +1312,7 @@ impl<Window: WindowMethods> IOCompositor<Window> {
         let mut stacking_context_scroll_states_per_pipeline = HashMap::new();
         for scroll_layer_state in self.webrender_api.get_scroll_layer_state() {
             let stacking_context_scroll_state = StackingContextScrollState {
-                stacking_context_id: scroll_layer_state.stacking_context_id.from_webrender(),
+                scroll_root_id: scroll_layer_state.scroll_root_id.from_webrender(),
                 scroll_offset: scroll_layer_state.scroll_offset,
             };
             let pipeline_id = scroll_layer_state.pipeline_id;

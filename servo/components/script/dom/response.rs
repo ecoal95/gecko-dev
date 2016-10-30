@@ -5,7 +5,7 @@
 use body::{BodyOperations, BodyType, consume_body, consume_body_with_promise};
 use core::cell::Cell;
 use dom::bindings::cell::DOMRefCell;
-use dom::bindings::codegen::Bindings::HeadersBinding::HeadersMethods;
+use dom::bindings::codegen::Bindings::HeadersBinding::{HeadersInit, HeadersMethods};
 use dom::bindings::codegen::Bindings::ResponseBinding;
 use dom::bindings::codegen::Bindings::ResponseBinding::{ResponseMethods, ResponseType as DOMResponseType};
 use dom::bindings::codegen::Bindings::XMLHttpRequestBinding::BodyInit;
@@ -298,11 +298,14 @@ impl ResponseMethods for Response {
     // https://fetch.spec.whatwg.org/#dom-response-clone
     fn Clone(&self) -> Fallible<Root<Response>> {
         // Step 1
-        // TODO: This step relies on body and stream, which are still unimplemented.
+        if self.is_locked() || self.body_used.get() {
+            return Err(Error::Type("cannot clone a disturbed response".to_string()));
+        }
 
         // Step 2
         let new_response = Response::new(&self.global());
         new_response.Headers().set_guard(self.Headers().get_guard());
+        try!(new_response.Headers().fill(Some(HeadersInit::Headers(self.Headers()))));
 
         // https://fetch.spec.whatwg.org/#concept-response-clone
         // Instead of storing a net_traits::Response internally, we

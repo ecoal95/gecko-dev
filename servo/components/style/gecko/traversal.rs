@@ -2,10 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use atomic_refcell::AtomicRefCell;
 use context::{LocalStyleContext, SharedStyleContext, StyleContext};
-use dom::OpaqueNode;
+use data::ElementData;
+use dom::{NodeInfo, OpaqueNode, StylingMode, TElement, TNode};
 use gecko::context::StandaloneStyleContext;
-use gecko::wrapper::GeckoNode;
+use gecko::wrapper::{GeckoElement, GeckoNode};
 use std::mem;
 use traversal::{DomTraversalContext, recalc_style_at};
 use traversal::RestyleResult;
@@ -29,11 +31,14 @@ impl<'lc, 'ln> DomTraversalContext<GeckoNode<'ln>> for RecalcStyleOnly<'lc> {
     }
 
     fn process_preorder(&self, node: GeckoNode<'ln>) -> RestyleResult {
-        // FIXME(pcwalton): Stop allocating here. Ideally this should just be done by the HTML
-        // parser.
-        node.initialize_data();
-
-        recalc_style_at(&self.context, self.root, node)
+        if node.is_text_node() {
+            // Text nodes don't have children, so save the traversal algorithm
+            // the trouble of iterating the children.
+            RestyleResult::Stop
+        } else {
+            let el = node.as_element().unwrap();
+            recalc_style_at::<_, _, Self>(&self.context, self.root, el)
+        }
     }
 
     fn process_postorder(&self, _: GeckoNode<'ln>) {
@@ -42,6 +47,17 @@ impl<'lc, 'ln> DomTraversalContext<GeckoNode<'ln>> for RecalcStyleOnly<'lc> {
 
     /// We don't use the post-order traversal for anything.
     fn needs_postorder_traversal(&self) -> bool { false }
+
+    fn should_traverse_child(_parent: GeckoElement<'ln>, child: GeckoNode<'ln>) -> bool {
+        match child.as_element() {
+            Some(el) => el.styling_mode() != StylingMode::Stop,
+            None => false, // Gecko restyle doesn't need to traverse text nodes.
+        }
+    }
+
+    fn ensure_element_data<'a>(element: &'a GeckoElement<'ln>) -> &'a AtomicRefCell<ElementData> {
+        element.ensure_data()
+    }
 
     fn local_context(&self) -> &LocalStyleContext {
         self.context.local_context()

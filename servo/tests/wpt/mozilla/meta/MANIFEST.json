@@ -1424,6 +1424,18 @@
             "url": "/_mozilla/css/dirty_viewport.html"
           }
         ],
+        "css/display_table_cell_intrinsic_width_a.html": [
+          {
+            "path": "css/display_table_cell_intrinsic_width_a.html",
+            "references": [
+              [
+                "/_mozilla/css/display_table_cell_intrinsic_width_ref.html",
+                "=="
+              ]
+            ],
+            "url": "/_mozilla/css/display_table_cell_intrinsic_width_a.html"
+          }
+        ],
         "css/empty_cells_a.html": [
           {
             "path": "css/empty_cells_a.html",
@@ -1914,6 +1926,18 @@
               ]
             ],
             "url": "/_mozilla/css/iframe/bg_color.html"
+          }
+        ],
+        "css/iframe/frameborder_a.html": [
+          {
+            "path": "css/iframe/frameborder_a.html",
+            "references": [
+              [
+                "/_mozilla/css/iframe/frameborder_ref.html",
+                "=="
+              ]
+            ],
+            "url": "/_mozilla/css/iframe/frameborder_a.html"
           }
         ],
         "css/iframe/hide_after_load.html": [
@@ -2430,6 +2454,18 @@
               ]
             ],
             "url": "/_mozilla/css/inline_absolute_hypothetical_line_metrics_a.html"
+          }
+        ],
+        "css/inline_absolute_hypothetical_margin_a.html": [
+          {
+            "path": "css/inline_absolute_hypothetical_margin_a.html",
+            "references": [
+              [
+                "/_mozilla/css/inline_absolute_hypothetical_margin_ref.html",
+                "=="
+              ]
+            ],
+            "url": "/_mozilla/css/inline_absolute_hypothetical_margin_a.html"
           }
         ],
         "css/inline_absolute_hypothetical_metrics_a.html": [
@@ -5970,18 +6006,6 @@
             "url": "/_mozilla/css/white-space-mixed-002.htm"
           }
         ],
-        "css/white-space-normal-001.htm": [
-          {
-            "path": "css/white-space-normal-001.htm",
-            "references": [
-              [
-                "/_mozilla/css/white-space-normal-001-ref.htm",
-                "=="
-              ]
-            ],
-            "url": "/_mozilla/css/white-space-normal-001.htm"
-          }
-        ],
         "css/white-space-pre-line.htm": [
           {
             "path": "css/white-space-pre-line.htm",
@@ -7092,6 +7116,12 @@
           {
             "path": "mozilla/load_event.html",
             "url": "/_mozilla/mozilla/load_event.html"
+          }
+        ],
+        "mozilla/localeCompare.html": [
+          {
+            "path": "mozilla/localeCompare.html",
+            "url": "/_mozilla/mozilla/localeCompare.html"
           }
         ],
         "mozilla/mime_sniffing_font_context.html": [
@@ -15254,6 +15284,18 @@
           "url": "/_mozilla/css/dirty_viewport.html"
         }
       ],
+      "css/display_table_cell_intrinsic_width_a.html": [
+        {
+          "path": "css/display_table_cell_intrinsic_width_a.html",
+          "references": [
+            [
+              "/_mozilla/css/display_table_cell_intrinsic_width_ref.html",
+              "=="
+            ]
+          ],
+          "url": "/_mozilla/css/display_table_cell_intrinsic_width_a.html"
+        }
+      ],
       "css/empty_cells_a.html": [
         {
           "path": "css/empty_cells_a.html",
@@ -15744,6 +15786,18 @@
             ]
           ],
           "url": "/_mozilla/css/iframe/bg_color.html"
+        }
+      ],
+      "css/iframe/frameborder_a.html": [
+        {
+          "path": "css/iframe/frameborder_a.html",
+          "references": [
+            [
+              "/_mozilla/css/iframe/frameborder_ref.html",
+              "=="
+            ]
+          ],
+          "url": "/_mozilla/css/iframe/frameborder_a.html"
         }
       ],
       "css/iframe/hide_after_load.html": [
@@ -16260,6 +16314,18 @@
             ]
           ],
           "url": "/_mozilla/css/inline_absolute_hypothetical_line_metrics_a.html"
+        }
+      ],
+      "css/inline_absolute_hypothetical_margin_a.html": [
+        {
+          "path": "css/inline_absolute_hypothetical_margin_a.html",
+          "references": [
+            [
+              "/_mozilla/css/inline_absolute_hypothetical_margin_ref.html",
+              "=="
+            ]
+          ],
+          "url": "/_mozilla/css/inline_absolute_hypothetical_margin_a.html"
         }
       ],
       "css/inline_absolute_hypothetical_metrics_a.html": [
@@ -19810,18 +19876,6 @@
             ]
           ],
           "url": "/_mozilla/css/white-space-mixed-002.htm"
-        }
-      ],
-      "css/white-space-normal-001.htm": [
-        {
-          "path": "css/white-space-normal-001.htm",
-          "references": [
-            [
-              "/_mozilla/css/white-space-normal-001-ref.htm",
-              "=="
-            ]
-          ],
-          "url": "/_mozilla/css/white-space-normal-001.htm"
         }
       ],
       "css/white-space-pre-line.htm": [

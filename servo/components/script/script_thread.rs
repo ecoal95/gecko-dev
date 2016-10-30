@@ -57,7 +57,6 @@ use dom::window::{ReflowReason, Window};
 use dom::worker::TrustedWorkerAddress;
 use euclid::Rect;
 use euclid::point::Point2D;
-use gfx_traits::LayerId;
 use hyper::header::{ContentType, Headers, HttpDate, LastModified};
 use hyper::header::ReferrerPolicy as ReferrerPolicyHeader;
 use hyper::method::Method;
@@ -72,8 +71,7 @@ use js::jsval::UndefinedValue;
 use js::rust::Runtime;
 use layout_wrapper::ServoLayoutNode;
 use mem::heap_size_of_self_and_children;
-use msg::constellation_msg::{FrameType, LoadData, PipelineId, PipelineNamespace};
-use msg::constellation_msg::{ReferrerPolicy, WindowSizeType};
+use msg::constellation_msg::{FrameType, PipelineId, PipelineNamespace, ReferrerPolicy};
 use net_traits::{AsyncResponseTarget, CoreResourceMsg, LoadConsumer, LoadContext, Metadata, ResourceThreads};
 use net_traits::{IpcSend, LoadData as NetLoadData};
 use net_traits::bluetooth_thread::BluetoothMethodMsg;
@@ -85,10 +83,10 @@ use script_layout_interface::message::{self, NewLayoutThreadInfo, ReflowQueryTyp
 use script_runtime::{CommonScriptMsg, ScriptChan, ScriptThreadEventCategory, EnqueuedPromiseCallback};
 use script_runtime::{ScriptPort, StackRootTLS, get_reports, new_rt_and_cx, PromiseJobQueue};
 use script_traits::{CompositorEvent, ConstellationControlMsg, EventResult};
-use script_traits::{InitialScriptState, MouseButton, MouseEventType, MozBrowserEvent};
+use script_traits::{InitialScriptState, LoadData, MouseButton, MouseEventType, MozBrowserEvent};
 use script_traits::{NewLayoutInfo, ScriptMsg as ConstellationMsg};
 use script_traits::{ScriptThreadFactory, TimerEvent, TimerEventRequest, TimerSource};
-use script_traits::{TouchEventType, TouchId, UntrustedNodeAddress, WindowSizeData};
+use script_traits::{TouchEventType, TouchId, UntrustedNodeAddress, WindowSizeData, WindowSizeType};
 use script_traits::CompositorEvent::{KeyEvent, MouseButtonEvent, MouseMoveEvent, ResizeEvent};
 use script_traits::CompositorEvent::{TouchEvent, TouchpadPressureEvent};
 use script_traits::webdriver_msg::WebDriverScriptCommand;
@@ -1536,6 +1534,9 @@ impl ScriptThread {
         let node = unsafe { node.get_jsmanaged().get_for_script() };
         let window = window_from_node(node);
 
+        // Not quite the right thing - see #13865.
+        node.dirty(NodeDamage::NodeStyleDamaged);
+
         if let Some(el) = node.downcast::<Element>() {
             if &*window.GetComputedStyle(el, None).Display() == "none" {
                 return;
@@ -1880,10 +1881,7 @@ impl ScriptThread {
         let point = Point2D::new(rect.origin.x.to_nearest_px() as f32,
                                  rect.origin.y.to_nearest_px() as f32);
 
-        let message = ConstellationMsg::ScrollFragmentPoint(pipeline_id,
-                                                            LayerId::null(),
-                                                            point,
-                                                            false);
+        let message = ConstellationMsg::ScrollFragmentPoint(pipeline_id, point, false);
         self.constellation_chan.send(message).unwrap();
     }
 

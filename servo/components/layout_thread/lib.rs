@@ -37,6 +37,7 @@ extern crate profile_traits;
 extern crate script;
 extern crate script_layout_interface;
 extern crate script_traits;
+extern crate selectors;
 extern crate serde_json;
 extern crate style;
 extern crate url;
@@ -51,12 +52,12 @@ use euclid::rect::Rect;
 use euclid::scale_factor::ScaleFactor;
 use euclid::size::Size2D;
 use fnv::FnvHasher;
-use gfx::display_list::{ClippingRegion, DisplayList, LayerInfo, OpaqueNode};
+use gfx::display_list::{ClippingRegion, DisplayList, OpaqueNode};
 use gfx::display_list::{StackingContext, StackingContextType, WebRenderImageInfo};
 use gfx::font;
 use gfx::font_cache_thread::FontCacheThread;
 use gfx::font_context;
-use gfx_traits::{Epoch, FragmentType, LayerId, ScrollPolicy, StackingContextId, color};
+use gfx_traits::{Epoch, FragmentType, ScrollPolicy, ScrollRootId, StackingContextId, color};
 use heapsize::HeapSizeOf;
 use ipc_channel::ipc::{self, IpcReceiver, IpcSender};
 use ipc_channel::router::ROUTER;
@@ -71,7 +72,7 @@ use layout::layout_debug;
 use layout::parallel;
 use layout::query::{LayoutRPCImpl, LayoutThreadData, process_content_box_request, process_content_boxes_request};
 use layout::query::{process_margin_style_query, process_node_overflow_request, process_resolved_style_request};
-use layout::query::{process_node_geometry_request, process_node_layer_id_request, process_node_scroll_area_request};
+use layout::query::{process_node_geometry_request, process_node_scroll_area_request};
 use layout::query::process_offset_parent_query;
 use layout::sequential;
 use layout::traversal::{ComputeAbsolutePositions, RecalcStyleAndConstructFlows};
@@ -94,6 +95,7 @@ use script_layout_interface::rpc::{LayoutRPC, MarginStyleResponse, NodeOverflowR
 use script_layout_interface::wrapper_traits::LayoutNode;
 use script_traits::{ConstellationControlMsg, LayoutControlMsg, LayoutMsg as ConstellationMsg};
 use script_traits::{StackingContextScrollState, UntrustedNodeAddress};
+use selectors::Element;
 use std::borrow::ToOwned;
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
@@ -113,7 +115,7 @@ use style::media_queries::{Device, MediaType};
 use style::parallel::WorkQueueData;
 use style::parser::ParserContextExtraData;
 use style::selector_matching::Stylist;
-use style::stylesheets::{CSSRuleIteratorExt, Origin, Stylesheet, UserAgentStylesheets};
+use style::stylesheets::{Origin, Stylesheet, UserAgentStylesheets};
 use style::thread_state;
 use style::timer::Timer;
 use style::workqueue::WorkQueue;
@@ -123,9 +125,6 @@ use util::opts;
 use util::prefs::PREFS;
 use util::resource_files::read_resource_file;
 use util::thread;
-
-/// The number of screens we have to traverse before we decide to generate new display lists.
-const DISPLAY_PORT_THRESHOLD_SIZE_FACTOR: i32 = 4;
 
 /// Information needed by the layout thread.
 pub struct LayoutThread {
@@ -196,10 +195,6 @@ pub struct LayoutThread {
 
     /// The root of the flow tree.
     root_flow: Option<FlowRef>,
-
-    /// The position and size of the visible rect for each layer. We do not build display lists
-    /// for any areas more than `DISPLAY_PORT_SIZE_FACTOR` screens away from this area.
-    visible_rects: Arc<HashMap<LayerId, Rect<Au>, BuildHasherDefault<FnvHasher>>>,
 
     /// The list of currently-running animations.
     running_animations: Arc<RwLock<HashMap<OpaqueNode, Vec<Animation>>>>,
@@ -354,21 +349,21 @@ fn add_font_face_rules(stylesheet: &Stylesheet,
                        outstanding_web_fonts_counter: &Arc<AtomicUsize>) {
     if opts::get().load_webfonts_synchronously {
         let (sender, receiver) = ipc::channel().unwrap();
-        for font_face in stylesheet.effective_rules(&device).font_face() {
+        stylesheet.effective_font_face_rules(&device, |font_face| {
             let effective_sources = font_face.effective_sources();
             font_cache_thread.add_web_font(font_face.family.clone(),
                                            effective_sources,
                                            sender.clone());
             receiver.recv().unwrap();
-        }
+        })
     } else {
-        for font_face in stylesheet.effective_rules(&device).font_face() {
+        stylesheet.effective_font_face_rules(&device, |font_face| {
             let effective_sources = font_face.effective_sources();
             outstanding_web_fonts_counter.fetch_add(1, Ordering::SeqCst);
             font_cache_thread.add_web_font(font_face.family.clone(),
                                           effective_sources,
                                           (*font_cache_sender).clone());
-        }
+        })
     }
 }
 
@@ -446,7 +441,6 @@ impl LayoutThread {
             new_animations_receiver: new_animations_receiver,
             outstanding_web_fonts: outstanding_web_fonts_counter,
             root_flow: None,
-            visible_rects: Arc::new(HashMap::with_hasher(Default::default())),
             running_animations: Arc::new(RwLock::new(HashMap::new())),
             expired_animations: Arc::new(RwLock::new(HashMap::new())),
             epoch: Epoch(0),
@@ -460,7 +454,6 @@ impl LayoutThread {
                     content_box_response: Rect::zero(),
                     content_boxes_response: Vec::new(),
                     client_rect_response: Rect::zero(),
-                    layer_id_response: None,
                     hit_test_response: (None, false),
                     scroll_area_response: Rect::zero(),
                     overflow_response: NodeOverflowResponse(None),
@@ -523,7 +516,6 @@ impl LayoutThread {
             image_cache_thread: self.image_cache_thread.clone(),
             image_cache_sender: Mutex::new(self.image_cache_sender.clone()),
             font_cache_thread: Mutex::new(self.font_cache_thread.clone()),
-            visible_rects: self.visible_rects.clone(),
             webrender_image_cache: self.webrender_image_cache.clone(),
         }
     }
@@ -561,10 +553,6 @@ impl LayoutThread {
         };
 
         match request {
-            Request::FromPipeline(LayoutControlMsg::SetVisibleRects(new_visible_rects)) => {
-                self.handle_request_helper(Msg::SetVisibleRects(new_visible_rects),
-                                           possibly_locked_rw_data)
-            },
             Request::FromPipeline(LayoutControlMsg::SetStackingContextScrollStates(
                     new_scroll_states)) => {
                 self.handle_request_helper(Msg::SetStackingContextScrollStates(new_scroll_states),
@@ -653,9 +641,6 @@ impl LayoutThread {
             Msg::TickAnimations => self.tick_all_animations(possibly_locked_rw_data),
             Msg::ReflowWithNewlyLoadedWebFont => {
                 self.reflow_with_newly_loaded_web_font(possibly_locked_rw_data)
-            }
-            Msg::SetVisibleRects(new_visible_rects) => {
-                self.set_visible_rects(new_visible_rects, possibly_locked_rw_data);
             }
             Msg::SetStackingContextScrollStates(new_scroll_states) => {
                 self.set_stacking_context_scroll_states(new_scroll_states,
@@ -935,7 +920,7 @@ impl LayoutThread {
                                                  Matrix4D::identity(),
                                                  Matrix4D::identity(),
                                                  true,
-                                                 false,
+                                                 ScrollPolicy::Scrollable,
                                                  None);
 
                         let display_list_entries =
@@ -945,7 +930,6 @@ impl LayoutThread {
 
                         debug!("Done building display list.");
 
-                        let root_background_color = get_root_flow_background_color(layout_root);
                         let root_size = {
                             let root_flow = flow::base(layout_root);
                             if rw_data.stylist.viewport_constraints().is_some() {
@@ -958,11 +942,6 @@ impl LayoutThread {
                         let origin = Rect::new(Point2D::new(Au(0), Au(0)), root_size);
                         root_stacking_context.bounds = origin;
                         root_stacking_context.overflow = origin;
-                        root_stacking_context.layer_info =
-                            Some(LayerInfo::new(layout_root.layer_id(),
-                                                ScrollPolicy::Scrollable,
-                                                None,
-                                                root_background_color));
 
                         rw_data.display_list =
                             Some(Arc::new(DisplayList::new(root_stacking_context,
@@ -1004,12 +983,10 @@ impl LayoutThread {
 
             // TODO(gw) For now only create a root scrolling layer!
             let mut frame_builder = WebRenderFrameBuilder::new(pipeline_id);
-            let root_scroll_layer_id = frame_builder.next_scroll_layer_id();
             let sc_id = rw_data.display_list.as_ref().unwrap().convert_to_webrender(
                 &mut self.webrender_api,
                 pipeline_id,
                 epoch,
-                Some(root_scroll_layer_id),
                 &mut frame_builder);
             let root_background_color = get_root_flow_background_color(layout_root);
             let root_background_color =
@@ -1065,9 +1042,6 @@ impl LayoutThread {
                     },
                     ReflowQueryType::NodeGeometryQuery(_) => {
                         rw_data.client_rect_response = Rect::zero();
-                    },
-                    ReflowQueryType::NodeLayerIdQuery(_) => {
-                        rw_data.layer_id_response = None;
                     },
                     ReflowQueryType::NodeScrollGeometryQuery(_) => {
                         rw_data.scroll_area_response = Rect::zero();
@@ -1135,13 +1109,13 @@ impl LayoutThread {
                 while let Some(node) = next {
                     if node.needs_dirty_on_viewport_size_changed() {
                         // NB: The dirty bit is propagated down the tree.
-                        unsafe { node.set_dirty(true); }
+                        unsafe { node.set_dirty(); }
 
-                        let mut current = node.parent_node();
-                        while let Some(node) = current {
-                            if node.has_dirty_descendants() { break; }
-                            unsafe { node.set_dirty_descendants(true); }
-                            current = node.parent_node();
+                        let mut current = node.parent_node().and_then(|n| n.as_element());
+                        while let Some(el) = current {
+                            if el.has_dirty_descendants() { break; }
+                            unsafe { el.set_dirty_descendants(); }
+                            current = el.parent_element();
                         }
 
                         next = iter.next_skipping_children();
@@ -1161,7 +1135,7 @@ impl LayoutThread {
             if needs_dirtying {
                 // NB: The dirty flag is propagated down during the restyle
                 // process.
-                node.set_dirty(true);
+                node.set_dirty();
             }
         }
         if needs_reflow {
@@ -1174,7 +1148,7 @@ impl LayoutThread {
         if !needs_dirtying {
             for (el, snapshot) in modified_elements {
                 let hint = rw_data.stylist.compute_restyle_hint(&el, &snapshot, el.get_state());
-                el.note_restyle_hint(hint);
+                el.note_restyle_hint::<RecalcStyleAndConstructFlows>(hint);
             }
         }
 
@@ -1183,7 +1157,8 @@ impl LayoutThread {
                                                                          viewport_size_changed,
                                                                          data.reflow_info.goal);
 
-        if node.is_dirty() || node.has_dirty_descendants() {
+        let el = node.as_element();
+        if el.is_some() && (el.unwrap().deprecated_dirty_bit_is_set() || el.unwrap().has_dirty_descendants()) {
             // Recalculate CSS styles and rebuild flows and fragments.
             profile(time::ProfilerCategory::LayoutStyleRecalc,
                     self.profiler_metadata(),
@@ -1279,10 +1254,6 @@ impl LayoutThread {
                 let node = unsafe { ServoLayoutNode::new(&node) };
                 rw_data.overflow_response = process_node_overflow_request(node);
             },
-            ReflowQueryType::NodeLayerIdQuery(node) => {
-                let node = unsafe { ServoLayoutNode::new(&node) };
-                rw_data.layer_id_response = Some(process_node_layer_id_request(node));
-            },
             ReflowQueryType::ResolvedStyleQuery(node, ref pseudo, ref property) => {
                 let node = unsafe { ServoLayoutNode::new(&node) };
                 let layout_context = LayoutContext::new(&shared_layout_context);
@@ -1305,66 +1276,6 @@ impl LayoutThread {
         }
     }
 
-    fn set_visible_rects<'a, 'b>(&mut self,
-                                 new_visible_rects: Vec<(LayerId, Rect<Au>)>,
-                                 possibly_locked_rw_data: &mut RwData<'a, 'b>)
-                                 -> bool {
-        let mut rw_data = possibly_locked_rw_data.lock();
-
-        // First, determine if we need to regenerate the display lists. This will happen if the
-        // layers have moved more than `DISPLAY_PORT_THRESHOLD_SIZE_FACTOR` away from their last
-        // positions.
-        let mut must_regenerate_display_lists = false;
-        let mut old_visible_rects = HashMap::with_hasher(Default::default());
-        let inflation_amount =
-            Size2D::new(self.viewport_size.width * DISPLAY_PORT_THRESHOLD_SIZE_FACTOR,
-                        self.viewport_size.height * DISPLAY_PORT_THRESHOLD_SIZE_FACTOR);
-        for &(ref layer_id, ref new_visible_rect) in &new_visible_rects {
-            match self.visible_rects.get(layer_id) {
-                None => {
-                    old_visible_rects.insert(*layer_id, *new_visible_rect);
-                }
-                Some(old_visible_rect) => {
-                    old_visible_rects.insert(*layer_id, *old_visible_rect);
-
-                    if !old_visible_rect.inflate(inflation_amount.width, inflation_amount.height)
-                                        .intersects(new_visible_rect) {
-                        must_regenerate_display_lists = true;
-                    }
-                }
-            }
-        }
-
-        if !must_regenerate_display_lists {
-            // Update `visible_rects` in case there are new layers that were discovered.
-            self.visible_rects = Arc::new(old_visible_rects);
-            return true
-        }
-
-        debug!("regenerating display lists!");
-        for &(ref layer_id, ref new_visible_rect) in &new_visible_rects {
-            old_visible_rects.insert(*layer_id, *new_visible_rect);
-        }
-        self.visible_rects = Arc::new(old_visible_rects);
-
-        // Regenerate the display lists.
-        let reflow_info = Reflow {
-            goal: ReflowGoal::ForDisplay,
-            page_clip_rect: max_rect(),
-        };
-
-        let mut layout_context = self.build_shared_layout_context(&*rw_data,
-                                                                  false,
-                                                                  reflow_info.goal);
-
-        self.perform_post_main_layout_passes(&reflow_info,
-                                             None,
-                                             None,
-                                             &mut *rw_data,
-                                             &mut layout_context);
-        true
-    }
-
     fn set_stacking_context_scroll_states<'a, 'b>(
             &mut self,
             new_scroll_states: Vec<StackingContextScrollState>,
@@ -1374,14 +1285,13 @@ impl LayoutThread {
         let mut layout_scroll_states = HashMap::new();
         for new_scroll_state in &new_scroll_states {
             let offset = new_scroll_state.scroll_offset;
-            layout_scroll_states.insert(new_scroll_state.stacking_context_id, offset);
+            layout_scroll_states.insert(new_scroll_state.scroll_root_id, offset);
 
-            if new_scroll_state.stacking_context_id == StackingContextId::root() {
+            if new_scroll_state.scroll_root_id == ScrollRootId::root() {
                 script_scroll_states.push((UntrustedNodeAddress::from_id(0), offset))
-            } else if !new_scroll_state.stacking_context_id.is_special() &&
-                    new_scroll_state.stacking_context_id.fragment_type() ==
-                        FragmentType::FragmentBody {
-                let id = new_scroll_state.stacking_context_id.id();
+            } else if !new_scroll_state.scroll_root_id.is_special() &&
+                    new_scroll_state.scroll_root_id.fragment_type() == FragmentType::FragmentBody {
+                let id = new_scroll_state.scroll_root_id.id();
                 script_scroll_states.push((UntrustedNodeAddress::from_id(id), offset))
             }
         }
@@ -1577,7 +1487,7 @@ impl LayoutThread {
     /// because the struct type is transmuted to a different type on the script side.
     unsafe fn handle_reap_style_and_layout_data(&self, data: OpaqueStyleAndLayoutData) {
         let ptr: *mut AtomicRefCell<PartialPersistentLayoutData> = *data.ptr;
-        let non_opaque: NonOpaqueStyleAndLayoutData = ptr as *mut _;
+        let non_opaque: *mut NonOpaqueStyleAndLayoutData = ptr as *mut _;
         let _ = Box::from_raw(non_opaque);
     }
 
@@ -1670,9 +1580,9 @@ fn reflow_query_type_needs_display_list(query_type: &ReflowQueryType) -> bool {
         ReflowQueryType::HitTestQuery(..) => true,
         ReflowQueryType::ContentBoxQuery(_) | ReflowQueryType::ContentBoxesQuery(_) |
         ReflowQueryType::NodeGeometryQuery(_) | ReflowQueryType::NodeScrollGeometryQuery(_) |
-        ReflowQueryType::NodeOverflowQuery(_) | ReflowQueryType::NodeLayerIdQuery(_) |
-        ReflowQueryType::ResolvedStyleQuery(..) | ReflowQueryType::OffsetParentQuery(_) |
-        ReflowQueryType::MarginStyleQuery(_) | ReflowQueryType::NoQuery => false,
+        ReflowQueryType::NodeOverflowQuery(_) | ReflowQueryType::ResolvedStyleQuery(..) |
+        ReflowQueryType::OffsetParentQuery(_) | ReflowQueryType::MarginStyleQuery(_) |
+        ReflowQueryType::NoQuery => false,
     }
 }
 

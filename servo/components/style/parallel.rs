@@ -8,7 +8,7 @@
 
 #![allow(unsafe_code)]
 
-use dom::{OpaqueNode, TNode, UnsafeNode};
+use dom::{OpaqueNode, StylingMode, TElement, TNode, UnsafeNode};
 use std::mem;
 use std::sync::atomic::Ordering;
 use traversal::{RestyleResult, DomTraversalContext};
@@ -47,6 +47,7 @@ pub fn traverse_dom<N, C>(root: N,
     where N: TNode,
           C: DomTraversalContext<N>
 {
+    debug_assert!(root.as_element().unwrap().styling_mode() != StylingMode::Stop);
     if opts::get().style_sharing_stats {
         STYLE_SHARING_CACHE_HITS.store(0, Ordering::SeqCst);
         STYLE_SHARING_CACHE_MISSES.store(0, Ordering::SeqCst);
@@ -80,38 +81,25 @@ fn top_down_dom<N, C>(unsafe_nodes: UnsafeNodeList,
         // Get a real layout node.
         let node = unsafe { N::from_unsafe(&unsafe_node) };
 
-        if !context.should_process(node) {
-            continue;
-        }
-
-        // Possibly enqueue the children.
-        let mut children_to_process = 0isize;
         // Perform the appropriate traversal.
+        let mut children_to_process = 0isize;
         if let RestyleResult::Continue = context.process_preorder(node) {
-            for kid in node.children() {
-                // Trigger the hook pre-adding the kid to the list. This can
-                // (and in fact uses to) change the result of the should_process
-                // operation.
-                //
-                // As of right now, this hook takes care of propagating the
-                // restyle flag down the tree. In the future, more accurate
-                // behavior is probably going to be needed.
-                context.pre_process_child_hook(node, kid);
-                if context.should_process(kid) {
-                    children_to_process += 1;
-                    discovered_child_nodes.push(kid.to_unsafe())
-                }
-            }
+            C::traverse_children(node.as_element().unwrap(), |kid| {
+                children_to_process += 1;
+                discovered_child_nodes.push(kid.to_unsafe())
+            });
         }
 
         // Reset the count of children if we need to do a bottom-up traversal
         // after the top up.
         if context.needs_postorder_traversal() {
-            node.store_children_to_process(children_to_process);
-
-            // If there were no more children, start walking back up.
             if children_to_process == 0 {
+                // If there were no more children, start walking back up.
                 bottom_up_dom::<N, C>(unsafe_nodes.1, unsafe_node, proxy)
+            } else {
+                // Otherwise record the number of children to process when the
+                // time comes.
+                node.as_element().unwrap().store_children_to_process(children_to_process);
             }
         }
     }
@@ -153,7 +141,7 @@ fn bottom_up_dom<N, C>(root: OpaqueNode,
         // Perform the appropriate operation.
         context.process_postorder(node);
 
-        let parent = match node.layout_parent_node(root) {
+        let parent = match node.layout_parent_element(root) {
             None => break,
             Some(parent) => parent,
         };
@@ -165,6 +153,6 @@ fn bottom_up_dom<N, C>(root: OpaqueNode,
         }
 
         // We were the last child of our parent. Construct flows for our parent.
-        node = parent;
+        node = parent.as_node();
     }
 }

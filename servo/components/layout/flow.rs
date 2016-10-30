@@ -33,9 +33,9 @@ use euclid::{Point2D, Size2D};
 use floats::{Floats, SpeculatedFloatPlacement};
 use flow_list::{FlowList, MutFlowListIterator};
 use flow_ref::{self, FlowRef, WeakFlowRef};
-use fragment::{Fragment, FragmentBorderBoxIterator, Overflow, SpecificFragmentInfo};
+use fragment::{Fragment, FragmentBorderBoxIterator, Overflow};
 use gfx::display_list::{ClippingRegion, StackingContext};
-use gfx_traits::{LayerId, LayerType, StackingContextId};
+use gfx_traits::{ScrollRootId, StackingContextId};
 use gfx_traits::print_tree::PrintTree;
 use inline::InlineFlow;
 use model::{CollapsibleMargins, IntrinsicISizes, MarginCollapseInfo};
@@ -44,17 +44,16 @@ use parallel::FlowParallelInfo;
 use rustc_serialize::{Encodable, Encoder};
 use script_layout_interface::restyle_damage::{RECONSTRUCT_FLOW, REFLOW, REFLOW_OUT_OF_FLOW};
 use script_layout_interface::restyle_damage::{REPAINT, REPOSITION, RestyleDamage};
-use script_layout_interface::wrapper_traits::{PseudoElementType, ThreadSafeLayoutNode};
 use std::{fmt, mem, raw};
 use std::iter::Zip;
 use std::slice::IterMut;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use style::computed_values::{clear, display, empty_cells, float, overflow_x, position, text_align};
+use style::computed_values::{clear, float, overflow_x, position, text_align};
 use style::context::SharedStyleContext;
 use style::dom::TRestyleDamage;
 use style::logical_geometry::{LogicalRect, LogicalSize, WritingMode};
-use style::properties::{self, ServoComputedValues};
+use style::properties::ServoComputedValues;
 use style::values::computed::LengthOrPercentageOrAuto;
 use table::{ColumnComputedInlineSize, ColumnIntrinsicInlineSize, TableFlow};
 use table_caption::TableCaptionFlow;
@@ -224,7 +223,9 @@ pub trait Flow: fmt::Debug + Sync + Send + 'static {
         None
     }
 
-    fn collect_stacking_contexts(&mut self, _parent: &mut StackingContext);
+    fn collect_stacking_contexts(&mut self,
+                                 _parent: &mut StackingContext,
+                                 parent_scroll_root_id: ScrollRootId);
 
     /// If this is a float, places it. The default implementation does nothing.
     fn place_float_if_applicable<'a>(&mut self) {}
@@ -399,16 +400,6 @@ pub trait Flow: fmt::Debug + Sync + Send + 'static {
     /// implications because this can be called on parents concurrently from descendants!
     fn generated_containing_block_size(&self, _: OpaqueFlow) -> LogicalSize<Au>;
 
-    /// Returns a layer ID for the given fragment.
-    fn layer_id(&self) -> LayerId {
-        LayerId::new_of_type(LayerType::FragmentBody, base(self).flow_id())
-    }
-
-    /// Returns a layer ID for the given fragment.
-    fn layer_id_for_overflow_scroll(&self) -> LayerId {
-        LayerId::new_of_type(LayerType::OverflowScroll, base(self).flow_id())
-    }
-
     /// Attempts to perform incremental fixup of this flow by replacing its fragment's style with
     /// the new style. This can only succeed if the flow has exactly one fragment.
     fn repair_style(&mut self, new_style: &Arc<ServoComputedValues>);
@@ -479,12 +470,6 @@ pub trait ImmutableFlowUtils {
 
     /// Returns true if this flow is one of table-related flows.
     fn is_table_kind(self) -> bool;
-
-    /// Returns true if anonymous flow is needed between this flow and child flow.
-    fn need_anonymous_flow(self, child: &Flow) -> bool;
-
-    /// Generates missing child flow of this flow.
-    fn generate_missing_child_flow<N: ThreadSafeLayoutNode>(self, node: &N, ctx: &LayoutContext) -> FlowRef;
 
     /// Returns true if this flow contains fragments that are roots of an absolute flow tree.
     fn contains_roots_of_absolute_flow_tree(&self) -> bool;
@@ -634,10 +619,6 @@ bitflags! {
     #[doc = "Flags used in flows."]
     pub flags FlowFlags: u32 {
         // text align flags
-        #[doc = "Whether this flow must have its own layer. Even if this flag is not set, it might"]
-        #[doc = "get its own layer if it's deemed to be likely to overlap flows with their own"]
-        #[doc = "layer."]
-        const NEEDS_LAYER = 0b0000_0000_0000_0000_0010_0000,
         #[doc = "Whether this flow is absolutely positioned. This is checked all over layout, so a"]
         #[doc = "virtual call is too expensive."]
         const IS_ABSOLUTELY_POSITIONED = 0b0000_0000_0000_0000_0100_0000,
@@ -679,6 +660,9 @@ bitflags! {
 
         /// Whether this flow contains any text and/or replaced fragments.
         const CONTAINS_TEXT_OR_REPLACED_FRAGMENTS = 0b0001_0000_0000_0000_0000_0000,
+
+        /// Whether margins are prohibited from collapsing with this flow.
+        const MARGINS_CANNOT_COLLAPSE = 0b0010_0000_0000_0000_0000_0000,
     }
 }
 
@@ -953,6 +937,8 @@ pub struct BaseFlow {
     /// to 0, but it assigned during the collect_stacking_contexts phase of display
     /// list construction.
     pub stacking_context_id: StackingContextId,
+
+    pub scroll_root_id: ScrollRootId,
 }
 
 impl fmt::Debug for BaseFlow {
@@ -977,7 +963,8 @@ impl fmt::Debug for BaseFlow {
         };
 
         write!(f,
-               "sc={:?} pos={:?}, {}{} floatspec-in={:?}, floatspec-out={:?}, overflow={:?}{}{}{}",
+               "sc={:?} pos={:?}, {}{} floatspec-in={:?}, floatspec-out={:?}, \
+                overflow={:?}{}{}{}",
                self.stacking_context_id,
                self.position,
                if self.flags.contains(FLOATS_LEFT) { "FL" } else { "" },
@@ -1122,6 +1109,7 @@ impl BaseFlow {
             writing_mode: writing_mode,
             thread_id: 0,
             stacking_context_id: StackingContextId::new(0),
+            scroll_root_id: ScrollRootId::root(),
         }
     }
 
@@ -1153,9 +1141,11 @@ impl BaseFlow {
         return self as *const BaseFlow as usize;
     }
 
-    pub fn collect_stacking_contexts_for_children(&mut self, parent: &mut StackingContext) {
+    pub fn collect_stacking_contexts_for_children(&mut self,
+                                                  parent: &mut StackingContext,
+                                                  parent_scroll_root_id: ScrollRootId) {
         for kid in self.children.iter_mut() {
-            kid.collect_stacking_contexts(parent);
+            kid.collect_stacking_contexts(parent, parent_scroll_root_id);
         }
     }
 
@@ -1244,74 +1234,6 @@ impl<'a> ImmutableFlowUtils for &'a Flow {
                 FlowClass::TableColGroup | FlowClass::TableRowGroup |
                 FlowClass::TableRow | FlowClass::TableCaption | FlowClass::TableCell => true,
             _ => false,
-        }
-    }
-
-    /// Returns true if anonymous flow is needed between this flow and child flow.
-    /// Spec: http://www.w3.org/TR/CSS21/tables.html#anonymous-boxes
-    fn need_anonymous_flow(self, child: &Flow) -> bool {
-        match self.class() {
-            FlowClass::Table => !child.is_proper_table_child(),
-            FlowClass::TableRowGroup => !child.is_table_row(),
-            FlowClass::TableRow => !child.is_table_cell(),
-            // FIXME(zentner): According to spec, anonymous flex items are only needed for text.
-            FlowClass::Flex => child.is_inline_flow(),
-            _ => false
-        }
-    }
-
-    /// Generates missing child flow of this flow.
-    ///
-    /// FIXME(pcwalton): This duplicates some logic in
-    /// `generate_anonymous_table_flows_if_necessary()`. We should remove this function eventually,
-    /// as it's harder to understand.
-    fn generate_missing_child_flow<N: ThreadSafeLayoutNode>(self, node: &N, ctx: &LayoutContext) -> FlowRef {
-        let style_context = ctx.style_context();
-        let mut style = node.style(style_context);
-        match self.class() {
-            FlowClass::Table | FlowClass::TableRowGroup => {
-                properties::modify_style_for_anonymous_table_object(
-                    &mut style,
-                    display::T::table_row);
-                let fragment = Fragment::from_opaque_node_and_style(
-                    node.opaque(),
-                    PseudoElementType::Normal,
-                    style,
-                    node.selected_style(style_context),
-                    node.restyle_damage(),
-                    SpecificFragmentInfo::TableRow);
-                Arc::new(TableRowFlow::from_fragment(fragment))
-            },
-            FlowClass::TableRow => {
-                properties::modify_style_for_anonymous_table_object(
-                    &mut style,
-                    display::T::table_cell);
-                let fragment = Fragment::from_opaque_node_and_style(
-                    node.opaque(),
-                    PseudoElementType::Normal,
-                    style,
-                    node.selected_style(style_context),
-                    node.restyle_damage(),
-                    SpecificFragmentInfo::TableCell);
-                let hide = node.style(style_context).get_inheritedtable().empty_cells == empty_cells::T::hide;
-                Arc::new(TableCellFlow::from_node_fragment_and_visibility_flag(node, fragment, !hide))
-            },
-            FlowClass::Flex => {
-                properties::modify_style_for_anonymous_flow(
-                    &mut style,
-                    display::T::block);
-                let fragment =
-                    Fragment::from_opaque_node_and_style(node.opaque(),
-                                                         PseudoElementType::Normal,
-                                                         style,
-                                                         node.selected_style(style_context),
-                                                         node.restyle_damage(),
-                                                         SpecificFragmentInfo::Generic);
-                Arc::new(BlockFlow::from_fragment(fragment, None))
-            },
-            _ => {
-                panic!("no need to generate a missing child")
-            }
         }
     }
 

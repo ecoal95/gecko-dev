@@ -8,9 +8,9 @@ use SendableFrameTree;
 use compositor::CompositingReason;
 use euclid::point::Point2D;
 use euclid::size::Size2D;
-use gfx_traits::LayerId;
 use ipc_channel::ipc::IpcSender;
-use msg::constellation_msg::{Image, Key, KeyModifiers, KeyState, PipelineId};
+use msg::constellation_msg::{Key, KeyModifiers, KeyState, PipelineId};
+use net_traits::image::base::Image;
 use profile_traits::mem;
 use profile_traits::time;
 use script_traits::{AnimationState, ConstellationMsg, EventResult};
@@ -72,7 +72,7 @@ pub enum Msg {
     ShutdownComplete,
 
     /// Scroll a page in a window
-    ScrollFragmentPoint(PipelineId, LayerId, Point2D<f32>, bool),
+    ScrollFragmentPoint(PipelineId, Point2D<f32>, bool),
     /// Alerts the compositor that the current page has changed its title.
     ChangePageTitle(PipelineId, Option<String>),
     /// Alerts the compositor that the current page has changed its URL.
@@ -126,6 +126,10 @@ pub enum Msg {
     // sends a reply on the IpcSender, the constellation knows it's safe to
     // tear down the other threads associated with this pipeline.
     PipelineExited(PipelineId, IpcSender<()>),
+    /// Runs a closure in the compositor thread.
+    /// It's used to dispatch functions from webrender to the main thread's event loop.
+    /// Required to allow WGL GLContext sharing in Windows.
+    Dispatch(Box<Fn() + Send>)
 }
 
 impl Debug for Msg {
@@ -158,6 +162,7 @@ impl Debug for Msg {
             Msg::PipelineVisibilityChanged(..) => write!(f, "PipelineVisibilityChanged"),
             Msg::PipelineExited(..) => write!(f, "PipelineExited"),
             Msg::NewScrollFrameReady(..) => write!(f, "NewScrollFrameReady"),
+            Msg::Dispatch(..) => write!(f, "Dispatch"),
         }
     }
 }

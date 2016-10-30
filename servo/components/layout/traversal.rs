@@ -11,15 +11,18 @@ use flow::{self, PreorderFlowTraversal};
 use flow::{CAN_BE_FRAGMENTED, Flow, ImmutableFlowUtils, PostorderFlowTraversal};
 use gfx::display_list::OpaqueNode;
 use script_layout_interface::restyle_damage::{BUBBLE_ISIZES, REFLOW, REFLOW_OUT_OF_FLOW, REPAINT, RestyleDamage};
-use script_layout_interface::wrapper_traits::{LayoutNode, ThreadSafeLayoutNode};
+use script_layout_interface::wrapper_traits::{LayoutElement, LayoutNode, ThreadSafeLayoutNode};
 use std::mem;
+use style::atomic_refcell::AtomicRefCell;
 use style::context::{LocalStyleContext, SharedStyleContext, StyleContext};
-use style::dom::TNode;
-use style::selector_impl::ServoSelectorImpl;
-use style::traversal::{DomTraversalContext, recalc_style_at, remove_from_bloom_filter};
+use style::data::ElementData;
+use style::dom::{StylingMode, TElement, TNode};
+use style::traversal::{DomTraversalContext, put_thread_local_bloom_filter};
+use style::traversal::{recalc_style_at, remove_from_bloom_filter};
 use style::traversal::RestyleResult;
+use style::traversal::take_thread_local_bloom_filter;
 use util::opts;
-use wrapper::{LayoutNodeLayoutData, ThreadSafeLayoutNodeHelpers};
+use wrapper::{LayoutNodeHelpers, LayoutNodeLayoutData};
 
 pub struct RecalcStyleAndConstructFlows<'lc> {
     context: LayoutContext<'lc>,
@@ -28,7 +31,7 @@ pub struct RecalcStyleAndConstructFlows<'lc> {
 
 impl<'lc, N> DomTraversalContext<N> for RecalcStyleAndConstructFlows<'lc>
     where N: LayoutNode + TNode,
-          N::ConcreteElement: ::selectors::Element<Impl=ServoSelectorImpl>
+          N::ConcreteElement: LayoutElement
 
 {
     type SharedContext = SharedLayoutContext;
@@ -75,11 +78,62 @@ impl<'lc, N> DomTraversalContext<N> for RecalcStyleAndConstructFlows<'lc>
         // done by the HTML parser.
         node.initialize_data();
 
-        recalc_style_at(&self.context, self.root, node)
+        if node.is_text_node() {
+            // FIXME(bholley): Stop doing this silly work to maintain broken bloom filter
+            // invariants.
+            //
+            // Longer version: The bloom filter is entirely busted for parallel traversal. Because
+            // parallel traversal is breadth-first, each sibling rejects the bloom filter set up
+            // by the previous sibling (which is valid for children, not siblings) and recreates
+            // it. Similarly, the fixup performed in the bottom-up traversal is useless, because
+            // threads perform flow construction up the parent chain until they find a parent with
+            // other unprocessed children, at which point they bail to the work queue and find a
+            // different node.
+            //
+            // Nevertheless, the remove_from_bloom_filter call at the end of flow construction
+            // asserts that the bloom filter is valid for the current node. This breaks when we
+            // stop calling recalc_style_at for text nodes, because the recursive chain of
+            // construct_flows_at calls is no longer necessarily rooted in a call that sets up the
+            // thread-local bloom filter for the leaf node.
+            //
+            // The bloom filter stuff is all going to be rewritten, so we just hackily duplicate
+            // the bloom filter manipulation from recalc_style_at to maintain invariants.
+            let parent = node.parent_node().unwrap().as_element();
+            let bf = take_thread_local_bloom_filter(parent, self.root, self.context.shared_context());
+            put_thread_local_bloom_filter(bf, &node.to_unsafe(), self.context.shared_context());
+
+            RestyleResult::Stop
+        } else {
+            let el = node.as_element().unwrap();
+            recalc_style_at::<_, _, Self>(&self.context, self.root, el)
+        }
     }
 
     fn process_postorder(&self, node: N) {
         construct_flows_at(&self.context, self.root, node);
+    }
+
+    fn should_traverse_child(parent: N::ConcreteElement, child: N) -> bool {
+        // If this node has been marked as damaged in some way, we need to
+        // traverse it unconditionally for layout.
+        if child.has_changed() {
+            return true;
+        }
+
+        match child.as_element() {
+            Some(el) => el.styling_mode() != StylingMode::Stop,
+            // Aside from the has_changed case above, we want to traverse non-element children
+            // in two additional cases:
+            // (1) They child doesn't yet have layout data (preorder traversal initializes it).
+            // (2) The parent element has restyle damage (so the text flow also needs fixup).
+            None => child.get_raw_data().is_none() ||
+                    parent.as_node().to_threadsafe().restyle_damage() != RestyleDamage::empty(),
+        }
+    }
+
+    fn ensure_element_data(element: &N::ConcreteElement) -> &AtomicRefCell<ElementData> {
+        element.as_node().initialize_data();
+        element.get_style_data().unwrap()
     }
 
     fn local_context(&self) -> &LocalStyleContext {
@@ -103,7 +157,8 @@ fn construct_flows_at<'a, N: LayoutNode>(context: &'a LayoutContext<'a>, root: O
 
         // Always reconstruct if incremental layout is turned off.
         let nonincremental_layout = opts::get().nonincremental_layout;
-        if nonincremental_layout || node.is_dirty() || node.has_dirty_descendants() {
+        if nonincremental_layout || tnode.restyle_damage() != RestyleDamage::empty() ||
+           node.as_element().map_or(false, |el| el.has_dirty_descendants()) {
             let mut flow_constructor = FlowConstructor::new(context);
             if nonincremental_layout || !flow_constructor.repair_if_possible(&tnode) {
                 flow_constructor.process(&tnode);
@@ -113,17 +168,10 @@ fn construct_flows_at<'a, N: LayoutNode>(context: &'a LayoutContext<'a>, root: O
             }
         }
 
-        // Reset the layout damage in this node. It's been propagated to the
-        // flow by the flow constructor.
-        tnode.set_restyle_damage(RestyleDamage::empty());
+        tnode.clear_restyle_damage();
     }
 
-    unsafe {
-        node.set_changed(false);
-        node.set_dirty(false);
-        node.set_dirty_descendants(false);
-    }
-
+    unsafe { node.clear_dirty_bits(); }
     remove_from_bloom_filter(context, root, node);
 }
 
@@ -216,10 +264,28 @@ impl<'a> BuildDisplayList<'a> {
     #[inline]
     pub fn traverse(&mut self, flow: &mut Flow) {
         if self.should_process() {
-            self.state.push_stacking_context_id(flow::base(flow).stacking_context_id);
+            let new_stacking_context =
+                flow::base(flow).stacking_context_id != self.state.stacking_context_id();
+            if new_stacking_context {
+                self.state.push_stacking_context_id(flow::base(flow).stacking_context_id);
+            }
+
+            let new_scroll_root =
+                flow::base(flow).scroll_root_id != self.state.scroll_root_id();
+            if new_scroll_root {
+                self.state.push_scroll_root_id(flow::base(flow).scroll_root_id);
+            }
+
             flow.build_display_list(&mut self.state);
             flow::mut_base(flow).restyle_damage.remove(REPAINT);
-            self.state.pop_stacking_context_id();
+
+            if new_stacking_context {
+                self.state.pop_stacking_context_id();
+            }
+
+            if new_scroll_root {
+                self.state.pop_scroll_root_id();
+            }
         }
 
         for kid in flow::child_iter_mut(flow) {

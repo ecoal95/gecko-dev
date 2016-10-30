@@ -17,7 +17,7 @@ use gfx;
 use gfx::display_list::{BLUR_INFLATION_FACTOR, OpaqueNode};
 use gfx::text::glyph::ByteIndex;
 use gfx::text::text_run::{TextRun, TextRunSlice};
-use gfx_traits::{FragmentType, LayerId, LayerType, StackingContextId};
+use gfx_traits::{FragmentType, StackingContextId};
 use inline::{FIRST_FRAGMENT_OF_ELEMENT, InlineFragmentContext, InlineFragmentNodeInfo};
 use inline::{InlineMetrics, LAST_FRAGMENT_OF_ELEMENT, LineMetrics};
 use ipc_channel::ipc::IpcSender;
@@ -48,7 +48,7 @@ use style::dom::TRestyleDamage;
 use style::logical_geometry::{LogicalMargin, LogicalRect, LogicalSize, WritingMode};
 use style::properties::ServoComputedValues;
 use style::str::char_is_whitespace;
-use style::values::computed::{LengthOrPercentage, LengthOrPercentageOrAuto};
+use style::values::computed::{LengthOrNone, LengthOrPercentage, LengthOrPercentageOrAuto};
 use style::values::computed::LengthOrPercentageOrNone;
 use text;
 use text::TextRunScanner;
@@ -121,9 +121,6 @@ pub struct Fragment {
 
     /// The pseudo-element that this fragment represents.
     pub pseudo: PseudoElementType<()>,
-
-    /// Various flags for this fragment.
-    pub flags: FragmentFlags,
 
     /// A debug ID that is consistent for the life of this fragment (via transform etc).
     /// This ID should not be considered stable across multiple layouts or fragment
@@ -888,7 +885,7 @@ pub struct TableColumnFragmentInfo {
 impl TableColumnFragmentInfo {
     /// Create the information specific to an table column fragment.
     pub fn new<N: ThreadSafeLayoutNode>(node: &N) -> TableColumnFragmentInfo {
-        let element = node.as_element();
+        let element = node.as_element().unwrap();
         let span = element.get_attr(&ns!(), &atom!("span"))
                           .and_then(|string| string.parse().ok())
                           .unwrap_or(0);
@@ -911,7 +908,7 @@ impl Fragment {
         Fragment {
             node: node.opaque(),
             style: style,
-            selected_style: node.selected_style(style_context),
+            selected_style: node.selected_style(),
             restyle_damage: restyle_damage,
             border_box: LogicalRect::zero(writing_mode),
             border_padding: LogicalMargin::zero(writing_mode),
@@ -919,7 +916,6 @@ impl Fragment {
             specific: specific,
             inline_context: None,
             pseudo: node.get_pseudo_element_type().strip(),
-            flags: FragmentFlags::empty(),
             debug_id: DebugId::new(),
             stacking_context_id: StackingContextId::new(0),
         }
@@ -948,7 +944,30 @@ impl Fragment {
             specific: specific,
             inline_context: None,
             pseudo: pseudo,
-            flags: FragmentFlags::empty(),
+            debug_id: DebugId::new(),
+            stacking_context_id: StackingContextId::new(0),
+        }
+    }
+
+    /// Creates an anonymous fragment just like this one but with the given style and fragment
+    /// type. For the new anonymous fragment, layout-related values (border box, etc.) are reset to
+    /// initial values.
+    pub fn create_similar_anonymous_fragment(&self,
+                                             style: Arc<ServoComputedValues>,
+                                             specific: SpecificFragmentInfo)
+                                             -> Fragment {
+        let writing_mode = style.writing_mode;
+        Fragment {
+            node: self.node,
+            style: style,
+            selected_style: self.selected_style.clone(),
+            restyle_damage: self.restyle_damage,
+            border_box: LogicalRect::zero(writing_mode),
+            border_padding: LogicalMargin::zero(writing_mode),
+            margin: LogicalMargin::zero(writing_mode),
+            specific: specific,
+            inline_context: None,
+            pseudo: self.pseudo,
             debug_id: DebugId::new(),
             stacking_context_id: StackingContextId::new(0),
         }
@@ -976,7 +995,6 @@ impl Fragment {
             specific: info,
             inline_context: self.inline_context.clone(),
             pseudo: self.pseudo.clone(),
-            flags: FragmentFlags::empty(),
             debug_id: self.debug_id.clone(),
             stacking_context_id: StackingContextId::new(0),
         }
@@ -1057,7 +1075,12 @@ impl Fragment {
             SpecificFragmentInfo::Svg(_) => {
                 QuantitiesIncludedInIntrinsicInlineSizes::all()
             }
-            SpecificFragmentInfo::Table | SpecificFragmentInfo::TableCell => {
+            SpecificFragmentInfo::Table => {
+                INTRINSIC_INLINE_SIZE_INCLUDES_SPECIFIED |
+                    INTRINSIC_INLINE_SIZE_INCLUDES_PADDING |
+                    INTRINSIC_INLINE_SIZE_INCLUDES_BORDER
+            }
+            SpecificFragmentInfo::TableCell => {
                 let base_quantities = INTRINSIC_INLINE_SIZE_INCLUDES_PADDING |
                     INTRINSIC_INLINE_SIZE_INCLUDES_SPECIFIED;
                 if self.style.get_inheritedtable().border_collapse ==
@@ -1097,11 +1120,11 @@ impl Fragment {
         }
     }
 
-    /// Returns the portion of the intrinsic inline-size that consists of borders, padding, and/or
-    /// margins.
+    /// Returns the portion of the intrinsic inline-size that consists of borders/padding and
+    /// margins, respectively.
     ///
     /// FIXME(#2261, pcwalton): This won't work well for inlines: is this OK?
-    pub fn surrounding_intrinsic_inline_size(&self) -> Au {
+    pub fn surrounding_intrinsic_inline_size(&self) -> (Au, Au) {
         let flags = self.quantities_included_in_intrinsic_inline_size();
         let style = self.style();
 
@@ -1133,16 +1156,19 @@ impl Fragment {
             Au(0)
         };
 
-        margin + padding + border
+        (border + padding, margin)
     }
 
     /// Uses the style only to estimate the intrinsic inline-sizes. These may be modified for text
     /// or replaced elements.
-    fn style_specified_intrinsic_inline_size(&self) -> IntrinsicISizesContribution {
+    pub fn style_specified_intrinsic_inline_size(&self) -> IntrinsicISizesContribution {
         let flags = self.quantities_included_in_intrinsic_inline_size();
         let style = self.style();
-        let mut specified = Au(0);
 
+        // FIXME(#2261, pcwalton): This won't work well for inlines: is this OK?
+        let (border_padding, margin) = self.surrounding_intrinsic_inline_size();
+
+        let mut specified = Au(0);
         if flags.contains(INTRINSIC_INLINE_SIZE_INCLUDES_SPECIFIED) {
             specified = MaybeAuto::from_style(style.content_inline_size(),
                                               Au(0)).specified_or_zero();
@@ -1150,17 +1176,18 @@ impl Fragment {
             if let Some(max) = model::specified_or_none(style.max_inline_size(), Au(0)) {
                 specified = min(specified, max)
             }
-        }
 
-        // FIXME(#2261, pcwalton): This won't work well for inlines: is this OK?
-        let surrounding_inline_size = self.surrounding_intrinsic_inline_size();
+            if self.style.get_position().box_sizing == box_sizing::T::border_box {
+                specified -= border_padding
+            }
+        }
 
         IntrinsicISizesContribution {
             content_intrinsic_sizes: IntrinsicISizes {
                 minimum_inline_size: specified,
                 preferred_inline_size: specified,
             },
-            surrounding_size: surrounding_inline_size,
+            surrounding_size: border_padding + margin,
         }
     }
 
@@ -1239,7 +1266,8 @@ impl Fragment {
             SpecificFragmentInfo::Table |
             SpecificFragmentInfo::TableCell |
             SpecificFragmentInfo::TableRow |
-            SpecificFragmentInfo::TableColumn(_) => {
+            SpecificFragmentInfo::TableColumn(_) |
+            SpecificFragmentInfo::InlineAbsoluteHypothetical(_) => {
                 self.margin.inline_start = Au(0);
                 self.margin.inline_end = Au(0);
                 return
@@ -2535,9 +2563,6 @@ impl Fragment {
             _ => {}
         }
 
-        if self.flags.contains(HAS_LAYER) {
-            return true
-        }
         if self.style().get_effects().opacity != 1.0 {
             return true
         }
@@ -2550,6 +2575,18 @@ impl Fragment {
         if self.style().get_effects().transform.0.is_some() {
             return true
         }
+
+        // TODO(mrobinson): Determine if this is necessary, since blocks with
+        // transformations already create stacking contexts.
+        if self.style().get_effects().perspective != LengthOrNone::None {
+            return true
+        }
+
+        // Fixed position blocks always create stacking contexts.
+        if self.style.get_box().position == position::T::fixed {
+            return true
+        }
+
         match self.style().get_used_transform_style() {
             transform_style::T::flat | transform_style::T::preserve_3d => {
                 return true
@@ -2874,21 +2911,6 @@ impl Fragment {
         }
     }
 
-    pub fn layer_id(&self) -> LayerId {
-        let layer_type = match self.pseudo {
-            PseudoElementType::Normal => LayerType::FragmentBody,
-            PseudoElementType::Before(_) => LayerType::BeforePseudoContent,
-            PseudoElementType::After(_) => LayerType::AfterPseudoContent,
-            PseudoElementType::DetailsSummary(_) => LayerType::FragmentBody,
-            PseudoElementType::DetailsContent(_) => LayerType::FragmentBody,
-        };
-        LayerId::new_of_type(layer_type, self.node.id() as usize)
-    }
-
-    pub fn layer_id_for_overflow_scroll(&self) -> LayerId {
-        LayerId::new_of_type(LayerType::OverflowScroll, self.node.id() as usize)
-    }
-
     /// Returns true if any of the inline styles associated with this fragment have
     /// `vertical-align` set to `top` or `bottom`.
     pub fn is_vertically_aligned_to_top_or_bottom(&self) -> bool {
@@ -3091,13 +3113,6 @@ impl Overflow {
     pub fn translate(&mut self, point: &Point2D<Au>) {
         self.scroll = self.scroll.translate(point);
         self.paint = self.paint.translate(point);
-    }
-}
-
-bitflags! {
-    pub flags FragmentFlags: u8 {
-        /// Whether this fragment has a layer.
-        const HAS_LAYER = 0x01,
     }
 }
 
