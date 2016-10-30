@@ -216,14 +216,17 @@ impl Literals {
         if self.lits.is_empty() {
             return self.to_empty();
         }
+        let mut old: Vec<Lit> = self.lits.iter().cloned().collect();
         let mut new = self.to_empty();
     'OUTER:
-        for lit1 in &self.lits {
-            if new.lits.is_empty() {
-                new.lits.push(lit1.clone());
+        while let Some(mut candidate) = old.pop() {
+            if candidate.is_empty() {
                 continue;
             }
-            let mut candidate = lit1.clone();
+            if new.lits.is_empty() {
+                new.lits.push(candidate);
+                continue;
+            }
             for lit2 in &mut new.lits {
                 if lit2.is_empty() {
                     continue;
@@ -236,17 +239,23 @@ impl Literals {
                     lit2.cut = candidate.cut;
                     continue 'OUTER;
                 }
-                if candidate.len() <= lit2.len() {
+                if candidate.len() < lit2.len() {
                     if let Some(i) = position(&candidate, &lit2) {
-                        lit2.truncate(i);
-                        lit2.cut();
                         candidate.cut();
+                        let mut lit3 = lit2.clone();
+                        lit3.truncate(i);
+                        lit3.cut();
+                        old.push(lit3);
+                        lit2.clear();
                     }
                 } else {
                     if let Some(i) = position(&lit2, &candidate) {
-                        candidate.truncate(i);
-                        candidate.cut();
                         lit2.cut();
+                        let mut new_candidate = candidate.clone();
+                        new_candidate.truncate(i);
+                        new_candidate.cut();
+                        old.push(new_candidate);
+                        candidate.clear();
                     }
                 }
                 // Oops, the candidate is already represented in the set.
@@ -1379,8 +1388,18 @@ mod tests {
                 vec![M("Mo'"), M("Mu'"), M("Mo"), M("Mu")],
                 vec![C("Mo"), C("Mu")]);
     test_unamb!(unambiguous11,
-                vec![M("zazb"), M("azb")], vec![C("azb"), C("z")]);
+                vec![M("zazb"), M("azb")], vec![C("a"), C("z")]);
     test_unamb!(unambiguous12, vec![M("foo"), C("foo")], vec![C("foo")]);
+    test_unamb!(unambiguous13,
+                vec![M("ABCX"), M("CDAX"), M("BCX")],
+                vec![C("A"), C("BCX"), C("CD")]);
+    test_unamb!(unambiguous14,
+                vec![M("IMGX"), M("MVIX"), M("MGX"), M("DSX")],
+                vec![M("DSX"), C("I"), C("MGX"), C("MV")]);
+    test_unamb!(unambiguous15,
+                vec![M("IMG_"), M("MG_"), M("CIMG")],
+                vec![C("C"), C("I"), C("MG_")]);
+
 
     // ************************************************************************
     // Tests for suffix trimming.
