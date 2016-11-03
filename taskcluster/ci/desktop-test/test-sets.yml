@@ -67,7 +67,7 @@ asan-tests:
 windows-vm-tests:
     - cppunit
     #- crashtest
-    #- external-media-tests
+    - external-media-tests
     #- gtest
     #- jittest
     #- jsreftest
@@ -94,6 +94,7 @@ windows-vm-tests:
 #    - mochitest-other
 
 ccov-code-coverage-tests:
+    - mochitest
     - mochitest-browser-chrome
     - mochitest-devtools-chrome
     - xpcshell

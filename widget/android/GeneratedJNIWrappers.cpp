@@ -537,6 +537,14 @@ auto GeckoAppShell::OpenUriExternal(mozilla::jni::String::Param a0, mozilla::jni
     return mozilla::jni::Method<OpenUriExternal_t>::Call(GeckoAppShell::Context(), nullptr, a0, a1, a2, a3, a4, a5);
 }
 
+constexpr char GeckoAppShell::OpenWindowForNotification_t::name[];
+constexpr char GeckoAppShell::OpenWindowForNotification_t::signature[];
+
+auto GeckoAppShell::OpenWindowForNotification() -> void
+{
+    return mozilla::jni::Method<OpenWindowForNotification_t>::Call(GeckoAppShell::Context(), nullptr);
+}
+
 constexpr char GeckoAppShell::PerformHapticFeedback_t::name[];
 constexpr char GeckoAppShell::PerformHapticFeedback_t::signature[];
 
@@ -1736,6 +1744,14 @@ auto Clipboard::SetText(mozilla::jni::String::Param a0) -> void
 
 const char HardwareCodecCapabilityUtils::name[] =
         "org/mozilla/gecko/util/HardwareCodecCapabilityUtils";
+
+constexpr char HardwareCodecCapabilityUtils::HasHWVP9_t::name[];
+constexpr char HardwareCodecCapabilityUtils::HasHWVP9_t::signature[];
+
+auto HardwareCodecCapabilityUtils::HasHWVP9() -> bool
+{
+    return mozilla::jni::Method<HasHWVP9_t>::Call(HardwareCodecCapabilityUtils::Context(), nullptr);
+}
 
 constexpr char HardwareCodecCapabilityUtils::FindDecoderCodecInfoForMimeType_t::name[];
 constexpr char HardwareCodecCapabilityUtils::FindDecoderCodecInfoForMimeType_t::signature[];

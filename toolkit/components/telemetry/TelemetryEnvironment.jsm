@@ -153,7 +153,6 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["dom.ipc.plugins.enabled", {what: RECORD_PREF_VALUE}],
   ["dom.ipc.processCount", {what: RECORD_PREF_VALUE, requiresRestart: true}],
   ["dom.max_script_run_time", {what: RECORD_PREF_VALUE}],
-  ["e10s.rollout.disabledByLongSpinners", {what: RECORD_PREF_VALUE}],
   ["experiments.manifest.uri", {what: RECORD_PREF_VALUE}],
   ["extensions.autoDisableScopes", {what: RECORD_PREF_VALUE}],
   ["extensions.enabledScopes", {what: RECORD_PREF_VALUE}],
@@ -1358,7 +1357,7 @@ EnvironmentCache.prototype = {
       ContentBackend: getGfxField("ContentBackend", null),
       // The following line is disabled due to main thread jank and will be enabled
       // again as part of bug 1154500.
-      //DWriteVersion: getGfxField("DWriteVersion", null),
+      // DWriteVersion: getGfxField("DWriteVersion", null),
       adapters: [],
       monitors: [],
       features: {},

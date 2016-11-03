@@ -44,6 +44,7 @@ const REASON_SHUTDOWN = "shutdown";
 const HISTOGRAM_SUFFIXES = {
   PARENT: "",
   CONTENT: "#content",
+  GPU: "#gpu",
 }
 
 const ENVIRONMENT_CHANGE_LISTENER = "TelemetrySession::onEnvironmentChange";
@@ -146,6 +147,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "ThirdPartyCookieProbe",
                                   "resource://gre/modules/ThirdPartyCookieProbe.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "UITelemetry",
                                   "resource://gre/modules/UITelemetry.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "GCTelemetry",
+                                  "resource://gre/modules/GCTelemetry.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "TelemetryEnvironment",
                                   "resource://gre/modules/TelemetryEnvironment.jsm");
 
@@ -1315,6 +1318,16 @@ var Impl = {
       },
     };
 
+    // Only include the GPU process if we've accumulated data for it.
+    if (HISTOGRAM_SUFFIXES.GPU in histograms ||
+        HISTOGRAM_SUFFIXES.GPU in keyedHistograms)
+    {
+      payloadObj.processes.gpu = {
+        histograms: histograms[HISTOGRAM_SUFFIXES.GPU],
+        keyedHistograms: keyedHistograms[HISTOGRAM_SUFFIXES.GPU],
+      };
+    }
+
     payloadObj.info = info;
 
     // Add extended set measurements for chrome process.
@@ -1339,6 +1352,11 @@ var Impl = {
           (Object.keys(this._slowSQLStartup.mainThread).length ||
            Object.keys(this._slowSQLStartup.otherThreads).length)) {
         payloadObj.slowSQLStartup = this._slowSQLStartup;
+      }
+
+      if (!this._isClassicReason(reason)) {
+        payloadObj.processes.parent.gc = protect(() => GCTelemetry.entries("main", clearSubsession));
+        payloadObj.processes.content.gc = protect(() => GCTelemetry.entries("content", clearSubsession));
       }
     }
 
@@ -1511,6 +1529,10 @@ var Impl = {
         this.attachObservers();
         this.gatherMemory();
 
+        if (Telemetry.canRecordExtended) {
+          GCTelemetry.init();
+        }
+
         Telemetry.asyncFetchTelemetryData(function () {});
 
         if (IS_UNIFIED_TELEMETRY) {
@@ -1568,6 +1590,10 @@ var Impl = {
 
       this.attachObservers();
       this.gatherMemory();
+
+      if (Telemetry.canRecordExtended) {
+        GCTelemetry.init();
+      }
     }.bind(this), testing ? TELEMETRY_TEST_DELAY : TELEMETRY_DELAY);
 
     delayedTask.arm();
@@ -1756,7 +1782,7 @@ var Impl = {
   },
 
   /**
-   * Remove observers to avoid leaks
+   * Do some shutdown work that is common to all process types.
    */
   uninstall: function uninstall() {
     this.detachObservers();
@@ -1771,6 +1797,7 @@ var Impl = {
     if (AppConstants.platform === "android") {
       Services.obs.removeObserver(this, "application-background", false);
     }
+    GCTelemetry.shutdown();
   },
 
   getPayload: function getPayload(reason, clearSubsession) {

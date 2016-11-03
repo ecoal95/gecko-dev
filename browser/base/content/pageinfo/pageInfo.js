@@ -5,7 +5,7 @@
 Components.utils.import("resource://gre/modules/LoadContextInfo.jsm");
 Components.utils.import("resource://gre/modules/Services.jsm");
 
-//******** define a js object to implement nsITreeView
+//* ******* define a js object to implement nsITreeView
 function pageInfoTreeView(treeid, copycol)
 {
   // copycol is the index number for the column that we want to add to
@@ -636,7 +636,7 @@ function addImage(imageViewRow)
   }
 }
 
-//******** Link Stuff
+//* ******* Link Stuff
 function openURL(target)
 {
   var url = target.parentNode.childNodes[2].value;
@@ -668,7 +668,7 @@ function onBeginLinkDrag(event, urlField, descField)
   dt.setData("text/plain", url);
 }
 
-//******** Image Stuff
+//* ******* Image Stuff
 function getSelectedRows(tree)
 {
   var start = { };
@@ -824,7 +824,6 @@ function onImageSelect()
 // Makes the media preview (image, video, etc) for the selected row on the media tab.
 function makePreview(row)
 {
-  var imageTree = document.getElementById("imagetree");
   var item = gImageView.data[row][COL_IMAGE_NODE];
   var url = gImageView.data[row][COL_IMAGE_ADDRESS];
   var isBG = gImageView.data[row][COL_IMAGE_BG];
@@ -1015,7 +1014,6 @@ var imagePermissionObserver = {
       if (permission.type == "image") {
         var imageTree = document.getElementById("imagetree");
         var row = getSelectedRow(imageTree);
-        var item = gImageView.data[row][COL_IMAGE_NODE];
         var url = gImageView.data[row][COL_IMAGE_ADDRESS];
         if (permission.matchesURI(makeURI(url), true)) {
           makeBlockImage(url);

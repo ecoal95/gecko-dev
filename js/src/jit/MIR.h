@@ -6187,6 +6187,7 @@ class MBinaryArithInstruction
     bool mustPreserveNaN() const { return mustPreserveNaN_; }
 
     MDefinition* foldsTo(TempAllocator& alloc) override;
+    void printOpcode(GenericPrinter& out) const override;
 
     virtual double getIdentity() = 0;
 
@@ -8106,30 +8107,21 @@ class MDefLexical
 };
 
 class MDefFun
-  : public MUnaryInstruction,
-    public NoTypePolicy::Data
+  : public MBinaryInstruction,
+    public ObjectPolicy<0>::Data
 {
-    CompilerFunction fun_;
-
   private:
-    MDefFun(JSFunction* fun, MDefinition* envChain)
-      : MUnaryInstruction(envChain),
-        fun_(fun)
+    MDefFun(MDefinition* fun, MDefinition* envChain)
+      : MBinaryInstruction(fun, envChain)
     {}
 
   public:
     INSTRUCTION_HEADER(DefFun)
     TRIVIAL_NEW_WRAPPERS
-    NAMED_OPERANDS((0, environmentChain))
+    NAMED_OPERANDS((0, fun), (1, environmentChain))
 
-    JSFunction* fun() const {
-        return fun_;
-    }
     bool possiblyCalls() const override {
         return true;
-    }
-    bool appendRoots(MRootList& roots) const override {
-        return roots.append(fun_);
     }
 };
 
@@ -8912,22 +8904,33 @@ class MSetArrayLength
     }
 };
 
-class MGetNextMapEntryForIterator
+class MGetNextEntryForIterator
   : public MBinaryInstruction,
     public MixPolicy<ObjectPolicy<0>, ObjectPolicy<1> >::Data
 {
-  protected:
-    explicit MGetNextMapEntryForIterator(MDefinition* iter, MDefinition* result)
-      : MBinaryInstruction(iter, result)
+  public:
+    enum Mode {
+        Map,
+        Set
+    };
+
+  private:
+    Mode mode_;
+
+    explicit MGetNextEntryForIterator(MDefinition* iter, MDefinition* result, Mode mode)
+      : MBinaryInstruction(iter, result), mode_(mode)
     {
         setResultType(MIRType::Boolean);
     }
 
   public:
-    INSTRUCTION_HEADER(GetNextMapEntryForIterator)
+    INSTRUCTION_HEADER(GetNextEntryForIterator)
     TRIVIAL_NEW_WRAPPERS
     NAMED_OPERANDS((0, iter), (1, result))
 
+    Mode mode() const {
+        return mode_;
+    }
 };
 
 // Read the length of a typed array.

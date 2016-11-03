@@ -441,10 +441,6 @@ var gSyncUI = {
     return this._stringBundle.formatStringFromName("lastSync2.label", [lastSyncDateString], 1);
   },
 
-  onSyncFinish: function SUI_onSyncFinish() {
-    let title = this._stringBundle.GetStringFromName("error.sync.title");
-  },
-
   onClientsSynced: function() {
     let broadcaster = document.getElementById("sync-syncnow-state");
     if (broadcaster) {
@@ -484,7 +480,7 @@ var gSyncUI = {
     // Note that sync uses the ":ui:" notifications for errors because sync.
     switch (topic) {
       case "weave:ui:sync:finish":
-        this.onSyncFinish();
+        // Do nothing.
         break;
       case "weave:ui:sync:error":
       case "weave:service:setup-complete":
@@ -530,7 +526,7 @@ var gSyncUI = {
 };
 
 XPCOMUtils.defineLazyGetter(gSyncUI, "_stringBundle", function() {
-  //XXXzpao these strings should probably be moved from /services to /browser... (bug 583381)
+  // XXXzpao these strings should probably be moved from /services to /browser... (bug 583381)
   //        but for now just make it work
   return Cc["@mozilla.org/intl/stringbundle;1"].
          getService(Ci.nsIStringBundleService).

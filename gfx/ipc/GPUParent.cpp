@@ -97,9 +97,11 @@ GPUParent::Init(base::ProcessId aParentPid,
   DeviceManagerDx::Init();
   DeviceManagerD3D9::Init();
 #endif
+
   if (NS_FAILED(NS_InitMinimalXPCOM())) {
     return false;
   }
+
   CompositorThreadHolder::Start();
   APZThreadUtils::SetControllerThread(CompositorThreadHolder::Loop());
   APZCTreeManager::InitializeGlobalState();
@@ -293,16 +295,19 @@ GPUParent::RecvNewContentVideoDecoderManager(Endpoint<PVideoDecoderManagerParent
 }
 
 bool
-GPUParent::RecvDeallocateLayerTreeId(const uint64_t& aLayersId)
+GPUParent::RecvAddLayerTreeIdMapping(nsTArray<LayerTreeIdMapping>&& aMappings)
 {
-  CompositorBridgeParent::DeallocateLayerTreeId(aLayersId);
+  for (const LayerTreeIdMapping& map : aMappings) {
+    LayerTreeOwnerTracker::Get()->Map(map.layersId(), map.ownerId());
+  }
   return true;
 }
 
 bool
-GPUParent::RecvAddLayerTreeIdMapping(const uint64_t& aLayersId, const ProcessId& aOwnerId)
+GPUParent::RecvRemoveLayerTreeIdMapping(const LayerTreeIdMapping& aMapping)
 {
-  LayerTreeOwnerTracker::Get()->Map(aLayersId, aOwnerId);
+  LayerTreeOwnerTracker::Get()->Unmap(aMapping.layersId(), aMapping.ownerId());
+  CompositorBridgeParent::DeallocateLayerTreeId(aMapping.layersId());
   return true;
 }
 

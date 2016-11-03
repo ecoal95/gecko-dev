@@ -38,6 +38,7 @@
 #include "jit/InlinableNatives.h"
 #include "js/CharacterEncoding.h"
 #include "js/Date.h"
+#include "vm/AsyncFunction.h"
 #include "vm/Compression.h"
 #include "vm/GeneratorObject.h"
 #include "vm/Interpreter.h"
@@ -775,7 +776,7 @@ intrinsic_GetNextMapEntryForIterator(JSContext* cx, unsigned argc, Value* vp)
     Rooted<MapIteratorObject*> mapIterator(cx, &args[0].toObject().as<MapIteratorObject>());
     RootedArrayObject result(cx, &args[1].toObject().as<ArrayObject>());
 
-    args.rval().setBoolean(MapIteratorObject::next(cx, mapIterator, result));
+    args.rval().setBoolean(MapIteratorObject::next(mapIterator, result, cx));
     return true;
 }
 
@@ -786,6 +787,35 @@ intrinsic_CreateMapIterationResultPair(JSContext* cx, unsigned argc, Value* vp)
     MOZ_ASSERT(args.length() == 0);
 
     RootedObject result(cx, MapIteratorObject::createResultPair(cx));
+    if (!result)
+        return false;
+
+    args.rval().setObject(*result);
+    return true;
+}
+
+static bool
+intrinsic_GetNextSetEntryForIterator(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    MOZ_ASSERT(args.length() == 2);
+    MOZ_ASSERT(args[0].toObject().is<SetIteratorObject>());
+    MOZ_ASSERT(args[1].isObject());
+
+    Rooted<SetIteratorObject*> setIterator(cx, &args[0].toObject().as<SetIteratorObject>());
+    RootedArrayObject result(cx, &args[1].toObject().as<ArrayObject>());
+
+    args.rval().setBoolean(SetIteratorObject::next(setIterator, result, cx));
+    return true;
+}
+
+static bool
+intrinsic_CreateSetIterationResult(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    MOZ_ASSERT(args.length() == 0);
+
+    RootedObject result(cx, SetIteratorObject::createResult(cx));
     if (!result)
         return false;
 
@@ -1831,6 +1861,23 @@ js::ReportIncompatibleSelfHostedMethod(JSContext* cx, const CallArgs& args)
     return false;
 }
 
+bool
+intrinsic_CreateAsyncFunction(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    MOZ_ASSERT(args.length() == 2);
+
+    RootedFunction wrapper(cx, &args[0].toObject().as<JSFunction>());
+    RootedFunction unwrapped(cx, &args[1].toObject().as<JSFunction>());
+
+    RootedFunction wrapped(cx);
+    if (!CreateAsyncFunction(cx, wrapper, unwrapped, &wrapped))
+        return false;
+
+    args.rval().setObject(*wrapped);
+    return true;
+}
+
 /**
  * Returns the default locale as a well-formed, but not necessarily canonicalized,
  * BCP-47 language tag.
@@ -2230,6 +2277,8 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("RuntimeDefaultLocale",    intrinsic_RuntimeDefaultLocale,    0,0),
     JS_FN("AddContentTelemetry",     intrinsic_AddContentTelemetry,     2,0),
 
+    JS_FN("CreateAsyncFunction",     intrinsic_CreateAsyncFunction,     1,0),
+
     JS_INLINABLE_FN("_IsConstructing", intrinsic_IsConstructing,        0,0,
                     IntrinsicIsConstructing),
     JS_INLINABLE_FN("SubstringKernel", intrinsic_SubstringKernel,       3,0,
@@ -2274,6 +2323,9 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_INLINABLE_FN("IsMapIterator",
                     intrinsic_IsInstanceOfBuiltin<MapIteratorObject>,   1,0,
                     IntrinsicIsMapIterator),
+    JS_INLINABLE_FN("IsSetIterator",
+                    intrinsic_IsInstanceOfBuiltin<SetIteratorObject>,   1,0,
+                    IntrinsicIsSetIterator),
     JS_INLINABLE_FN("IsStringIterator",
                     intrinsic_IsInstanceOfBuiltin<StringIteratorObject>, 1,0,
                     IntrinsicIsStringIterator),
@@ -2286,6 +2338,12 @@ static const JSFunctionSpec intrinsic_functions[] = {
                     IntrinsicGetNextMapEntryForIterator),
     JS_FN("CallMapIteratorMethodIfWrapped",
           CallNonGenericSelfhostedMethod<Is<MapIteratorObject>>,        2,0),
+
+    JS_FN("_CreateSetIterationResult", intrinsic_CreateSetIterationResult, 0, 0),
+    JS_INLINABLE_FN("_GetNextSetEntryForIterator", intrinsic_GetNextSetEntryForIterator, 2,0,
+                    IntrinsicGetNextSetEntryForIterator),
+    JS_FN("CallSetIteratorMethodIfWrapped",
+          CallNonGenericSelfhostedMethod<Is<SetIteratorObject>>,        2,0),
 
 
     JS_FN("NewStringIterator",       intrinsic_NewStringIterator,       0,0),
@@ -2362,6 +2420,10 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("IsWeakSet", intrinsic_IsInstanceOfBuiltin<WeakSetObject>, 1,0),
     JS_FN("CallWeakSetMethodIfWrapped",
           CallNonGenericSelfhostedMethod<Is<WeakSetObject>>, 2, 0),
+
+    JS_FN("Promise_static_resolve",                Promise_static_resolve, 1, 0),
+    JS_FN("Promise_static_reject",                 Promise_reject, 1, 0),
+    JS_FN("Promise_then",                          Promise_then, 2, 0),
 
     // See builtin/TypedObject.h for descriptors of the typedobj functions.
     JS_FN("NewOpaqueTypedObject",           js::NewOpaqueTypedObject, 1, 0),

@@ -22,6 +22,7 @@ import org.mozilla.gecko.IntentHelper;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
+import org.mozilla.gecko.activitystream.ActivityStream;
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.home.HomePager;
 import org.mozilla.gecko.icons.IconCallback;
@@ -39,6 +40,12 @@ import static org.mozilla.gecko.activitystream.ActivityStream.extractLabel;
 public class ActivityStreamContextMenu
     extends BottomSheetDialog
         implements NavigationView.OnNavigationItemSelectedListener {
+
+    public enum MenuMode {
+        HIGHLIGHT,
+        TOPSITE
+    }
+
     final Context context;
 
     final String title;
@@ -49,7 +56,9 @@ public class ActivityStreamContextMenu
 
     boolean isAlreadyBookmarked = false;
 
-    private ActivityStreamContextMenu(final Context context, final String title, @NonNull final String url,
+    private ActivityStreamContextMenu(final Context context,
+                                      final MenuMode mode,
+                                      final String title, @NonNull final String url,
                                       HomePager.OnUrlOpenListener onUrlOpenListener,
                                       HomePager.OnUrlOpenInBackgroundListener onUrlOpenInBackgroundListener,
                                       final int tilesWidth, final int tilesHeight) {
@@ -68,8 +77,11 @@ public class ActivityStreamContextMenu
         setContentView(content);
 
         ((TextView) findViewById(R.id.title)).setText(title);
-        final String label = extractLabel(url, false);
-        ((TextView) findViewById(R.id.url)).setText(label);
+        extractLabel(context, url, false, new ActivityStream.LabelCallback() {
+                public void onLabelExtracted(String label) {
+                    ((TextView) findViewById(R.id.url)).setText(label);
+                }
+        });
 
         // Copy layouted parameters from the Highlights / TopSites items to ensure consistency
         final FaviconView faviconView = (FaviconView) findViewById(R.id.icon);
@@ -91,6 +103,14 @@ public class ActivityStreamContextMenu
 
         NavigationView navigationView = (NavigationView) findViewById(R.id.menu);
         navigationView.setNavigationItemSelectedListener(this);
+
+        // Disable "dismiss" for topsites until we have decided on its behaviour for topsites
+        // (currently "dismiss" adds the URL to a highlights-specific blocklist, which the topsites
+        // query has no knowledge of).
+        if (mode == MenuMode.TOPSITE) {
+            final MenuItem dismissItem = navigationView.getMenu().findItem(R.id.dismiss);
+            dismissItem.setVisible(false);
+        }
 
         // Disable the bookmark item until we know its bookmark state
         final MenuItem bookmarkItem = navigationView.getMenu().findItem(R.id.bookmark);
@@ -149,11 +169,15 @@ public class ActivityStreamContextMenu
         bsBehaviour.setPeekHeight(context.getResources().getDimensionPixelSize(R.dimen.activity_stream_contextmenu_peek_height));
     }
 
-    public static ActivityStreamContextMenu show(Context context, final String title, @NonNull  final String url,
+    public static ActivityStreamContextMenu show(Context context,
+                            final MenuMode menuMode,
+                            final String title, @NonNull  final String url,
                             HomePager.OnUrlOpenListener onUrlOpenListener,
                             HomePager.OnUrlOpenInBackgroundListener onUrlOpenInBackgroundListener,
                             final int tilesWidth, final int tilesHeight) {
-        final ActivityStreamContextMenu menu = new ActivityStreamContextMenu(context, title, url,
+        final ActivityStreamContextMenu menu = new ActivityStreamContextMenu(context,
+                menuMode,
+                title, url,
                 onUrlOpenListener, onUrlOpenInBackgroundListener,
                 tilesWidth, tilesHeight);
         menu.show();

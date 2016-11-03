@@ -1452,6 +1452,25 @@ public:
 
     static auto OpenUriExternal(mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param) -> bool;
 
+    struct OpenWindowForNotification_t {
+        typedef GeckoAppShell Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "openWindowForNotification";
+        static constexpr char signature[] =
+                "()V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+        static const mozilla::jni::CallingThread callingThread =
+                mozilla::jni::CallingThread::ANY;
+        static const mozilla::jni::DispatchTarget dispatchTarget =
+                mozilla::jni::DispatchTarget::CURRENT;
+    };
+
+    static auto OpenWindowForNotification() -> void;
+
     struct PerformHapticFeedback_t {
         typedef GeckoAppShell Owner;
         typedef void ReturnType;
@@ -4794,6 +4813,25 @@ public:
     static const char name[];
 
     explicit HardwareCodecCapabilityUtils(const Context& ctx) : ObjectBase<HardwareCodecCapabilityUtils>(ctx) {}
+
+    struct HasHWVP9_t {
+        typedef HardwareCodecCapabilityUtils Owner;
+        typedef bool ReturnType;
+        typedef bool SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "HasHWVP9";
+        static constexpr char signature[] =
+                "()Z";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+        static const mozilla::jni::CallingThread callingThread =
+                mozilla::jni::CallingThread::ANY;
+        static const mozilla::jni::DispatchTarget dispatchTarget =
+                mozilla::jni::DispatchTarget::CURRENT;
+    };
+
+    static auto HasHWVP9() -> bool;
 
     struct FindDecoderCodecInfoForMimeType_t {
         typedef HardwareCodecCapabilityUtils Owner;

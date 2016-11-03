@@ -637,8 +637,6 @@ child:
 
     async LoadURL(nsCString uri, ShowInfo info);
 
-    async CacheFileDescriptor(nsString path, FileDescriptor fd);
-
     async UpdateDimensions(CSSRect rect, CSSSize size,
                            ScreenOrientationInternal orientation,
                            LayoutDeviceIntPoint clientOffset,
@@ -902,6 +900,12 @@ child:
      * an inactive history in the grouped session history.
      */
     async NotifyPartialSessionHistoryDeactive();
+
+    /**
+     * Tell the child that it is a fresh process created for a Large-Allocation
+     * load.
+     */
+    async SetFreshProcess();
 
 /*
  * FIXME: write protocol!

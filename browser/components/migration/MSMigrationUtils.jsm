@@ -13,7 +13,6 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource:///modules/MigrationUtils.jsm");
-Cu.import("resource://gre/modules/LoginHelper.jsm");
 
 Cu.importGlobalProperties(["FileReader"]);
 
@@ -41,8 +40,8 @@ const WEB_CREDENTIALS_VAULT_ID = [0x4BF4C442,
 
 Cu.importGlobalProperties(["File"]);
 
-////////////////////////////////////////////////////////////////////////////////
-//// Helpers.
+// //////////////////////////////////////////////////////////////////////////////
+// // Helpers.
 
 const wintypes = {
   BOOL: ctypes.int,
@@ -407,7 +406,7 @@ Bookmarks.prototype = {
           }
           else {
             // Import to a new folder.
-            folderGuid = (yield PlacesUtils.bookmarks.insert({
+            folderGuid = (yield MigrationUtils.insertBookmarkWrapper({
               type: PlacesUtils.bookmarks.TYPE_FOLDER,
               parentGuid: aDestFolderGuid,
               title: entry.leafName
@@ -429,7 +428,7 @@ Bookmarks.prototype = {
             let uri = fileHandler.readURLFile(entry);
             let title = matches[1];
 
-            yield PlacesUtils.bookmarks.insert({
+            yield MigrationUtils.insertBookmarkWrapper({
               parentGuid: aDestFolderGuid, url: uri, title
             });
           }
@@ -838,7 +837,7 @@ WindowsVaultFormPasswords.prototype = {
             hostname: realURL.prePath,
             timeCreated: creation,
           };
-          LoginHelper.maybeImportLogin(login);
+          MigrationUtils.insertLoginWrapper(login);
 
           // close current item
           error = ctypesVaultHelpers._functions.VaultFree(credential);

@@ -1550,18 +1550,22 @@ class LDefLexical : public LCallInstructionHelper<0, 0, 0>
     }
 };
 
-class LDefFun : public LCallInstructionHelper<0, 1, 0>
+class LDefFun : public LCallInstructionHelper<0, 2, 0>
 {
   public:
     LIR_HEADER(DefFun)
 
-    explicit LDefFun(const LAllocation& envChain)
+    LDefFun(const LAllocation& fun, const LAllocation& envChain)
     {
-        setOperand(0, envChain);
+        setOperand(0, fun);
+        setOperand(1, envChain);
     }
 
-    const LAllocation* environmentChain() {
+    const LAllocation* fun() {
         return getOperand(0);
+    }
+    const LAllocation* environmentChain() {
+        return getOperand(1);
     }
     MDefFun* mir() const {
         return mir_->toDefFun();
@@ -5230,14 +5234,14 @@ class LSetArrayLength : public LInstructionHelper<0, 2, 0>
     }
 };
 
-class LGetNextMapEntryForIterator : public LInstructionHelper<1, 2, 3>
+class LGetNextEntryForIterator : public LInstructionHelper<1, 2, 3>
 {
   public:
-    LIR_HEADER(GetNextMapEntryForIterator)
+    LIR_HEADER(GetNextEntryForIterator)
 
-    explicit LGetNextMapEntryForIterator(const LAllocation& iter, const LAllocation& result,
-                                         const LDefinition& temp0, const LDefinition& temp1,
-                                         const LDefinition& temp2)
+    explicit LGetNextEntryForIterator(const LAllocation& iter, const LAllocation& result,
+                                      const LDefinition& temp0, const LDefinition& temp1,
+                                      const LDefinition& temp2)
     {
         setOperand(0, iter);
         setOperand(1, result);
@@ -5246,6 +5250,9 @@ class LGetNextMapEntryForIterator : public LInstructionHelper<1, 2, 3>
         setTemp(2, temp2);
     }
 
+    const MGetNextEntryForIterator* mir() const {
+        return mir_->toGetNextEntryForIterator();
+    }
     const LAllocation* iter() {
         return getOperand(0);
     }

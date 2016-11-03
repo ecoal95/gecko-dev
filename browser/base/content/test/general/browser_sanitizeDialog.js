@@ -136,7 +136,6 @@ add_task(function* test_history_downloads_checked() {
   let promiseSanitized = promiseSanitizationComplete();
 
   yield PlacesTestUtils.addVisits(places);
-  let totalHistoryVisits = uris.length + olderURIs.length;
 
   let wh = new WindowHelper();
   wh.onload = function () {
@@ -633,7 +632,7 @@ add_task(function* test_offline_apps_permissions() {
 var now_mSec = Date.now();
 var now_uSec = now_mSec * 1000;
 
-///////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////
 
 /**
  * This wraps the dialog and provides some convenience methods for interacting

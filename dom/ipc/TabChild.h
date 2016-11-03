@@ -41,8 +41,8 @@
 #include "nsISHistoryListener.h"
 #include "nsIPartialSHistoryListener.h"
 
-class nsICachedFileDescriptorListener;
 class nsIDOMWindowUtils;
+class nsIHttpChannel;
 
 namespace mozilla {
 namespace layout {
@@ -338,11 +338,6 @@ public:
 
   virtual bool RecvLoadURL(const nsCString& aURI,
                            const ShowInfo& aInfo) override;
-
-  virtual bool RecvCacheFileDescriptor(const nsString& aPath,
-                                       const FileDescriptor& aFileDescriptor)
-                                       override;
-
   virtual bool
   RecvShow(const ScreenIntSize& aSize,
            const ShowInfo& aInfo,
@@ -518,7 +513,7 @@ public:
   void NotifyPainted();
 
   void RequestNativeKeyBindings(mozilla::widget::AutoCacheNativeKeyCommands* aAutoCache,
-                                WidgetKeyboardEvent* aEvent);
+                                const WidgetKeyboardEvent* aEvent);
 
   /**
    * Signal to this TabChild that it should be made visible:
@@ -527,15 +522,6 @@ public:
    */
   void MakeVisible();
   void MakeHidden();
-
-  // Returns true if the file descriptor was found in the cache, false
-  // otherwise.
-  bool GetCachedFileDescriptor(const nsAString& aPath,
-                               nsICachedFileDescriptorListener* aCallback);
-
-  void CancelCachedFileDescriptorCallback(
-                                  const nsAString& aPath,
-                                  nsICachedFileDescriptorListener* aCallback);
 
   nsIContentChild* Manager() const { return mManager; }
 
@@ -675,6 +661,13 @@ public:
   uintptr_t GetNativeWindowHandle() const { return mNativeWindowHandle; }
 #endif
 
+  bool TakeIsFreshProcess()
+  {
+    bool wasFreshProcess = mIsFreshProcess;
+    mIsFreshProcess = false;
+    return wasFreshProcess;
+  }
+
 protected:
   virtual ~TabChild();
 
@@ -711,6 +704,8 @@ protected:
                                                      const uint32_t& aTargetLocalIndex) override;
 
   virtual bool RecvNotifyPartialSessionHistoryDeactive() override;
+
+  virtual bool RecvSetFreshProcess() override;
 
 private:
   void HandleDoubleTap(const CSSPoint& aPoint, const Modifiers& aModifiers,
@@ -754,8 +749,6 @@ private:
     mUnscaledInnerSize = aSize;
   }
 
-  class CachedFileDescriptorInfo;
-  class CachedFileDescriptorCallbackRunnable;
   class DelayedDeleteRunnable;
 
   TextureFactoryIdentifier mTextureFactoryIdentifier;
@@ -769,11 +762,6 @@ private:
   int32_t mActiveSuppressDisplayport;
   uint64_t mLayersId;
   CSSRect mUnscaledOuterRect;
-  // Whether we have already received a FileDescriptor for the app package.
-  bool mAppPackageFileDescriptorRecved;
-  // At present only 1 of these is really expected.
-  AutoTArray<nsAutoPtr<CachedFileDescriptorInfo>, 1>
-      mCachedFileDescriptorInfos;
   nscolor mLastBackgroundColor;
   bool mDidFakeShow;
   bool mNotified;
@@ -804,6 +792,7 @@ private:
   CSSSize mUnscaledInnerSize;
   bool mDidSetRealShowInfo;
   bool mDidLoadURLInit;
+  bool mIsFreshProcess;
 
   AutoTArray<bool, NUMBER_OF_AUDIO_CHANNELS> mAudioChannelsActive;
 

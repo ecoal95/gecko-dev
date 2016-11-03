@@ -7,20 +7,17 @@ package org.mozilla.gecko.home.activitystream;
 import android.content.res.Resources;
 import android.database.Cursor;
 import android.graphics.Color;
-import android.graphics.Rect;
 import android.support.v4.view.ViewPager;
 import android.support.v7.widget.RecyclerView;
 import android.text.TextUtils;
 import android.text.format.DateUtils;
-import android.util.DisplayMetrics;
-import android.util.TypedValue;
-import android.view.TouchDelegate;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.TextView;
 
 import org.mozilla.gecko.R;
+import org.mozilla.gecko.activitystream.ActivityStream.LabelCallback;
 import org.mozilla.gecko.db.BrowserContract;
 import org.mozilla.gecko.home.HomePager;
 import org.mozilla.gecko.home.activitystream.menu.ActivityStreamContextMenu;
@@ -30,6 +27,7 @@ import org.mozilla.gecko.icons.IconCallback;
 import org.mozilla.gecko.icons.IconResponse;
 import org.mozilla.gecko.icons.Icons;
 import org.mozilla.gecko.util.DrawableUtil;
+import org.mozilla.gecko.util.TouchTargetUtil;
 import org.mozilla.gecko.widget.FaviconView;
 
 import java.util.concurrent.Future;
@@ -46,11 +44,11 @@ public abstract class StreamItem extends RecyclerView.ViewHolder {
 
         private final ViewPager topSitesPager;
 
-        public TopPanel(View itemView, HomePager.OnUrlOpenListener onUrlOpenListener) {
+        public TopPanel(View itemView, HomePager.OnUrlOpenListener onUrlOpenListener, HomePager.OnUrlOpenInBackgroundListener onUrlOpenInBackgroundListener) {
             super(itemView);
 
             topSitesPager = (ViewPager) itemView.findViewById(R.id.topsites_pager);
-            topSitesPager.setAdapter(new TopSitesPagerAdapter(itemView.getContext(), onUrlOpenListener));
+            topSitesPager.setAdapter(new TopSitesPagerAdapter(itemView.getContext(), onUrlOpenListener, onUrlOpenInBackgroundListener));
 
             CirclePageIndicator indicator = (CirclePageIndicator) itemView.findViewById(R.id.topsites_indicator);
             indicator.setViewPager(topSitesPager);
@@ -106,31 +104,14 @@ public abstract class StreamItem extends RecyclerView.ViewHolder {
             menuButton.setImageDrawable(
                     DrawableUtil.tintDrawable(menuButton.getContext(), R.drawable.menu, Color.LTGRAY));
 
-            itemView.post(new Runnable() {
-                @Override
-                public void run() {
-                    Rect delegateArea = new Rect();
-                    menuButton.getHitRect(delegateArea);
-
-                    final int targetHitArea = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 40, itemView.getContext().getResources().getDisplayMetrics());;
-
-                    final int widthDelta = (targetHitArea - delegateArea.width()) / 2;
-                    delegateArea.right += widthDelta;
-                    delegateArea.left -= widthDelta;
-
-                    final int heightDelta = (targetHitArea - delegateArea.height()) / 2;
-                    delegateArea.bottom += heightDelta;
-                    delegateArea.top -= heightDelta;
-
-                    TouchDelegate touchDelegate = new TouchDelegate(delegateArea, menuButton);
-                    itemView.setTouchDelegate(touchDelegate);
-                }
-            });
+            TouchTargetUtil.ensureTargetHitArea(menuButton, itemView);
 
             menuButton.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    ActivityStreamContextMenu.show(v.getContext(), title, url, onUrlOpenListener, onUrlOpenInBackgroundListener, vIconView.getWidth(), vIconView.getHeight());
+                    ActivityStreamContextMenu.show(v.getContext(), ActivityStreamContextMenu.MenuMode.HIGHLIGHT,
+                            title, url, onUrlOpenListener, onUrlOpenInBackgroundListener,
+                            vIconView.getWidth(), vIconView.getHeight());
                 }
             });
         }
@@ -185,14 +166,13 @@ public abstract class StreamItem extends RecyclerView.ViewHolder {
             vSourceView.setText(vSourceView.getText());
         }
 
-        private void updatePage(String url) {
-            final String label = extractLabel(url, false);
-
-            if (!TextUtils.isEmpty(label)) {
-                vPageView.setText(label);
-            } else {
-                vPageView.setText(url);
-            }
+        private void updatePage(final String url) {
+            extractLabel(itemView.getContext(), url, false, new LabelCallback() {
+                @Override
+                public void onLabelExtracted(String label) {
+                    vPageView.setText(TextUtils.isEmpty(label) ? url : label);
+                }
+            });
         }
 
         @Override

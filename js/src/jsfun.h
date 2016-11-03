@@ -301,6 +301,13 @@ class JSFunction : public js::NativeObject
         flags_ |= RESOLVED_NAME;
     }
 
+    void setAsyncKind(js::FunctionAsyncKind asyncKind) {
+        if (isInterpretedLazy())
+            lazyScript()->setAsyncKind(asyncKind);
+        else
+            nonLazyScript()->setAsyncKind(asyncKind);
+    }
+
     bool getUnresolvedLength(JSContext* cx, js::MutableHandleValue v);
 
     JSAtom* getUnresolvedName(JSContext* cx);
@@ -469,6 +476,18 @@ class JSFunction : public js::NativeObject
 
     bool isStarGenerator() const { return generatorKind() == js::StarGenerator; }
 
+    js::FunctionAsyncKind asyncKind() const {
+        return isInterpretedLazy() ? lazyScript()->asyncKind() : nonLazyScript()->asyncKind();
+    }
+
+    bool isAsync() const {
+        if (isInterpretedLazy())
+            return lazyScript()->asyncKind() == js::AsyncFunction;
+        if (hasScript())
+            return nonLazyScript()->asyncKind() == js::AsyncFunction;
+        return false;
+    }
+
     void setScript(JSScript* script_) {
         mutableScript() = script_;
     }
@@ -478,11 +497,13 @@ class JSFunction : public js::NativeObject
     }
 
     void setUnlazifiedScript(JSScript* script) {
-        // Note: createScriptForLazilyInterpretedFunction triggers a barrier on
-        // lazy script before it is overwritten here.
         MOZ_ASSERT(isInterpretedLazy());
-        if (lazyScriptOrNull() && !lazyScript()->maybeScript())
-            lazyScript()->initScript(script);
+        if (lazyScriptOrNull()) {
+            // Trigger a pre barrier on the lazy script being overwritten.
+            js::LazyScript::writeBarrierPre(lazyScriptOrNull());
+            if (!lazyScript()->maybeScript())
+                lazyScript()->initScript(script);
+        }
         flags_ &= ~INTERPRETED_LAZY;
         flags_ |= INTERPRETED;
         initScript(script);
@@ -600,6 +621,9 @@ Function(JSContext* cx, unsigned argc, Value* vp);
 
 extern bool
 Generator(JSContext* cx, unsigned argc, Value* vp);
+
+extern bool
+AsyncFunctionConstructor(JSContext* cx, unsigned argc, Value* vp);
 
 // Allocate a new function backed by a JSNative.  Note that by default this
 // creates a singleton object.

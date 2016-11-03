@@ -180,7 +180,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "TabStateCache",
 XPCOMUtils.defineLazyModuleGetter(this, "TabStateFlusher",
   "resource:///modules/sessionstore/TabStateFlusher.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Utils",
-  "resource:///modules/sessionstore/Utils.jsm");
+  "resource://gre/modules/sessionstore/Utils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ViewSourceBrowser",
   "resource://gre/modules/ViewSourceBrowser.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "AsyncShutdown",
@@ -209,6 +209,10 @@ this.SessionStore = {
 
   set canRestoreLastSession(val) {
     SessionStoreInternal.canRestoreLastSession = val;
+  },
+
+  get lastClosedObjectType() {
+    return SessionStoreInternal.lastClosedObjectType;
   },
 
   init: function ss_init() {
@@ -339,6 +343,10 @@ this.SessionStore = {
     return SessionStoreInternal.getSessionHistory(tab, updatedCallback);
   },
 
+  undoCloseById(aClosedId) {
+    return SessionStoreInternal.undoCloseById(aClosedId);
+  },
+
   /**
    * Determines whether the passed version number is compatible with
    * the current version number of the SessionStore.
@@ -377,6 +385,9 @@ var SessionStoreInternal = {
   ]),
 
   _globalState: new GlobalState(),
+
+  // A counter to be used to generate a unique ID for each closed tab or window.
+  _nextClosedId: 0,
 
   // During the initial restore and setBrowserState calls tracks the number of
   // windows yet to be restored
@@ -494,6 +505,33 @@ var SessionStoreInternal = {
     if (!val) {
       LastSession.clear();
     }
+  },
+
+  /**
+   * Returns a string describing the last closed object, either "tab" or "window".
+   *
+   * This was added to support the sessions.restore WebExtensions API.
+   */
+  get lastClosedObjectType() {
+    if (this._closedWindows.length) {
+      // Since there are closed windows, we need to check if there's a closed tab
+      // in one of the currently open windows that was closed after the
+      // last-closed window.
+      let tabTimestamps = [];
+      let windowsEnum = Services.wm.getEnumerator("navigator:browser");
+      while (windowsEnum.hasMoreElements()) {
+        let window = windowsEnum.getNext();
+        let windowState = this._windows[window.__SSi];
+        if (windowState && windowState._closedTabs[0]) {
+          tabTimestamps.push(windowState._closedTabs[0].closedAt);
+        }
+      }
+      if (!tabTimestamps.length ||
+          (tabTimestamps.sort((a, b) => b - a)[0] < this._closedWindows[0].closedAt)) {
+        return "window";
+      }
+    }
+    return "tab";
   },
 
   /**
@@ -1431,6 +1469,9 @@ var SessionStoreInternal = {
           index = this._closedWindows.length;
         }
 
+        // About to save the closed window, add a unique ID.
+        winData.closedId = this._nextClosedId++;
+
         // Insert tabData at the right position.
         this._closedWindows.splice(index, 0, winData);
         this._capClosedWindows();
@@ -1851,6 +1892,9 @@ var SessionStoreInternal = {
     if (index == -1) {
       index = closedTabs.length;
     }
+
+    // About to save the closed tab, add a unique ID.
+    tabData.closedId = this._nextClosedId++;
 
     // Insert tabData at the right position.
     closedTabs.splice(index, 0, tabData);
@@ -2398,6 +2442,42 @@ var SessionStoreInternal = {
     }
   },
 
+
+  /**
+   * Undoes the closing of a tab or window which corresponds
+   * to the closedId passed in.
+   *
+   * @param aClosedId
+   *        The closedId of the tab or window
+   *
+   * @returns a tab or window object
+   */
+  undoCloseById(aClosedId) {
+    // Check for a window first.
+    for (let i = 0, l = this._closedWindows.length; i < l; i++) {
+      if (this._closedWindows[i].closedId == aClosedId) {
+        return this.undoCloseWindow(i);
+      }
+    }
+
+    // Check for a tab.
+    let windowsEnum = Services.wm.getEnumerator("navigator:browser");
+    while (windowsEnum.hasMoreElements()) {
+      let window = windowsEnum.getNext();
+      let windowState = this._windows[window.__SSi];
+      if (windowState) {
+        for (let j = 0, l = windowState._closedTabs.length; j < l; j++) {
+          if (windowState._closedTabs[j].closedId == aClosedId) {
+            return this.undoCloseTab(window, j);
+          }
+        }
+      }
+    }
+
+    // Neither a tab nor a window was found, return undefined and let the caller decide what to do about it.
+    return undefined;
+  },
+
   /**
    * Restores the session state stored in LastSession. This will attempt
    * to merge data into the current session. If a window was opened at startup
@@ -2614,7 +2694,13 @@ var SessionStoreInternal = {
       }
 
       let tabState = TabState.clone(tab);
-      let options = {restoreImmediately: true};
+      let options = {
+        restoreImmediately: true,
+        // We want to make sure that this information is passed to restoreTab
+        // whether or not a historyIndex is passed in. Thus, we extract it from
+        // the loadArguments.
+        reloadInFreshProcess: !!recentLoadArguments.reloadInFreshProcess,
+      };
 
       if (historyIndex >= 0) {
         tabState.index = historyIndex + 1;
@@ -3274,6 +3360,7 @@ var SessionStoreInternal = {
     let window = tab.ownerGlobal;
     let tabbrowser = window.gBrowser;
     let forceOnDemand = options.forceOnDemand;
+    let reloadInFreshProcess = options.reloadInFreshProcess;
 
     let willRestoreImmediately = restoreImmediately ||
                                  tabbrowser.selectedBrowser == browser ||
@@ -3396,7 +3483,7 @@ var SessionStoreInternal = {
     // This could cause us to ignore MAX_CONCURRENT_TAB_RESTORES a bit, but
     // it ensures each window will have its selected tab loaded.
     if (willRestoreImmediately) {
-      this.restoreTabContent(tab, loadArguments);
+      this.restoreTabContent(tab, loadArguments, reloadInFreshProcess);
     } else if (!forceOnDemand) {
       this.restoreNextTab();
     }
@@ -3412,11 +3499,10 @@ var SessionStoreInternal = {
    *        the tab to restore
    * @param aLoadArguments
    *        optional load arguments used for loadURI()
-   * @param aRemotenessSwitch
-   *        true if we're restoring a tab's content because we flipped
-   *        its remoteness (out-of-process) state.
+   * @param aReloadInFreshProcess
+   *        true if we want to reload into a fresh process
    */
-  restoreTabContent: function (aTab, aLoadArguments = null) {
+  restoreTabContent: function (aTab, aLoadArguments = null, aReloadInFreshProcess = false) {
     if (aTab.hasAttribute("customizemode")) {
       return;
     }
@@ -3441,7 +3527,13 @@ var SessionStoreInternal = {
     // flip the remoteness of any browser that is not being displayed.
     this.markTabAsRestoring(aTab);
 
-    let isRemotenessUpdate = tabbrowser.updateBrowserRemotenessByURL(browser, uri);
+    let isRemotenessUpdate = false;
+    if (aReloadInFreshProcess) {
+      isRemotenessUpdate = tabbrowser.switchBrowserIntoFreshProcess(browser);
+    } else {
+      isRemotenessUpdate = tabbrowser.updateBrowserRemotenessByURL(browser, uri);
+    }
+
     if (isRemotenessUpdate) {
       // We updated the remoteness, so we need to send the history down again.
       //
