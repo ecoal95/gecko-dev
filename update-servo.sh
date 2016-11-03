@@ -42,6 +42,7 @@ echo "Re-vendoring dependencies..."
   cargo update
   cargo vendor ../../../third_party/rust
 )
+( cd toolkit/library/gtest/rust && cargo update )
 echo "Restoring .cargo/..."
 mv .cargo-inactive .cargo
 echo "Committing..."
