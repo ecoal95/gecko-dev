@@ -1388,17 +1388,6 @@ pub enum nsresult {
     NS_ERROR_DOM_FILESYSTEM_PATH_EXISTS_ERR = 2154364932,
     NS_ERROR_DOM_FILESYSTEM_TYPE_MISMATCH_ERR = 2154364933,
     NS_ERROR_DOM_FILESYSTEM_UNKNOWN_ERR = 2154364934,
-    NS_ERROR_DOM_BLUETOOTH_FAIL = 2154430465,
-    NS_ERROR_DOM_BLUETOOTH_NOT_READY = 2154430466,
-    NS_ERROR_DOM_BLUETOOTH_NOMEM = 2154430467,
-    NS_ERROR_DOM_BLUETOOTH_BUSY = 2154430468,
-    NS_ERROR_DOM_BLUETOOTH_DONE = 2154430469,
-    NS_ERROR_DOM_BLUETOOTH_UNSUPPORTED = 2154430470,
-    NS_ERROR_DOM_BLUETOOTH_PARM_INVALID = 2154430471,
-    NS_ERROR_DOM_BLUETOOTH_UNHANDLED = 2154430472,
-    NS_ERROR_DOM_BLUETOOTH_AUTH_FAILURE = 2154430473,
-    NS_ERROR_DOM_BLUETOOTH_RMT_DEV_DOWN = 2154430474,
-    NS_ERROR_DOM_BLUETOOTH_AUTH_REJECTED = 2154430475,
     NS_ERROR_SIGNED_APP_MANIFEST_INVALID = 2154496001,
     NS_ERROR_DOM_ANIM_MISSING_PROPS_ERR = 2154561537,
     NS_ERROR_DOM_PUSH_INVALID_REGISTRATION_ERR = 2154627073,
@@ -1433,6 +1422,37 @@ pub enum nsresult {
     NS_OK_NO_NAME_CLAUSE_HANDLED = 7864354,
 }
 pub type nsrefcnt = MozRefCountType;
+#[repr(C)]
+#[derive(Debug)]
+pub struct OwningNonNull<T> {
+    pub mPtr: RefPtr<T>,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct StaticRefPtr<T> {
+    pub mRawPtr: *mut T,
+}
+#[repr(C)]
+#[derive(Debug)]
+pub struct RefPtr<T> {
+    pub mRawPtr: *mut T,
+}
+pub type RefPtr_element_type<T> = T;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct RefPtr_Proxy<T, R, Args> {
+    pub _phantom_0: ::std::marker::PhantomData<T>,
+    pub _phantom_1: ::std::marker::PhantomData<R>,
+    pub _phantom_2: ::std::marker::PhantomData<Args>,
+}
+pub type RefPtr_Proxy_member_function = [u8; 0usize];
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct RefPtr_ConstRemovingRefPtrTraits<T, U> {
+    pub _address: u8,
+    pub _phantom_0: ::std::marker::PhantomData<T>,
+    pub _phantom_1: ::std::marker::PhantomData<U>,
+}
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct AlignedStorage2<T> {
@@ -1640,12 +1660,10 @@ impl Clone for JSCompartment {
     fn clone(&self) -> Self { *self }
 }
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug)]
 pub struct atomic<_Tp> {
-    pub _base: (),
-    pub _phantom_0: ::std::marker::PhantomData<_Tp>,
+    pub _M_i: _Tp,
 }
-pub type atomic___base = [u8; 0usize];
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum JSWhyMagic {
@@ -2078,50 +2096,6 @@ fn bindgen_test_layout_PLHashAllocOps() {
     assert_eq!(::std::mem::align_of::<PLHashAllocOps>() , 8usize);
 }
 impl Clone for PLHashAllocOps {
-    fn clone(&self) -> Self { *self }
-}
-#[repr(C)]
-#[derive(Debug)]
-pub struct OwningNonNull<T> {
-    pub mPtr: RefPtr<T>,
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct StaticRefPtr<T> {
-    pub mRawPtr: *mut T,
-}
-#[repr(C)]
-#[derive(Debug)]
-pub struct RefPtr<T> {
-    pub mRawPtr: *mut T,
-}
-pub type RefPtr_element_type<T> = T;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct RefPtr_Proxy<T, R, Args> {
-    pub _phantom_0: ::std::marker::PhantomData<T>,
-    pub _phantom_1: ::std::marker::PhantomData<R>,
-    pub _phantom_2: ::std::marker::PhantomData<Args>,
-}
-pub type RefPtr_Proxy_member_function = [u8; 0usize];
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct RefPtr_ConstRemovingRefPtrTraits<T, U> {
-    pub _address: u8,
-    pub _phantom_0: ::std::marker::PhantomData<T>,
-    pub _phantom_1: ::std::marker::PhantomData<U>,
-}
-#[repr(C)]
-#[derive(Debug, Copy)]
-pub struct nsAutoOwningThread {
-    pub mThread: *mut ::std::os::raw::c_void,
-}
-#[test]
-fn bindgen_test_layout_nsAutoOwningThread() {
-    assert_eq!(::std::mem::size_of::<nsAutoOwningThread>() , 8usize);
-    assert_eq!(::std::mem::align_of::<nsAutoOwningThread>() , 8usize);
-}
-impl Clone for nsAutoOwningThread {
     fn clone(&self) -> Self { *self }
 }
 #[repr(C)]
@@ -2619,38 +2593,6 @@ pub struct pair<_T1, _T2> {
 }
 pub type pair_first_type<_T1> = _T1;
 pub type pair_second_type<_T2> = _T2;
-#[repr(C)]
-#[derive(Debug, Copy)]
-pub struct input_iterator_tag {
-    pub _address: u8,
-}
-impl Clone for input_iterator_tag {
-    fn clone(&self) -> Self { *self }
-}
-#[repr(C)]
-#[derive(Debug, Copy)]
-pub struct forward_iterator_tag {
-    pub _address: u8,
-}
-impl Clone for forward_iterator_tag {
-    fn clone(&self) -> Self { *self }
-}
-#[repr(C)]
-#[derive(Debug, Copy)]
-pub struct bidirectional_iterator_tag {
-    pub _address: u8,
-}
-impl Clone for bidirectional_iterator_tag {
-    fn clone(&self) -> Self { *self }
-}
-#[repr(C)]
-#[derive(Debug, Copy)]
-pub struct random_access_iterator_tag {
-    pub _address: u8,
-}
-impl Clone for random_access_iterator_tag {
-    fn clone(&self) -> Self { *self }
-}
 #[repr(C)]
 pub struct SourceHook__bindgen_vtable {
 }
@@ -4113,12 +4055,11 @@ pub type TimeStampValue = u64;
 pub struct Runnable {
     pub _base: nsIRunnable,
     pub mRefCnt: ThreadSafeAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
 }
 pub type Runnable_HasThreadSafeRefCnt = TrueType;
 #[test]
 fn bindgen_test_layout_Runnable() {
-    assert_eq!(::std::mem::size_of::<Runnable>() , 24usize);
+    assert_eq!(::std::mem::size_of::<Runnable>() , 16usize);
     assert_eq!(::std::mem::align_of::<Runnable>() , 8usize);
 }
 pub type DOMHighResTimeStamp = f64;
@@ -4281,7 +4222,6 @@ pub struct nsPresContext {
     pub _base: nsIObserver,
     pub _base_1: u64,
     pub mRefCnt: nsCycleCollectingAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
     pub mType: nsPresContext_nsPresContextType,
     pub mShell: *mut nsIPresShell,
     pub mDocument: nsCOMPtr<nsIDocument>,
@@ -4394,7 +4334,7 @@ extern "C" {
 }
 #[test]
 fn bindgen_test_layout_nsPresContext() {
-    assert_eq!(::std::mem::size_of::<nsPresContext>() , 1168usize);
+    assert_eq!(::std::mem::size_of::<nsPresContext>() , 1160usize);
     assert_eq!(::std::mem::align_of::<nsPresContext>() , 8usize);
 }
 impl nsPresContext {
@@ -5092,7 +5032,7 @@ pub struct CallbackFunction {
 }
 #[test]
 fn bindgen_test_layout_CallbackFunction() {
-    assert_eq!(::std::mem::size_of::<CallbackFunction>() , 56usize);
+    assert_eq!(::std::mem::size_of::<CallbackFunction>() , 48usize);
     assert_eq!(::std::mem::align_of::<CallbackFunction>() , 8usize);
 }
 #[repr(C)]
@@ -5100,7 +5040,6 @@ fn bindgen_test_layout_CallbackFunction() {
 pub struct CallbackObject {
     pub _base: nsISupports,
     pub mRefCnt: nsCycleCollectingAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
     pub mCallback: u64,
     pub mCreationStack: u64,
     pub mIncumbentGlobal: nsCOMPtr<nsIGlobalObject>,
@@ -5178,7 +5117,7 @@ extern "C" {
 }
 #[test]
 fn bindgen_test_layout_CallbackObject() {
-    assert_eq!(::std::mem::size_of::<CallbackObject>() , 56usize);
+    assert_eq!(::std::mem::size_of::<CallbackObject>() , 48usize);
     assert_eq!(::std::mem::align_of::<CallbackObject>() , 8usize);
 }
 pub type PLDHashNumber = u32;
@@ -5490,7 +5429,7 @@ extern "C" {
 }
 #[test]
 fn bindgen_test_layout_Element() {
-    assert_eq!(::std::mem::size_of::<Element>() , 136usize);
+    assert_eq!(::std::mem::size_of::<Element>() , 128usize);
     assert_eq!(::std::mem::align_of::<Element>() , 8usize);
 }
 #[repr(C)]
@@ -5498,7 +5437,6 @@ fn bindgen_test_layout_Element() {
 pub struct FragmentOrElement {
     pub _base: nsIContent,
     pub mRefCnt: nsCycleCollectingAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
     /**
    * Array containing all attributes and children for this element
    */
@@ -5651,7 +5589,7 @@ extern "C" {
 }
 #[test]
 fn bindgen_test_layout_FragmentOrElement() {
-    assert_eq!(::std::mem::size_of::<FragmentOrElement>() , 128usize);
+    assert_eq!(::std::mem::size_of::<FragmentOrElement>() , 120usize);
     assert_eq!(::std::mem::align_of::<FragmentOrElement>() , 8usize);
 }
 pub const ReferrerPolicy_RP_Default: ReferrerPolicy =
@@ -5690,14 +5628,6 @@ impl Clone for nsIWeakReference {
     fn clone(&self) -> Self { *self }
 }
 pub type nsWeakPtr = nsCOMPtr<nsIWeakReference>;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct __bit_const_reference<_Cp> {
-    pub __seg_: __bit_const_reference___storage_pointer<_Cp>,
-    pub __mask_: __bit_const_reference___storage_type<_Cp>,
-}
-pub type __bit_const_reference___storage_type<_Cp> = _Cp;
-pub type __bit_const_reference___storage_pointer<_Cp> = _Cp;
 #[repr(C)]
 #[derive(Debug, Copy)]
 pub struct nsIChannel {
@@ -6016,7 +5946,6 @@ fn bindgen_test_layout_nsAttrValue() {
 #[derive(Debug)]
 pub struct nsNodeInfoManager {
     pub mRefCnt: nsCycleCollectingAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
     pub mNodeInfoHash: *mut PLHashTable,
     pub mDocument: *mut nsIDocument,
     pub mNonDocumentNodeInfos: u32,
@@ -6050,14 +5979,13 @@ extern "C" {
 }
 #[test]
 fn bindgen_test_layout_nsNodeInfoManager() {
-    assert_eq!(::std::mem::size_of::<nsNodeInfoManager>() , 88usize);
+    assert_eq!(::std::mem::size_of::<nsNodeInfoManager>() , 80usize);
     assert_eq!(::std::mem::align_of::<nsNodeInfoManager>() , 8usize);
 }
 #[repr(C)]
 #[derive(Debug)]
 pub struct NodeInfo {
     pub mRefCnt: nsCycleCollectingAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
     pub mDocument: *mut nsIDocument,
     pub mInner: NodeInfo_NodeInfoInner,
     pub mOwnerManager: RefPtr<nsNodeInfoManager>,
@@ -6100,7 +6028,7 @@ extern "C" {
 }
 #[test]
 fn bindgen_test_layout_NodeInfo() {
-    assert_eq!(::std::mem::size_of::<NodeInfo>() , 120usize);
+    assert_eq!(::std::mem::size_of::<NodeInfo>() , 112usize);
     assert_eq!(::std::mem::align_of::<NodeInfo>() , 8usize);
 }
 #[repr(C)]
@@ -6191,7 +6119,6 @@ pub struct nsDOMAttributeMap {
     pub _base: nsIDOMMozNamedAttrMap,
     pub _base_1: nsWrapperCache,
     pub mRefCnt: nsCycleCollectingAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
     pub mContent: nsCOMPtr<Element>,
     /**
    * Cache of Attrs.
@@ -6225,7 +6152,7 @@ extern "C" {
 }
 #[test]
 fn bindgen_test_layout_nsDOMAttributeMap() {
-    assert_eq!(::std::mem::size_of::<nsDOMAttributeMap>() , 96usize);
+    assert_eq!(::std::mem::size_of::<nsDOMAttributeMap>() , 88usize);
     assert_eq!(::std::mem::align_of::<nsDOMAttributeMap>() , 8usize);
 }
 #[repr(C)]
@@ -6735,13 +6662,12 @@ impl nsIPresShell {
 pub struct nsNodeWeakReference {
     pub _base: nsIWeakReference,
     pub mRefCnt: nsAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
     pub mNode: *mut nsINode,
 }
 pub type nsNodeWeakReference_HasThreadSafeRefCnt = FalseType;
 #[test]
 fn bindgen_test_layout_nsNodeWeakReference() {
-    assert_eq!(::std::mem::size_of::<nsNodeWeakReference>() , 32usize);
+    assert_eq!(::std::mem::size_of::<nsNodeWeakReference>() , 24usize);
     assert_eq!(::std::mem::align_of::<nsNodeWeakReference>() , 8usize);
 }
 #[repr(C)]
@@ -6782,7 +6708,6 @@ pub struct DOMRectReadOnly {
     pub _base: nsISupports,
     pub _base_1: nsWrapperCache,
     pub mRefCnt: nsCycleCollectingAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
     pub mParent: nsCOMPtr<nsISupports>,
 }
 pub type DOMRectReadOnly_HasThreadSafeRefCnt = FalseType;
@@ -6808,7 +6733,7 @@ extern "C" {
 }
 #[test]
 fn bindgen_test_layout_DOMRectReadOnly() {
-    assert_eq!(::std::mem::size_of::<DOMRectReadOnly>() , 56usize);
+    assert_eq!(::std::mem::size_of::<DOMRectReadOnly>() , 48usize);
     assert_eq!(::std::mem::align_of::<DOMRectReadOnly>() , 8usize);
 }
 #[repr(C)]
@@ -6860,63 +6785,63 @@ pub struct DOMPointInit {
 impl Clone for DOMPointInit {
     fn clone(&self) -> Self { *self }
 }
-pub const NODE_HAS_LISTENERMANAGER: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_HAS_LISTENERMANAGER;
-pub const NODE_HAS_PROPERTIES: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_HAS_PROPERTIES;
-pub const NODE_IS_ANONYMOUS_ROOT: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_IS_ANONYMOUS_ROOT;
-pub const NODE_IS_IN_NATIVE_ANONYMOUS_SUBTREE: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_IS_IN_NATIVE_ANONYMOUS_SUBTREE;
-pub const NODE_IS_NATIVE_ANONYMOUS_ROOT: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_IS_NATIVE_ANONYMOUS_ROOT;
-pub const NODE_FORCE_XBL_BINDINGS: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_FORCE_XBL_BINDINGS;
-pub const NODE_MAY_BE_IN_BINDING_MNGR: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_MAY_BE_IN_BINDING_MNGR;
-pub const NODE_IS_EDITABLE: _bindgen_ty_22 = _bindgen_ty_22::NODE_IS_EDITABLE;
-pub const NODE_MAY_HAVE_CLASS: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_MAY_HAVE_CLASS;
-pub const NODE_IS_IN_SHADOW_TREE: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_IS_IN_SHADOW_TREE;
-pub const NODE_HAS_EMPTY_SELECTOR: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_HAS_EMPTY_SELECTOR;
-pub const NODE_HAS_SLOW_SELECTOR: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_HAS_SLOW_SELECTOR;
-pub const NODE_HAS_EDGE_CHILD_SELECTOR: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_HAS_EDGE_CHILD_SELECTOR;
-pub const NODE_HAS_SLOW_SELECTOR_LATER_SIBLINGS: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_HAS_SLOW_SELECTOR_LATER_SIBLINGS;
-pub const NODE_ALL_SELECTOR_FLAGS: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_ALL_SELECTOR_FLAGS;
-pub const NODE_NEEDS_FRAME: _bindgen_ty_22 = _bindgen_ty_22::NODE_NEEDS_FRAME;
-pub const NODE_DESCENDANTS_NEED_FRAMES: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_DESCENDANTS_NEED_FRAMES;
-pub const NODE_HAS_ACCESSKEY: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_HAS_ACCESSKEY;
-pub const NODE_HAS_DIRECTION_RTL: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_HAS_DIRECTION_RTL;
-pub const NODE_HAS_DIRECTION_LTR: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_HAS_DIRECTION_LTR;
-pub const NODE_ALL_DIRECTION_FLAGS: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_ALL_DIRECTION_FLAGS;
-pub const NODE_CHROME_ONLY_ACCESS: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_CHROME_ONLY_ACCESS;
-pub const NODE_IS_ROOT_OF_CHROME_ONLY_ACCESS: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_IS_ROOT_OF_CHROME_ONLY_ACCESS;
-pub const NODE_SHARED_RESTYLE_BIT_1: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_SHARED_RESTYLE_BIT_1;
-pub const NODE_SHARED_RESTYLE_BIT_2: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_SHARED_RESTYLE_BIT_2;
-pub const NODE_IS_DIRTY_FOR_SERVO: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_SHARED_RESTYLE_BIT_1;
-pub const NODE_HAS_DIRTY_DESCENDANTS_FOR_SERVO: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_SHARED_RESTYLE_BIT_2;
-pub const NODE_TYPE_SPECIFIC_BITS_OFFSET: _bindgen_ty_22 =
-    _bindgen_ty_22::NODE_TYPE_SPECIFIC_BITS_OFFSET;
+pub const NODE_HAS_LISTENERMANAGER: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_HAS_LISTENERMANAGER;
+pub const NODE_HAS_PROPERTIES: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_HAS_PROPERTIES;
+pub const NODE_IS_ANONYMOUS_ROOT: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_IS_ANONYMOUS_ROOT;
+pub const NODE_IS_IN_NATIVE_ANONYMOUS_SUBTREE: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_IS_IN_NATIVE_ANONYMOUS_SUBTREE;
+pub const NODE_IS_NATIVE_ANONYMOUS_ROOT: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_IS_NATIVE_ANONYMOUS_ROOT;
+pub const NODE_FORCE_XBL_BINDINGS: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_FORCE_XBL_BINDINGS;
+pub const NODE_MAY_BE_IN_BINDING_MNGR: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_MAY_BE_IN_BINDING_MNGR;
+pub const NODE_IS_EDITABLE: _bindgen_ty_61 = _bindgen_ty_61::NODE_IS_EDITABLE;
+pub const NODE_MAY_HAVE_CLASS: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_MAY_HAVE_CLASS;
+pub const NODE_IS_IN_SHADOW_TREE: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_IS_IN_SHADOW_TREE;
+pub const NODE_HAS_EMPTY_SELECTOR: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_HAS_EMPTY_SELECTOR;
+pub const NODE_HAS_SLOW_SELECTOR: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_HAS_SLOW_SELECTOR;
+pub const NODE_HAS_EDGE_CHILD_SELECTOR: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_HAS_EDGE_CHILD_SELECTOR;
+pub const NODE_HAS_SLOW_SELECTOR_LATER_SIBLINGS: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_HAS_SLOW_SELECTOR_LATER_SIBLINGS;
+pub const NODE_ALL_SELECTOR_FLAGS: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_ALL_SELECTOR_FLAGS;
+pub const NODE_NEEDS_FRAME: _bindgen_ty_61 = _bindgen_ty_61::NODE_NEEDS_FRAME;
+pub const NODE_DESCENDANTS_NEED_FRAMES: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_DESCENDANTS_NEED_FRAMES;
+pub const NODE_HAS_ACCESSKEY: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_HAS_ACCESSKEY;
+pub const NODE_HAS_DIRECTION_RTL: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_HAS_DIRECTION_RTL;
+pub const NODE_HAS_DIRECTION_LTR: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_HAS_DIRECTION_LTR;
+pub const NODE_ALL_DIRECTION_FLAGS: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_ALL_DIRECTION_FLAGS;
+pub const NODE_CHROME_ONLY_ACCESS: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_CHROME_ONLY_ACCESS;
+pub const NODE_IS_ROOT_OF_CHROME_ONLY_ACCESS: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_IS_ROOT_OF_CHROME_ONLY_ACCESS;
+pub const NODE_SHARED_RESTYLE_BIT_1: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_SHARED_RESTYLE_BIT_1;
+pub const NODE_SHARED_RESTYLE_BIT_2: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_SHARED_RESTYLE_BIT_2;
+pub const NODE_IS_DIRTY_FOR_SERVO: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_SHARED_RESTYLE_BIT_1;
+pub const NODE_HAS_DIRTY_DESCENDANTS_FOR_SERVO: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_SHARED_RESTYLE_BIT_2;
+pub const NODE_TYPE_SPECIFIC_BITS_OFFSET: _bindgen_ty_61 =
+    _bindgen_ty_61::NODE_TYPE_SPECIFIC_BITS_OFFSET;
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum _bindgen_ty_22 {
+pub enum _bindgen_ty_61 {
     NODE_HAS_LISTENERMANAGER = 4,
     NODE_HAS_PROPERTIES = 8,
     NODE_IS_ANONYMOUS_ROOT = 16,
@@ -7251,7 +7176,6 @@ pub struct Attr {
     pub _base: nsIAttribute,
     pub _base_1: nsIDOMAttr,
     pub mRefCnt: nsCycleCollectingAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
     pub mValue: nsString,
 }
 pub type Attr_HasThreadSafeRefCnt = FalseType;
@@ -7278,7 +7202,7 @@ extern "C" {
 }
 #[test]
 fn bindgen_test_layout_Attr() {
-    assert_eq!(::std::mem::size_of::<Attr>() , 152usize);
+    assert_eq!(::std::mem::size_of::<Attr>() , 144usize);
     assert_eq!(::std::mem::align_of::<Attr>() , 8usize);
 }
 #[repr(C)]
@@ -7305,7 +7229,6 @@ pub struct DOMIntersectionObserver {
     pub _base: nsISupports,
     pub _base_1: nsWrapperCache,
     pub mRefCnt: nsCycleCollectingAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
     pub mOwner: nsCOMPtr<nsPIDOMWindowInner>,
     pub mCallback: RefPtr<IntersectionCallback>,
     pub mRoot: RefPtr<Element>,
@@ -7346,7 +7269,7 @@ extern "C" {
 }
 #[test]
 fn bindgen_test_layout_DOMIntersectionObserver() {
-    assert_eq!(::std::mem::size_of::<DOMIntersectionObserver>() , 200usize);
+    assert_eq!(::std::mem::size_of::<DOMIntersectionObserver>() , 192usize);
     assert_eq!(::std::mem::align_of::<DOMIntersectionObserver>() , 8usize);
 }
 #[repr(C)]
@@ -7364,7 +7287,7 @@ pub struct FrameRequestCallback {
 }
 #[test]
 fn bindgen_test_layout_FrameRequestCallback() {
-    assert_eq!(::std::mem::size_of::<FrameRequestCallback>() , 56usize);
+    assert_eq!(::std::mem::size_of::<FrameRequestCallback>() , 48usize);
     assert_eq!(::std::mem::align_of::<FrameRequestCallback>() , 8usize);
 }
 #[repr(C)]
@@ -7902,7 +7825,6 @@ fn bindgen_test_layout_gfxAlternateValue() {
 #[derive(Debug)]
 pub struct gfxFontFeatureValueSet {
     pub mRefCnt: nsAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
     pub mFontFeatureValues: [u64; 5usize],
 }
 pub type gfxFontFeatureValueSet_HasThreadSafeRefCnt = FalseType;
@@ -7974,7 +7896,7 @@ fn bindgen_test_layout_gfxFontFeatureValueSet_FeatureValueHashEntry() {
 }
 #[test]
 fn bindgen_test_layout_gfxFontFeatureValueSet() {
-    assert_eq!(::std::mem::size_of::<gfxFontFeatureValueSet>() , 56usize);
+    assert_eq!(::std::mem::size_of::<gfxFontFeatureValueSet>() , 48usize);
     assert_eq!(::std::mem::align_of::<gfxFontFeatureValueSet>() , 8usize);
 }
 #[repr(C)]
@@ -8312,21 +8234,21 @@ pub enum nsStyleUnit {
 }
 #[repr(C)]
 #[derive(Debug, Copy)]
-pub struct _bindgen_ty_10 {
+pub struct _bindgen_ty_25 {
     pub mInt: __BindgenUnionField<i32>,
     pub mFloat: __BindgenUnionField<f32>,
     pub mPointer: __BindgenUnionField<*mut ::std::os::raw::c_void>,
     pub bindgen_union_field: u64,
 }
 #[test]
-fn bindgen_test_layout__bindgen_ty_10() {
-    assert_eq!(::std::mem::size_of::<_bindgen_ty_10>() , 8usize);
-    assert_eq!(::std::mem::align_of::<_bindgen_ty_10>() , 8usize);
+fn bindgen_test_layout__bindgen_ty_25() {
+    assert_eq!(::std::mem::size_of::<_bindgen_ty_25>() , 8usize);
+    assert_eq!(::std::mem::align_of::<_bindgen_ty_25>() , 8usize);
 }
-impl Clone for _bindgen_ty_10 {
+impl Clone for _bindgen_ty_25 {
     fn clone(&self) -> Self { *self }
 }
-pub type nsStyleUnion = _bindgen_ty_10;
+pub type nsStyleUnion = _bindgen_ty_25;
 /**
  * Class that hold a single size specification used by the style
  * system.  The size specification consists of two parts -- a number
@@ -8663,14 +8585,13 @@ impl Clone for EventStateManager {
 #[derive(Debug)]
 pub struct CounterStyleManager {
     pub mRefCnt: nsAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
     pub mPresContext: *mut nsPresContext,
     pub mCacheTable: [u64; 5usize],
 }
 pub type CounterStyleManager_HasThreadSafeRefCnt = FalseType;
 #[test]
 fn bindgen_test_layout_CounterStyleManager() {
-    assert_eq!(::std::mem::size_of::<CounterStyleManager>() , 64usize);
+    assert_eq!(::std::mem::size_of::<CounterStyleManager>() , 56usize);
     assert_eq!(::std::mem::align_of::<CounterStyleManager>() , 8usize);
 }
 #[repr(C)]
@@ -8711,7 +8632,7 @@ pub struct DOMRect {
 }
 #[test]
 fn bindgen_test_layout_DOMRect() {
-    assert_eq!(::std::mem::size_of::<DOMRect>() , 96usize);
+    assert_eq!(::std::mem::size_of::<DOMRect>() , 88usize);
     assert_eq!(::std::mem::align_of::<DOMRect>() , 8usize);
 }
 #[repr(C)]
@@ -8720,7 +8641,6 @@ pub struct DOMIntersectionObserverEntry {
     pub _base: nsISupports,
     pub _base_1: nsWrapperCache,
     pub mRefCnt: nsCycleCollectingAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
     pub mOwner: nsCOMPtr<nsISupports>,
     pub mTime: DOMHighResTimeStamp,
     pub mRootBounds: RefPtr<DOMRect>,
@@ -8754,7 +8674,7 @@ extern "C" {
 #[test]
 fn bindgen_test_layout_DOMIntersectionObserverEntry() {
     assert_eq!(::std::mem::size_of::<DOMIntersectionObserverEntry>() ,
-               104usize);
+               96usize);
     assert_eq!(::std::mem::align_of::<DOMIntersectionObserverEntry>() ,
                8usize);
 }
@@ -8765,7 +8685,7 @@ pub struct IntersectionCallback {
 }
 #[test]
 fn bindgen_test_layout_IntersectionCallback() {
-    assert_eq!(::std::mem::size_of::<IntersectionCallback>() , 56usize);
+    assert_eq!(::std::mem::size_of::<IntersectionCallback>() , 48usize);
     assert_eq!(::std::mem::align_of::<IntersectionCallback>() , 8usize);
 }
 /**
@@ -9340,7 +9260,6 @@ pub struct imgRequestProxy {
     pub _base_3: nsISecurityInfoProvider,
     pub _base_4: nsITimedChannel,
     pub mRefCnt: nsAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
     pub mBehaviour: UniquePtr<ProxyBehaviour, DefaultDelete<ProxyBehaviour>>,
     pub mURI: RefPtr<ImageURL>,
     pub mListener: *mut imgINotificationObserver,
@@ -9368,13 +9287,13 @@ pub struct imgRequestProxy_imgCancelRunnable {
 #[test]
 fn bindgen_test_layout_imgRequestProxy_imgCancelRunnable() {
     assert_eq!(::std::mem::size_of::<imgRequestProxy_imgCancelRunnable>() ,
-               40usize);
+               32usize);
     assert_eq!(::std::mem::align_of::<imgRequestProxy_imgCancelRunnable>() ,
                8usize);
 }
 #[test]
 fn bindgen_test_layout_imgRequestProxy() {
-    assert_eq!(::std::mem::size_of::<imgRequestProxy>() , 120usize);
+    assert_eq!(::std::mem::size_of::<imgRequestProxy>() , 112usize);
     assert_eq!(::std::mem::align_of::<imgRequestProxy>() , 8usize);
 }
 #[repr(C)]
@@ -9508,12 +9427,11 @@ pub struct GridTemplateAreasValue {
     pub mTemplates: nsTArray<nsString>,
     pub mNColumns: u32,
     pub mRefCnt: nsAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
 }
 pub type GridTemplateAreasValue_HasThreadSafeRefCnt = FalseType;
 #[test]
 fn bindgen_test_layout_GridTemplateAreasValue() {
-    assert_eq!(::std::mem::size_of::<GridTemplateAreasValue>() , 40usize);
+    assert_eq!(::std::mem::size_of::<GridTemplateAreasValue>() , 32usize);
     assert_eq!(::std::mem::align_of::<GridTemplateAreasValue>() , 8usize);
 }
 #[repr(C)]
@@ -9521,12 +9439,11 @@ fn bindgen_test_layout_GridTemplateAreasValue() {
 pub struct FontFamilyListRefCnt {
     pub _base: FontFamilyList,
     pub mRefCnt: nsAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
 }
 pub type FontFamilyListRefCnt_HasThreadSafeRefCnt = FalseType;
 #[test]
 fn bindgen_test_layout_FontFamilyListRefCnt() {
-    assert_eq!(::std::mem::size_of::<FontFamilyListRefCnt>() , 32usize);
+    assert_eq!(::std::mem::size_of::<FontFamilyListRefCnt>() , 24usize);
     assert_eq!(::std::mem::align_of::<FontFamilyListRefCnt>() , 8usize);
 }
 #[repr(C)]
@@ -9564,12 +9481,11 @@ impl Clone for ComplexColorData {
 pub struct ComplexColorValue {
     pub _base: ComplexColorData,
     pub mRefCnt: nsAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
 }
 pub type ComplexColorValue_HasThreadSafeRefCnt = FalseType;
 #[test]
 fn bindgen_test_layout_ComplexColorValue() {
-    assert_eq!(::std::mem::size_of::<ComplexColorValue>() , 40usize);
+    assert_eq!(::std::mem::size_of::<ComplexColorValue>() , 32usize);
     assert_eq!(::std::mem::align_of::<ComplexColorValue>() , 8usize);
 }
 #[repr(u32)]
@@ -9673,12 +9589,11 @@ pub struct nsCSSValueGradient {
     pub mRadialValues: [nsCSSValue; 2usize],
     pub mStops: nsTArray<nsCSSValueGradientStop>,
     pub mRefCnt: nsAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
 }
 pub type nsCSSValueGradient_HasThreadSafeRefCnt = FalseType;
 #[test]
 fn bindgen_test_layout_nsCSSValueGradient() {
-    assert_eq!(::std::mem::size_of::<nsCSSValueGradient>() , 112usize);
+    assert_eq!(::std::mem::size_of::<nsCSSValueGradient>() , 104usize);
     assert_eq!(::std::mem::align_of::<nsCSSValueGradient>() , 8usize);
 }
 #[repr(C)]
@@ -9700,19 +9615,17 @@ pub enum Serialization { eNormalized = 0, eAuthorSpecified = 1, }
 pub struct nsCSSValuePair_heap {
     pub _base: nsCSSValuePair,
     pub mRefCnt: nsAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
 }
 pub type nsCSSValuePair_heap_HasThreadSafeRefCnt = FalseType;
 #[test]
 fn bindgen_test_layout_nsCSSValuePair_heap() {
-    assert_eq!(::std::mem::size_of::<nsCSSValuePair_heap>() , 48usize);
+    assert_eq!(::std::mem::size_of::<nsCSSValuePair_heap>() , 40usize);
     assert_eq!(::std::mem::align_of::<nsCSSValuePair_heap>() , 8usize);
 }
 #[repr(C)]
 #[derive(Debug)]
 pub struct nsCSSValueTokenStream {
     pub mRefCnt: nsAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
     pub mPropertyID: nsCSSPropertyID,
     pub mShorthandPropertyID: nsCSSPropertyID,
     pub mTokenStream: nsString,
@@ -9726,7 +9639,7 @@ pub struct nsCSSValueTokenStream {
 pub type nsCSSValueTokenStream_HasThreadSafeRefCnt = FalseType;
 #[test]
 fn bindgen_test_layout_nsCSSValueTokenStream() {
-    assert_eq!(::std::mem::size_of::<nsCSSValueTokenStream>() , 80usize);
+    assert_eq!(::std::mem::size_of::<nsCSSValueTokenStream>() , 72usize);
     assert_eq!(::std::mem::align_of::<nsCSSValueTokenStream>() , 8usize);
 }
 #[repr(C)]
@@ -9752,12 +9665,11 @@ fn bindgen_test_layout_nsCSSRect() {
 pub struct nsCSSRect_heap {
     pub _base: nsCSSRect,
     pub mRefCnt: nsAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
 }
 pub type nsCSSRect_heap_HasThreadSafeRefCnt = FalseType;
 #[test]
 fn bindgen_test_layout_nsCSSRect_heap() {
-    assert_eq!(::std::mem::size_of::<nsCSSRect_heap>() , 80usize);
+    assert_eq!(::std::mem::size_of::<nsCSSRect_heap>() , 72usize);
     assert_eq!(::std::mem::align_of::<nsCSSRect_heap>() , 8usize);
 }
 #[repr(C)]
@@ -9776,25 +9688,23 @@ fn bindgen_test_layout_nsCSSValueList() {
 pub struct nsCSSValueList_heap {
     pub _base: nsCSSValueList,
     pub mRefCnt: nsAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
 }
 pub type nsCSSValueList_heap_HasThreadSafeRefCnt = FalseType;
 #[test]
 fn bindgen_test_layout_nsCSSValueList_heap() {
-    assert_eq!(::std::mem::size_of::<nsCSSValueList_heap>() , 40usize);
+    assert_eq!(::std::mem::size_of::<nsCSSValueList_heap>() , 32usize);
     assert_eq!(::std::mem::align_of::<nsCSSValueList_heap>() , 8usize);
 }
 #[repr(C)]
 #[derive(Debug)]
 pub struct nsCSSValueSharedList {
     pub mRefCnt: nsAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
     pub mHead: *mut nsCSSValueList,
 }
 pub type nsCSSValueSharedList_HasThreadSafeRefCnt = FalseType;
 #[test]
 fn bindgen_test_layout_nsCSSValueSharedList() {
-    assert_eq!(::std::mem::size_of::<nsCSSValueSharedList>() , 24usize);
+    assert_eq!(::std::mem::size_of::<nsCSSValueSharedList>() , 16usize);
     assert_eq!(::std::mem::align_of::<nsCSSValueSharedList>() , 8usize);
 }
 #[repr(C)]
@@ -9814,12 +9724,11 @@ fn bindgen_test_layout_nsCSSValuePairList() {
 pub struct nsCSSValuePairList_heap {
     pub _base: nsCSSValuePairList,
     pub mRefCnt: nsAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
 }
 pub type nsCSSValuePairList_heap_HasThreadSafeRefCnt = FalseType;
 #[test]
 fn bindgen_test_layout_nsCSSValuePairList_heap() {
-    assert_eq!(::std::mem::size_of::<nsCSSValuePairList_heap>() , 56usize);
+    assert_eq!(::std::mem::size_of::<nsCSSValuePairList_heap>() , 48usize);
     assert_eq!(::std::mem::align_of::<nsCSSValuePairList_heap>() , 8usize);
 }
 #[repr(C)]
@@ -9839,19 +9748,17 @@ fn bindgen_test_layout_nsCSSValueTriplet() {
 pub struct nsCSSValueTriplet_heap {
     pub _base: nsCSSValueTriplet,
     pub mRefCnt: nsAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
 }
 pub type nsCSSValueTriplet_heap_HasThreadSafeRefCnt = FalseType;
 #[test]
 fn bindgen_test_layout_nsCSSValueTriplet_heap() {
-    assert_eq!(::std::mem::size_of::<nsCSSValueTriplet_heap>() , 64usize);
+    assert_eq!(::std::mem::size_of::<nsCSSValueTriplet_heap>() , 56usize);
     assert_eq!(::std::mem::align_of::<nsCSSValueTriplet_heap>() , 8usize);
 }
 #[repr(C)]
 #[derive(Debug)]
 pub struct nsCSSValueFloatColor {
     pub mRefCnt: nsAutoRefCnt,
-    pub _mOwningThread: nsAutoOwningThread,
     pub mComponent1: f32,
     pub mComponent2: f32,
     pub mComponent3: f32,
@@ -9860,7 +9767,7 @@ pub struct nsCSSValueFloatColor {
 pub type nsCSSValueFloatColor_HasThreadSafeRefCnt = FalseType;
 #[test]
 fn bindgen_test_layout_nsCSSValueFloatColor() {
-    assert_eq!(::std::mem::size_of::<nsCSSValueFloatColor>() , 32usize);
+    assert_eq!(::std::mem::size_of::<nsCSSValueFloatColor>() , 24usize);
     assert_eq!(::std::mem::align_of::<nsCSSValueFloatColor>() , 8usize);
 }
 #[repr(C)]
@@ -10157,18 +10064,12 @@ fn bindgen_test_layout_nsStyleGradient() {
  * RequestDiscard() are made to the imgRequestProxy and ImageTracker as
  * appropriate, according to the mode flags passed in to the constructor.
  *
- * The main thread constructor takes a pointer to the already-created
- * imgRequestProxy, and the css::ImageValue that was used while creating it.
- * The ImageValue object is only used to grab the URL details to store
- * into mBaseURI and mURIString.
- *
- * The off-main-thread constructor creates a new css::ImageValue to
- * hold all the data required to resolve the imgRequestProxy later.  This
- * constructor also stores the URL details into mbaseURI and mURIString.
- * The ImageValue is held on to in mImageTracker until the Resolve call.
- *
- * We use mBaseURI and mURIString so that we can perform nsStyleImageRequest
- * equality comparisons without needing an imgRequestProxy.
+ * The main thread constructor takes a pointer to the css::ImageValue that
+ * is the specified url() value, while the off-main-thread constructor
+ * creates a new css::ImageValue to represent the url() information passed
+ * to the constructor.  This ImageValue is held on to for the comparisons done
+ * in DefinitelyEquals(), so that we don't need to call into the non-OMT-safe
+ * Equals() on the nsIURI objects returned from imgRequestProxy::GetURI().
  */
 #[repr(C)]
 #[derive(Debug)]
@@ -10177,18 +10078,16 @@ pub struct nsStyleImageRequest {
     pub mRequestProxy: RefPtr<imgRequestProxy>,
     pub mImageValue: RefPtr<ImageValue>,
     pub mImageTracker: RefPtr<ImageTracker>,
-    pub mBaseURI: nsMainThreadPtrHandle<nsIURI>,
-    pub mURIString: RefPtr<nsStringBuffer>,
     pub mModeFlags: nsStyleImageRequest_Mode,
     pub mResolved: bool,
 }
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum nsStyleImageRequest_Mode { Track = 1, Lock = 2, Discard = 4, }
+pub enum nsStyleImageRequest_Mode { Track = 1, Discard = 2, }
 pub type nsStyleImageRequest_HasThreadSafeRefCnt = TrueType;
 #[test]
 fn bindgen_test_layout_nsStyleImageRequest() {
-    assert_eq!(::std::mem::size_of::<nsStyleImageRequest>() , 56usize);
+    assert_eq!(::std::mem::size_of::<nsStyleImageRequest>() , 40usize);
     assert_eq!(::std::mem::align_of::<nsStyleImageRequest>() , 8usize);
 }
 #[repr(u32)]
