@@ -13,7 +13,8 @@
 //!  - `#[dom_struct]` : Implies `#[privatize]`,`#[derive(JSTraceable)]`, and `#[must_root]`.
 //!                       Use this for structs that correspond to a DOM type
 
-#![feature(plugin_registrar, quote, plugin, box_syntax, rustc_private, slice_patterns)]
+
+#![feature(box_syntax, plugin, plugin_registrar, quote, rustc_private, slice_patterns)]
 
 #![deny(unsafe_code)]
 
@@ -24,7 +25,6 @@ extern crate rustc;
 extern crate rustc_plugin;
 #[macro_use]
 extern crate syntax;
-extern crate syntax_ext;
 
 use rustc_plugin::Registry;
 use syntax::ext::base::*;
@@ -43,8 +43,6 @@ mod utils;
 #[plugin_registrar]
 pub fn plugin_registrar(reg: &mut Registry) {
     reg.register_syntax_extension(intern("dom_struct"), MultiModifier(box jstraceable::expand_dom_struct));
-    reg.register_syntax_extension(intern("derive_JSTraceable"),
-                                  MultiDecorator(box jstraceable::expand_jstraceable));
     reg.register_syntax_extension(intern("_generate_reflector"),
                                   MultiDecorator(box reflector::expand_reflector));
     reg.register_late_lint_pass(box lints::unrooted_must_root::UnrootedPass::new());

@@ -385,11 +385,14 @@ def check_rust(file_name, lines):
     import_block = False
     whitespace = False
 
+    is_lib_rs_file = file_name.endswith("lib.rs")
+
     prev_use = None
     prev_open_brace = False
     current_indent = 0
     prev_crate = {}
     prev_mod = {}
+    prev_feature_name = ""
 
     decl_message = "{} is not in alphabetical order"
     decl_expected = "\n\t\033[93mexpected: {}\033[0m"
@@ -442,6 +445,13 @@ def check_rust(file_name, lines):
         regex_rules = [
             (r",[^\s]", "missing space after ,",
                 lambda match, line: '$' not in line and not is_attribute),
+            (r"([A-Za-z0-9_]+) (\()", "extra space after {0}",
+                lambda match, line: not (
+                    is_attribute or
+                    re.match(r"\bmacro_rules!\s+", line[:match.start()]) or
+                    re.search(r"[^']'[A-Za-z0-9_]+ \($", line[:match.end()]) or
+                    match.group(1) in ['const', 'fn', 'for', 'if', 'in',
+                                       'let', 'match', 'mut', 'return'])),
             (r"[A-Za-z0-9\"]=", "missing space before =",
                 lambda match, line: is_attribute),
             (r"=[A-Za-z0-9\"]", "missing space after =",
@@ -509,6 +519,28 @@ def check_rust(file_name, lines):
                       + decl_expected.format(prev_crate[indent])
                       + decl_found.format(crate_name))
             prev_crate[indent] = crate_name
+
+        # check alphabetical order of feature attributes in lib.rs files
+        if is_lib_rs_file:
+            match = re.search(r"#!\[feature\((.*)\)\]", line)
+
+            if match:
+                features = map(lambda w: w.strip(), match.group(1).split(','))
+                sorted_features = sorted(features)
+                if sorted_features != features:
+                    yield(idx + 1, decl_message.format("feature attribute")
+                          + decl_expected.format(tuple(sorted_features))
+                          + decl_found.format(tuple(features)))
+
+                if prev_feature_name > sorted_features[0]:
+                    yield(idx + 1, decl_message.format("feature attribute")
+                          + decl_expected.format(prev_feature_name + " after " + sorted_features[0])
+                          + decl_found.format(prev_feature_name + " before " + sorted_features[0]))
+
+                prev_feature_name = sorted_features[0]
+            else:
+                # not a feature attribute line, so empty previous name
+                prev_feature_name = ""
 
         # imports must be in the same line, alphabetically sorted, and merged
         # into a single import block
@@ -782,8 +814,8 @@ def collect_errors_for_files(files_to_check, checking_functions, line_checking_f
                     yield (filename,) + error
 
 
-def get_wpt_files(only_changed_files, progress):
-    wpt_dir = os.path.join(".", "tests", "wpt" + os.sep)
+def get_wpt_files(suite, only_changed_files, progress):
+    wpt_dir = os.path.join(".", "tests", "wpt", suite, "")
     file_iter = get_file_list(os.path.join(wpt_dir), only_changed_files)
     (has_element, file_iter) = is_iter_empty(file_iter)
     if not has_element:
@@ -796,12 +828,13 @@ def get_wpt_files(only_changed_files, progress):
             yield f[len(wpt_dir):]
 
 
-def check_wpt_lint_errors(files):
+def check_wpt_lint_errors(suite, files):
     wpt_working_dir = os.path.abspath(os.path.join(".", "tests", "wpt", "web-platform-tests"))
     if os.path.isdir(wpt_working_dir):
         site.addsitedir(wpt_working_dir)
         from tools.lint import lint
-        returncode = lint.lint(wpt_working_dir, files, output_json=False)
+        file_dir = os.path.abspath(os.path.join(".", "tests", "wpt", suite))
+        returncode = lint.lint(file_dir, files, output_json=False)
         if returncode:
             yield ("WPT Lint Tool", "", "lint error(s) in Web Platform Tests: exit status {0}".format(returncode))
 
@@ -865,9 +898,12 @@ def scan(only_changed_files=False, progress=True):
     # check dependecy licenses
     dep_license_errors = check_dep_license_errors(get_dep_toml_files(only_changed_files), progress)
     # wpt lint checks
-    wpt_lint_errors = check_wpt_lint_errors(get_wpt_files(only_changed_files, progress))
+    wpt_lint_errors = [
+        check_wpt_lint_errors(suite, get_wpt_files(suite, only_changed_files, progress))
+        for suite in ["web-platform-tests", os.path.join("mozilla", "tests")]
+    ]
     # chain all the iterators
-    errors = itertools.chain(config_errors, directory_errors, file_errors, dep_license_errors, wpt_lint_errors)
+    errors = itertools.chain(config_errors, directory_errors, file_errors, dep_license_errors, *wpt_lint_errors)
 
     error = None
     for error in errors:

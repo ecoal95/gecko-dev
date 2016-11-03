@@ -3,15 +3,15 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #![feature(custom_derive, plugin, proc_macro, rustc_attrs, structural_match)]
-#![plugin(heapsize_plugin, plugins)]
+#![plugin(plugins)]
 
 #![crate_name = "gfx_traits"]
 #![crate_type = "rlib"]
 
 #![deny(unsafe_code)]
 
-extern crate azure;
 extern crate heapsize;
+#[macro_use] extern crate heapsize_derive;
 #[macro_use]
 extern crate range;
 extern crate rustc_serialize;
@@ -19,7 +19,6 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 
-pub mod color;
 pub mod print_tree;
 
 use range::RangeIndex;

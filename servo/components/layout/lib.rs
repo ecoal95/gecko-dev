@@ -8,12 +8,12 @@
 #![feature(custom_derive)]
 #![feature(nonzero)]
 #![feature(plugin)]
+#![feature(proc_macro)]
 #![feature(raw)]
 #![feature(step_by)]
 
 #![deny(unsafe_code)]
 
-#![plugin(heapsize_plugin)]
 #![plugin(plugins)]
 
 extern crate app_units;
@@ -29,6 +29,7 @@ extern crate fnv;
 extern crate gfx;
 extern crate gfx_traits;
 extern crate heapsize;
+#[macro_use] extern crate heapsize_derive;
 extern crate ipc_channel;
 extern crate libc;
 #[macro_use]
@@ -36,6 +37,7 @@ extern crate log;
 extern crate msg;
 extern crate net_traits;
 extern crate ordered_float;
+extern crate parking_lot;
 #[macro_use]
 #[no_link]
 extern crate plugins as servo_plugins;

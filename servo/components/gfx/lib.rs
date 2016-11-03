@@ -16,7 +16,6 @@
 #![feature(structural_match)]
 #![feature(unique)]
 
-#![plugin(heapsize_plugin)]
 #![plugin(plugins)]
 
 #![deny(unsafe_code)]
@@ -55,6 +54,7 @@ extern crate gfx_traits;
 extern crate harfbuzz_sys as harfbuzz;
 
 extern crate heapsize;
+#[macro_use] extern crate heapsize_derive;
 extern crate ipc_channel;
 #[allow(unused_extern_crates)]
 #[macro_use]
@@ -62,7 +62,6 @@ extern crate lazy_static;
 extern crate libc;
 #[macro_use]
 extern crate log;
-extern crate mime;
 extern crate msg;
 extern crate net_traits;
 extern crate ordered_float;

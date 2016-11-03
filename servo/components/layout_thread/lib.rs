@@ -9,8 +9,8 @@
 #![feature(custom_derive)]
 #![feature(mpsc_select)]
 #![feature(plugin)]
+#![feature(proc_macro)]
 
-#![plugin(heapsize_plugin)]
 #![plugin(plugins)]
 
 extern crate app_units;
@@ -21,6 +21,7 @@ extern crate fnv;
 extern crate gfx;
 extern crate gfx_traits;
 extern crate heapsize;
+#[macro_use] extern crate heapsize_derive;
 extern crate ipc_channel;
 #[macro_use]
 extern crate layout;
@@ -32,6 +33,7 @@ extern crate lazy_static;
 extern crate log;
 extern crate msg;
 extern crate net_traits;
+extern crate parking_lot;
 #[macro_use]
 extern crate profile_traits;
 extern crate script;
@@ -45,19 +47,17 @@ extern crate util;
 extern crate webrender_traits;
 
 use app_units::Au;
-use azure::azure::AzColor;
-use euclid::Matrix4D;
+use azure::azure_hl::Color;
 use euclid::point::Point2D;
 use euclid::rect::Rect;
 use euclid::scale_factor::ScaleFactor;
 use euclid::size::Size2D;
 use fnv::FnvHasher;
-use gfx::display_list::{ClippingRegion, DisplayList, OpaqueNode};
-use gfx::display_list::{StackingContext, StackingContextType, WebRenderImageInfo};
+use gfx::display_list::{ClippingRegion, OpaqueNode, WebRenderImageInfo};
 use gfx::font;
 use gfx::font_cache_thread::FontCacheThread;
 use gfx::font_context;
-use gfx_traits::{Epoch, FragmentType, ScrollPolicy, ScrollRootId, StackingContextId, color};
+use gfx_traits::{Epoch, FragmentType, ScrollRootId};
 use heapsize::HeapSizeOf;
 use ipc_channel::ipc::{self, IpcReceiver, IpcSender};
 use ipc_channel::router::ROUTER;
@@ -77,16 +77,17 @@ use layout::query::process_offset_parent_query;
 use layout::sequential;
 use layout::traversal::{ComputeAbsolutePositions, RecalcStyleAndConstructFlows};
 use layout::webrender_helpers::{WebRenderDisplayListConverter, WebRenderFrameBuilder};
-use layout::wrapper::{LayoutNodeLayoutData, NonOpaqueStyleAndLayoutData};
+use layout::wrapper::LayoutNodeLayoutData;
+use layout::wrapper::drop_style_and_layout_data;
 use layout_traits::LayoutThreadFactory;
 use msg::constellation_msg::PipelineId;
 use net_traits::image_cache_thread::{ImageCacheChan, ImageCacheResult, ImageCacheThread};
 use net_traits::image_cache_thread::UsePlaceholder;
+use parking_lot::RwLock;
 use profile_traits::mem::{self, Report, ReportKind, ReportsChan};
 use profile_traits::time::{self, TimerMetadata, profile};
 use profile_traits::time::{TimerMetadataFrameType, TimerMetadataReflowType};
 use script::layout_wrapper::{ServoLayoutDocument, ServoLayoutNode};
-use script_layout_interface::{OpaqueStyleAndLayoutData, PartialPersistentLayoutData};
 use script_layout_interface::message::{Msg, NewLayoutThreadInfo, Reflow, ReflowQueryType, ScriptReflow};
 use script_layout_interface::reporter::CSSErrorReporter;
 use script_layout_interface::restyle_damage::{REFLOW, REFLOW_OUT_OF_FLOW, REPAINT, REPOSITION};
@@ -101,12 +102,10 @@ use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
 use std::ops::{Deref, DerefMut};
 use std::process;
-use std::sync::{Arc, Mutex, MutexGuard, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use style::animation::Animation;
-use style::atomic_refcell::AtomicRefCell;
-use style::computed_values::{filter, mix_blend_mode};
 use style::context::{LocalStyleContextCreationInfo, ReflowGoal, SharedStyleContext};
 use style::dom::{TDocument, TElement, TNode};
 use style::error_reporting::{ParseErrorReporter, StdoutErrorReporter};
@@ -648,7 +647,7 @@ impl LayoutThread {
             }
             Msg::ReapStyleAndLayoutData(dead_data) => {
                 unsafe {
-                    self.handle_reap_style_and_layout_data(dead_data)
+                    drop_style_and_layout_data(dead_data)
                 }
             }
             Msg::CollectReports(reports_chan) => {
@@ -756,7 +755,7 @@ impl LayoutThread {
             match self.port.recv().unwrap() {
                 Msg::ReapStyleAndLayoutData(dead_data) => {
                     unsafe {
-                        self.handle_reap_style_and_layout_data(dead_data)
+                        drop_style_and_layout_data(dead_data)
                     }
                 }
                 Msg::ExitNow => {
@@ -909,24 +908,9 @@ impl LayoutThread {
                                                     .unwrap_or(false);
                 match (data.goal, display_list_needed) {
                     (ReflowGoal::ForDisplay, _) | (ReflowGoal::ForScriptQuery, true) => {
-                        let mut root_stacking_context =
-                            StackingContext::new(StackingContextId::new(0),
-                                                 StackingContextType::Real,
-                                                 &Rect::zero(),
-                                                 &Rect::zero(),
-                                                 0,
-                                                 filter::T::new(Vec::new()),
-                                                 mix_blend_mode::T::normal,
-                                                 Matrix4D::identity(),
-                                                 Matrix4D::identity(),
-                                                 true,
-                                                 ScrollPolicy::Scrollable,
-                                                 None);
-
-                        let display_list_entries =
-                            sequential::build_display_list_for_subtree(layout_root,
-                                                                       &mut root_stacking_context,
-                                                                       shared_layout_context);
+                        let mut build_state =
+                             sequential::build_display_list_for_subtree(layout_root,
+                                                                        shared_layout_context);
 
                         debug!("Done building display list.");
 
@@ -940,12 +924,9 @@ impl LayoutThread {
                         };
 
                         let origin = Rect::new(Point2D::new(Au(0), Au(0)), root_size);
-                        root_stacking_context.bounds = origin;
-                        root_stacking_context.overflow = origin;
-
-                        rw_data.display_list =
-                            Some(Arc::new(DisplayList::new(root_stacking_context,
-                                                           display_list_entries)))
+                        build_state.root_stacking_context.bounds = origin;
+                        build_state.root_stacking_context.overflow = origin;
+                        rw_data.display_list = Some(Arc::new(build_state.to_display_list()));
                     }
                     (ReflowGoal::ForScriptQuery, false) => {}
                 }
@@ -1317,7 +1298,7 @@ impl LayoutThread {
 
         if let Some(mut root_flow) = self.root_flow.clone() {
             // Perform an abbreviated style recalc that operates without access to the DOM.
-            let animations = self.running_animations.read().unwrap();
+            let animations = self.running_animations.read();
             profile(time::ProfilerCategory::LayoutStyleRecalc,
                     self.profiler_metadata(),
                     self.time_profiler_chan.clone(),
@@ -1369,8 +1350,8 @@ impl LayoutThread {
             // Kick off animations if any were triggered, expire completed ones.
             animation::update_animation_state(&self.constellation_chan,
                                               &self.script_chan,
-                                              &mut *self.running_animations.write().unwrap(),
-                                              &mut *self.expired_animations.write().unwrap(),
+                                              &mut *self.running_animations.write(),
+                                              &mut *self.expired_animations.write(),
                                               &self.new_animations_receiver,
                                               self.id,
                                               &self.timer);
@@ -1483,14 +1464,6 @@ impl LayoutThread {
         }
     }
 
-    /// Handles a message to destroy layout data. Layout data must be destroyed on *this* thread
-    /// because the struct type is transmuted to a different type on the script side.
-    unsafe fn handle_reap_style_and_layout_data(&self, data: OpaqueStyleAndLayoutData) {
-        let ptr: *mut AtomicRefCell<PartialPersistentLayoutData> = *data.ptr;
-        let non_opaque: *mut NonOpaqueStyleAndLayoutData = ptr as *mut _;
-        let _ = Box::from_raw(non_opaque);
-    }
-
     /// Returns profiling information which is passed to the time profiler.
     fn profiler_metadata(&self) -> Option<TimerMetadata> {
         Some(TimerMetadata {
@@ -1519,18 +1492,18 @@ impl LayoutThread {
 // clearing the frame buffer to white. This ensures that setting a background
 // color on an iframe element, while the iframe content itself has a default
 // transparent background color is handled correctly.
-fn get_root_flow_background_color(flow: &mut Flow) -> AzColor {
+fn get_root_flow_background_color(flow: &mut Flow) -> Color {
     if !flow.is_block_like() {
-        return color::transparent()
+        return Color::transparent()
     }
 
     let block_flow = flow.as_mut_block();
     let kid = match block_flow.base.children.iter_mut().next() {
-        None => return color::transparent(),
+        None => return Color::transparent(),
         Some(kid) => kid,
     };
     if !kid.is_block_like() {
-        return color::transparent()
+        return Color::transparent()
     }
 
     let kid_block_flow = kid.as_block();
