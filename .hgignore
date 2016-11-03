@@ -132,3 +132,6 @@ GPATH
 
 # tup database
 ^\.tup
+
+# Ignore rust-bindgen checkout.
+^servo/components/style/binding_tools/rust-bindgen/
