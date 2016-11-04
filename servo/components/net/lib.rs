@@ -3,11 +3,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #![feature(box_syntax)]
-#![feature(custom_attribute)]
-#![feature(custom_derive)]
 #![feature(fnbox)]
 #![feature(mpsc_select)]
 #![feature(plugin)]
+#![feature(proc_macro)]
 #![plugin(plugins)]
 
 #![deny(unsafe_code)]
@@ -17,7 +16,6 @@ extern crate bitflags;
 extern crate brotli;
 extern crate content_blocker as content_blocker_parser;
 extern crate cookie as cookie_rs;
-extern crate device;
 extern crate devtools_traits;
 extern crate flate2;
 extern crate hyper;
@@ -35,8 +33,9 @@ extern crate net_traits;
 extern crate openssl;
 extern crate openssl_verify;
 extern crate profile_traits;
-extern crate rand;
 extern crate rustc_serialize;
+#[macro_use]
+extern crate serde_derive;
 extern crate threadpool;
 extern crate time;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
@@ -50,13 +49,12 @@ extern crate websocket;
 
 pub mod about_loader;
 pub mod blob_loader;
-pub mod bluetooth_thread;
 pub mod chrome_loader;
 pub mod connector;
 pub mod content_blocker;
 pub mod cookie;
 pub mod cookie_storage;
-pub mod data_loader;
+mod data_loader;
 pub mod file_loader;
 pub mod filemanager_thread;
 pub mod hsts;

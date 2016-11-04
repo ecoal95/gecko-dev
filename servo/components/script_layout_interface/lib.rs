@@ -8,8 +8,6 @@
 
 #![deny(unsafe_code)]
 #![feature(box_syntax)]
-#![feature(custom_attribute)]
-#![feature(custom_derive)]
 #![feature(nonzero)]
 #![feature(plugin)]
 #![feature(proc_macro)]
@@ -26,6 +24,7 @@ extern crate euclid;
 extern crate gfx_traits;
 extern crate heapsize;
 #[macro_use] extern crate heapsize_derive;
+#[macro_use] extern crate html5ever_atoms;
 extern crate ipc_channel;
 extern crate libc;
 #[macro_use]
@@ -36,8 +35,7 @@ extern crate profile_traits;
 extern crate range;
 extern crate script_traits;
 extern crate selectors;
-#[macro_use(atom, ns)]
-extern crate string_cache;
+#[macro_use] extern crate servo_atoms;
 extern crate style;
 extern crate url;
 

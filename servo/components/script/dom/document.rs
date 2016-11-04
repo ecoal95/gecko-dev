@@ -91,12 +91,13 @@ use encoding::EncodingRef;
 use encoding::all::UTF_8;
 use euclid::point::Point2D;
 use html5ever::tree_builder::{LimitedQuirks, NoQuirks, Quirks, QuirksMode};
+use html5ever_atoms::{LocalName, QualName};
 use ipc_channel::ipc::{self, IpcSender};
 use js::jsapi::{JSContext, JSObject, JSRuntime};
 use js::jsapi::JS_GetRuntime;
 use msg::constellation_msg::{ALT, CONTROL, SHIFT, SUPER};
+use msg::constellation_msg::{FrameId, ReferrerPolicy};
 use msg::constellation_msg::{Key, KeyModifiers, KeyState};
-use msg::constellation_msg::{PipelineId, ReferrerPolicy};
 use net_traits::{FetchResponseMsg, IpcSend};
 use net_traits::CookieSource::NonHTTP;
 use net_traits::CoreResourceMsg::{GetCookiesForUrl, SetCookiesForUrl};
@@ -110,6 +111,7 @@ use script_traits::{AnimationState, CompositorEvent, MouseButton, MouseEventType
 use script_traits::{ScriptMsg as ConstellationMsg, TouchpadPressurePhase};
 use script_traits::{TouchEventType, TouchId};
 use script_traits::UntrustedNodeAddress;
+use servo_atoms::Atom;
 use std::ascii::AsciiExt;
 use std::borrow::ToOwned;
 use std::boxed::FnBox;
@@ -122,7 +124,6 @@ use std::mem;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use string_cache::{Atom, QualName};
 use style::attr::AttrValue;
 use style::context::ReflowGoal;
 use style::selector_impl::ElementSnapshot;
@@ -175,7 +176,7 @@ pub struct Document {
     quirks_mode: Cell<QuirksMode>,
     /// Caches for the getElement methods
     id_map: DOMRefCell<HashMap<Atom, Vec<JS<Element>>>>,
-    tag_map: DOMRefCell<HashMap<Atom, JS<HTMLCollection>>>,
+    tag_map: DOMRefCell<HashMap<LocalName, JS<HTMLCollection>>>,
     tagns_map: DOMRefCell<HashMap<QualName, JS<HTMLCollection>>>,
     classes_map: DOMRefCell<HashMap<Vec<Atom>, JS<HTMLCollection>>>,
     images: MutNullableHeap<JS<HTMLCollection>>,
@@ -288,7 +289,7 @@ struct LinksFilter;
 impl CollectionFilter for LinksFilter {
     fn filter(&self, elem: &Element, _root: &Node) -> bool {
         (elem.is::<HTMLAnchorElement>() || elem.is::<HTMLAreaElement>()) &&
-        elem.has_attribute(&atom!("href"))
+        elem.has_attribute(&local_name!("href"))
     }
 }
 
@@ -312,7 +313,7 @@ impl CollectionFilter for ScriptsFilter {
 struct AnchorsFilter;
 impl CollectionFilter for AnchorsFilter {
     fn filter(&self, elem: &Element, _root: &Node) -> bool {
-        elem.is::<HTMLAnchorElement>() && elem.has_attribute(&atom!("href"))
+        elem.is::<HTMLAnchorElement>() && elem.has_attribute(&local_name!("href"))
     }
 }
 
@@ -428,7 +429,7 @@ impl Document {
         let base = self.upcast::<Node>()
                        .traverse_preorder()
                        .filter_map(Root::downcast::<HTMLBaseElement>)
-                       .find(|element| element.upcast::<Element>().has_attribute(&atom!("href")));
+                       .find(|element| element.upcast::<Element>().has_attribute(&local_name!("href")));
         self.base_element.set(base.r());
     }
 
@@ -577,7 +578,7 @@ impl Document {
     fn get_anchor_by_name(&self, name: &str) -> Option<Root<Element>> {
         let check_anchor = |node: &HTMLAnchorElement| {
             let elem = node.upcast::<Element>();
-            elem.get_attribute(&ns!(), &atom!("name"))
+            elem.get_attribute(&ns!(), &local_name!("name"))
                 .map_or(false, |attr| &**attr.value() == name)
         };
         let doc_node = self.upcast::<Node>();
@@ -1322,7 +1323,7 @@ impl Document {
         }
     }
 
-    pub fn get_body_attribute(&self, local_name: &Atom) -> DOMString {
+    pub fn get_body_attribute(&self, local_name: &LocalName) -> DOMString {
         match self.GetBody().and_then(Root::downcast::<HTMLBodyElement>) {
             Some(ref body) => {
                 body.upcast::<Element>().get_string_attribute(local_name)
@@ -1331,7 +1332,7 @@ impl Document {
         }
     }
 
-    pub fn set_body_attribute(&self, local_name: &Atom, value: DOMString) {
+    pub fn set_body_attribute(&self, local_name: &LocalName, value: DOMString) {
         if let Some(ref body) = self.GetBody().and_then(Root::downcast::<HTMLBodyElement>) {
             let body = body.upcast::<Element>();
             let value = body.parse_attribute(&ns!(), &local_name, value);
@@ -1399,7 +1400,7 @@ impl Document {
             if let Some((parent_pipeline_id, _)) = self.window.parent_info() {
                 let global_scope = self.window.upcast::<GlobalScope>();
                 let event = ConstellationMsg::MozBrowserEvent(parent_pipeline_id,
-                                                              Some(global_scope.pipeline_id()),
+                                                              global_scope.pipeline_id(),
                                                               event);
                 global_scope.constellation_chan().send(event).unwrap();
             }
@@ -1512,8 +1513,10 @@ impl Document {
             }
         }
 
-        let loader = self.loader.borrow();
-        if !loader.is_blocked() && !loader.events_inhibited() {
+        if !self.loader.borrow().is_blocked() && !self.loader.borrow().events_inhibited() {
+            // Schedule a task to fire a "load" event (if no blocking loads have arrived in the mean time)
+            // NOTE: we can end up executing this code more than once, in case more blocking loads arrive.
+            debug!("Document loads are complete.");
             let win = self.window();
             let msg = MainThreadScriptMsg::DocumentLoadsComplete(
                 win.upcast::<GlobalScope>().pipeline_id());
@@ -1629,11 +1632,11 @@ impl Document {
     }
 
     /// Find an iframe element in the document.
-    pub fn find_iframe(&self, pipeline: PipelineId) -> Option<Root<HTMLIFrameElement>> {
+    pub fn find_iframe(&self, frame_id: FrameId) -> Option<Root<HTMLIFrameElement>> {
         self.upcast::<Node>()
             .traverse_preorder()
             .filter_map(Root::downcast::<HTMLIFrameElement>)
-            .find(|node| node.pipeline_id() == Some(pipeline))
+            .find(|node| node.frame_id() == frame_id)
     }
 
     pub fn get_dom_loading(&self) -> u64 {
@@ -2175,13 +2178,13 @@ impl DocumentMethods for Document {
 
     // https://dom.spec.whatwg.org/#dom-document-getelementsbytagname
     fn GetElementsByTagName(&self, tag_name: DOMString) -> Root<HTMLCollection> {
-        let tag_atom = Atom::from(&*tag_name);
+        let tag_atom = LocalName::from(&*tag_name);
         match self.tag_map.borrow_mut().entry(tag_atom.clone()) {
             Occupied(entry) => Root::from_ref(entry.get()),
             Vacant(entry) => {
                 let mut tag_copy = tag_name;
                 tag_copy.make_ascii_lowercase();
-                let ascii_lower_tag = Atom::from(tag_copy);
+                let ascii_lower_tag = LocalName::from(tag_copy);
                 let result = HTMLCollection::by_atomic_tag_name(&self.window,
                                                                 self.upcast(),
                                                                 tag_atom,
@@ -2198,7 +2201,7 @@ impl DocumentMethods for Document {
                               tag_name: DOMString)
                               -> Root<HTMLCollection> {
         let ns = namespace_from_domstring(maybe_ns);
-        let local = Atom::from(tag_name);
+        let local = LocalName::from(tag_name);
         let qname = QualName::new(ns, local);
         match self.tagns_map.borrow_mut().entry(qname.clone()) {
             Occupied(entry) => Root::from_ref(entry.get()),
@@ -2241,7 +2244,7 @@ impl DocumentMethods for Document {
         if self.is_html_document {
             local_name.make_ascii_lowercase();
         }
-        let name = QualName::new(ns!(html), Atom::from(local_name));
+        let name = QualName::new(ns!(html), LocalName::from(local_name));
         Ok(Element::create(name, None, self, ElementCreator::ScriptCreated))
     }
 
@@ -2265,7 +2268,7 @@ impl DocumentMethods for Document {
         if self.is_html_document {
             local_name.make_ascii_lowercase();
         }
-        let name = Atom::from(local_name);
+        let name = LocalName::from(local_name);
         let value = AttrValue::String("".to_owned());
 
         Ok(Attr::new(&self.window, name.clone(), value, name, ns!(), None, None))
@@ -2279,7 +2282,7 @@ impl DocumentMethods for Document {
         let (namespace, prefix, local_name) = try!(validate_and_extract(namespace,
                                                                         &qualified_name));
         let value = AttrValue::String("".to_owned());
-        let qualified_name = Atom::from(qualified_name);
+        let qualified_name = LocalName::from(qualified_name);
         Ok(Attr::new(&self.window,
                      local_name,
                      value,
@@ -2465,12 +2468,12 @@ impl DocumentMethods for Document {
     // https://html.spec.whatwg.org/multipage/#document.title
     fn Title(&self) -> DOMString {
         let title = self.GetDocumentElement().and_then(|root| {
-            if root.namespace() == &ns!(svg) && root.local_name() == &atom!("svg") {
+            if root.namespace() == &ns!(svg) && root.local_name() == &local_name!("svg") {
                 // Step 1.
                 root.upcast::<Node>()
                     .child_elements()
                     .find(|node| {
-                        node.namespace() == &ns!(svg) && node.local_name() == &atom!("title")
+                        node.namespace() == &ns!(svg) && node.local_name() == &local_name!("title")
                     })
                     .map(Root::upcast::<Node>)
             } else {
@@ -2498,14 +2501,14 @@ impl DocumentMethods for Document {
             None => return,
         };
 
-        let elem = if root.namespace() == &ns!(svg) && root.local_name() == &atom!("svg") {
+        let elem = if root.namespace() == &ns!(svg) && root.local_name() == &local_name!("svg") {
             let elem = root.upcast::<Node>().child_elements().find(|node| {
-                node.namespace() == &ns!(svg) && node.local_name() == &atom!("title")
+                node.namespace() == &ns!(svg) && node.local_name() == &local_name!("title")
             });
             match elem {
                 Some(elem) => Root::upcast::<Node>(elem),
                 None => {
-                    let name = QualName::new(ns!(svg), atom!("title"));
+                    let name = QualName::new(ns!(svg), local_name!("title"));
                     let elem = Element::create(name, None, self, ElementCreator::ScriptCreated);
                     let parent = root.upcast::<Node>();
                     let child = elem.upcast::<Node>();
@@ -2522,7 +2525,7 @@ impl DocumentMethods for Document {
                 None => {
                     match self.GetHead() {
                         Some(head) => {
-                            let name = QualName::new(ns!(html), atom!("title"));
+                            let name = QualName::new(ns!(html), local_name!("title"));
                             let elem = Element::create(name,
                                                        None,
                                                        self,
@@ -2617,7 +2620,7 @@ impl DocumentMethods for Document {
             if element.namespace() != &ns!(html) {
                 return false;
             }
-            element.get_attribute(&ns!(), &atom!("name"))
+            element.get_attribute(&ns!(), &local_name!("name"))
                    .map_or(false, |attr| &**attr.value() == &*name)
         })
     }
@@ -2785,22 +2788,22 @@ impl DocumentMethods for Document {
 
     // https://html.spec.whatwg.org/multipage/#dom-document-bgcolor
     fn BgColor(&self) -> DOMString {
-        self.get_body_attribute(&atom!("bgcolor"))
+        self.get_body_attribute(&local_name!("bgcolor"))
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-document-bgcolor
     fn SetBgColor(&self, value: DOMString) {
-        self.set_body_attribute(&atom!("bgcolor"), value)
+        self.set_body_attribute(&local_name!("bgcolor"), value)
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-document-fgcolor
     fn FgColor(&self) -> DOMString {
-        self.get_body_attribute(&atom!("text"))
+        self.get_body_attribute(&local_name!("text"))
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-document-fgcolor
     fn SetFgColor(&self, value: DOMString) {
-        self.set_body_attribute(&atom!("text"), value)
+        self.set_body_attribute(&local_name!("text"), value)
     }
 
     #[allow(unsafe_code)]
@@ -2827,10 +2830,10 @@ impl DocumentMethods for Document {
             };
             match html_elem_type {
                 HTMLElementTypeId::HTMLAppletElement => {
-                    match elem.get_attribute(&ns!(), &atom!("name")) {
+                    match elem.get_attribute(&ns!(), &local_name!("name")) {
                         Some(ref attr) if attr.value().as_atom() == name => true,
                         _ => {
-                            match elem.get_attribute(&ns!(), &atom!("id")) {
+                            match elem.get_attribute(&ns!(), &local_name!("id")) {
                                 Some(ref attr) => attr.value().as_atom() == name,
                                 None => false,
                             }
@@ -2838,18 +2841,18 @@ impl DocumentMethods for Document {
                     }
                 },
                 HTMLElementTypeId::HTMLFormElement => {
-                    match elem.get_attribute(&ns!(), &atom!("name")) {
+                    match elem.get_attribute(&ns!(), &local_name!("name")) {
                         Some(ref attr) => attr.value().as_atom() == name,
                         None => false,
                     }
                 },
                 HTMLElementTypeId::HTMLImageElement => {
-                    match elem.get_attribute(&ns!(), &atom!("name")) {
+                    match elem.get_attribute(&ns!(), &local_name!("name")) {
                         Some(ref attr) => {
                             if attr.value().as_atom() == name {
                                 true
                             } else {
-                                match elem.get_attribute(&ns!(), &atom!("id")) {
+                                match elem.get_attribute(&ns!(), &local_name!("id")) {
                                     Some(ref attr) => attr.value().as_atom() == name,
                                     None => false,
                                 }

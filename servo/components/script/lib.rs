@@ -6,8 +6,6 @@
 #![feature(conservative_impl_trait)]
 #![feature(const_fn)]
 #![feature(core_intrinsics)]
-#![feature(custom_attribute)]
-#![feature(custom_derive)]
 #![feature(fnbox)]
 #![feature(mpsc_select)]
 #![feature(nonzero)]
@@ -34,6 +32,7 @@ extern crate audio_video_metadata;
 #[allow(unused_extern_crates)]
 #[macro_use]
 extern crate bitflags;
+extern crate bluetooth_traits;
 extern crate canvas_traits;
 extern crate caseless;
 extern crate cookie as cookie_rs;
@@ -48,6 +47,7 @@ extern crate gfx_traits;
 extern crate heapsize;
 #[macro_use] extern crate heapsize_derive;
 extern crate html5ever;
+#[macro_use] extern crate html5ever_atoms;
 extern crate hyper;
 extern crate hyper_serde;
 extern crate image;
@@ -80,8 +80,8 @@ extern crate script_layout_interface;
 extern crate script_traits;
 extern crate selectors;
 extern crate serde;
+#[macro_use] extern crate servo_atoms;
 extern crate smallvec;
-#[macro_use(atom, ns)] extern crate string_cache;
 #[macro_use]
 extern crate style;
 extern crate style_traits;

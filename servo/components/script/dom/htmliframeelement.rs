@@ -35,6 +35,7 @@ use dom::node::{Node, NodeDamage, UnbindContext, document_from_node, window_from
 use dom::urlhelper::UrlHelper;
 use dom::virtualmethods::VirtualMethods;
 use dom::window::{ReflowReason, Window};
+use html5ever_atoms::LocalName;
 use ipc_channel::ipc;
 use js::jsapi::{JSAutoCompartment, JSContext, MutableHandleValue};
 use js::jsval::{NullValue, UndefinedValue};
@@ -43,8 +44,8 @@ use net_traits::response::HttpsState;
 use script_layout_interface::message::ReflowQueryType;
 use script_traits::{IFrameLoadInfo, LoadData, MozBrowserEvent, ScriptMsg as ConstellationMsg};
 use script_traits::IFrameSandboxState::{IFrameSandboxed, IFrameUnsandboxed};
+use servo_atoms::Atom;
 use std::cell::Cell;
-use string_cache::Atom;
 use style::attr::{AttrValue, LengthOrPercentageOrAuto};
 use style::context::ReflowGoal;
 use url::Url;
@@ -84,7 +85,7 @@ impl HTMLIFrameElement {
     /// step 1.
     fn get_url(&self) -> Url {
         let element = self.upcast::<Element>();
-        element.get_attribute(&ns!(), &atom!("src")).and_then(|src| {
+        element.get_attribute(&ns!(), &local_name!("src")).and_then(|src| {
             let url = src.value();
             if url.is_empty() {
                 None
@@ -178,7 +179,7 @@ impl HTMLIFrameElement {
         self.upcast::<Node>().dirty(NodeDamage::OtherNodeDamage);
     }
 
-    fn new_inherited(local_name: Atom,
+    fn new_inherited(local_name: LocalName,
                      prefix: Option<DOMString>,
                      document: &Document) -> HTMLIFrameElement {
         HTMLIFrameElement {
@@ -193,7 +194,7 @@ impl HTMLIFrameElement {
     }
 
     #[allow(unrooted_must_root)]
-    pub fn new(local_name: Atom,
+    pub fn new(local_name: LocalName,
                prefix: Option<DOMString>,
                document: &Document) -> Root<HTMLIFrameElement> {
         Node::reflect_node(box HTMLIFrameElement::new_inherited(local_name, prefix, document),
@@ -204,6 +205,11 @@ impl HTMLIFrameElement {
     #[inline]
     pub fn pipeline_id(&self) -> Option<PipelineId> {
         self.pipeline_id.get()
+    }
+
+    #[inline]
+    pub fn frame_id(&self) -> FrameId {
+        self.frame_id
     }
 
     pub fn change_visibility_status(&self, visibility: bool) {
@@ -255,7 +261,7 @@ impl HTMLIFrameElement {
     pub fn privatebrowsing(&self) -> bool {
         if self.Mozbrowser() {
             let element = self.upcast::<Element>();
-            element.has_attribute(&Atom::from("mozprivatebrowsing"))
+            element.has_attribute(&LocalName::from("mozprivatebrowsing"))
         } else {
             false
         }
@@ -290,7 +296,7 @@ impl HTMLIFrameElementLayoutMethods for LayoutJS<HTMLIFrameElement> {
     fn get_width(&self) -> LengthOrPercentageOrAuto {
         unsafe {
             (*self.upcast::<Element>().unsafe_get())
-                .get_attr_for_layout(&ns!(), &atom!("width"))
+                .get_attr_for_layout(&ns!(), &local_name!("width"))
                 .map(AttrValue::as_dimension)
                 .cloned()
                 .unwrap_or(LengthOrPercentageOrAuto::Auto)
@@ -301,7 +307,7 @@ impl HTMLIFrameElementLayoutMethods for LayoutJS<HTMLIFrameElement> {
     fn get_height(&self) -> LengthOrPercentageOrAuto {
         unsafe {
             (*self.upcast::<Element>().unsafe_get())
-                .get_attr_for_layout(&ns!(), &atom!("height"))
+                .get_attr_for_layout(&ns!(), &local_name!("height"))
                 .map(AttrValue::as_dimension)
                 .cloned()
                 .unwrap_or(LengthOrPercentageOrAuto::Auto)
@@ -408,7 +414,7 @@ unsafe fn build_mozbrowser_event_detail(event: MozBrowserEvent,
 
 pub fn Navigate(iframe: &HTMLIFrameElement, direction: TraversalDirection) -> ErrorResult {
     if iframe.Mozbrowser() {
-        if iframe.upcast::<Node>().is_in_doc() {
+        if iframe.upcast::<Node>().is_in_doc_with_browsing_context() {
             let window = window_from_node(iframe);
             let msg = ConstellationMsg::TraverseHistory(iframe.pipeline_id(), direction);
             window.upcast::<GlobalScope>().constellation_chan().send(msg).unwrap();
@@ -425,17 +431,17 @@ pub fn Navigate(iframe: &HTMLIFrameElement, direction: TraversalDirection) -> Er
 impl HTMLIFrameElementMethods for HTMLIFrameElement {
     // https://html.spec.whatwg.org/multipage/#dom-iframe-src
     fn Src(&self) -> DOMString {
-        self.upcast::<Element>().get_string_attribute(&atom!("src"))
+        self.upcast::<Element>().get_string_attribute(&local_name!("src"))
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-iframe-src
     fn SetSrc(&self, src: DOMString) {
-        self.upcast::<Element>().set_url_attribute(&atom!("src"), src)
+        self.upcast::<Element>().set_url_attribute(&local_name!("src"), src)
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-iframe-sandbox
     fn Sandbox(&self) -> Root<DOMTokenList> {
-        self.sandbox.or_init(|| DOMTokenList::new(self.upcast::<Element>(), &atom!("sandbox")))
+        self.sandbox.or_init(|| DOMTokenList::new(self.upcast::<Element>(), &local_name!("sandbox")))
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-iframe-contentwindow
@@ -469,7 +475,7 @@ impl HTMLIFrameElementMethods for HTMLIFrameElement {
     fn Mozbrowser(&self) -> bool {
         if window_from_node(self).is_mozbrowser() {
             let element = self.upcast::<Element>();
-            element.has_attribute(&atom!("mozbrowser"))
+            element.has_attribute(&local_name!("mozbrowser"))
         } else {
             false
         }
@@ -478,7 +484,7 @@ impl HTMLIFrameElementMethods for HTMLIFrameElement {
     // https://developer.mozilla.org/en-US/docs/Web/HTML/Element/iframe#attr-mozbrowser
     fn SetMozbrowser(&self, value: bool) {
         let element = self.upcast::<Element>();
-        element.set_bool_attribute(&atom!("mozbrowser"), value);
+        element.set_bool_attribute(&local_name!("mozbrowser"), value);
     }
 
     // https://developer.mozilla.org/en-US/docs/Web/API/HTMLIFrameElement/goBack
@@ -494,7 +500,7 @@ impl HTMLIFrameElementMethods for HTMLIFrameElement {
     // https://developer.mozilla.org/en-US/docs/Web/API/HTMLIFrameElement/reload
     fn Reload(&self, _hard_reload: bool) -> ErrorResult {
         if self.Mozbrowser() {
-            if self.upcast::<Node>().is_in_doc() {
+            if self.upcast::<Node>().is_in_doc_with_browsing_context() {
                 self.navigate_or_reload_child_browsing_context(None, true);
             }
             Ok(())
@@ -552,13 +558,13 @@ impl HTMLIFrameElementMethods for HTMLIFrameElement {
     // check-tidy: no specs after this line
     fn SetMozprivatebrowsing(&self, value: bool) {
         let element = self.upcast::<Element>();
-        element.set_bool_attribute(&Atom::from("mozprivatebrowsing"), value);
+        element.set_bool_attribute(&LocalName::from("mozprivatebrowsing"), value);
     }
 
     fn Mozprivatebrowsing(&self) -> bool {
         if window_from_node(self).is_mozbrowser() {
             let element = self.upcast::<Element>();
-            element.has_attribute(&Atom::from("mozprivatebrowsing"))
+            element.has_attribute(&LocalName::from("mozprivatebrowsing"))
         } else {
             false
         }
@@ -573,7 +579,7 @@ impl VirtualMethods for HTMLIFrameElement {
     fn attribute_mutated(&self, attr: &Attr, mutation: AttributeMutation) {
         self.super_type().unwrap().attribute_mutated(attr, mutation);
         match attr.local_name() {
-            &atom!("sandbox") => {
+            &local_name!("sandbox") => {
                 self.sandbox_allowance.set(mutation.new_value(attr).map(|value| {
                     let mut modes = ALLOW_NOTHING;
                     for token in value.as_tokens() {
@@ -590,9 +596,18 @@ impl VirtualMethods for HTMLIFrameElement {
                     modes
                 }));
             },
-            &atom!("src") => {
+            &local_name!("src") => {
                 if let AttributeMutation::Set(_) = mutation {
-                    if self.upcast::<Node>().is_in_doc() {
+                    // https://html.spec.whatwg.org/multipage/#the-iframe-element
+                    // "Similarly, whenever an iframe element with a non-null nested browsing context
+                    // but with no srcdoc attribute specified has its src attribute set, changed, or removed,
+                    // the user agent must process the iframe attributes,"
+                    // but we can't check that directly, since the child browsing context
+                    // may be in a different script thread. Instread, we check to see if the parent
+                    // is in a document tree and has a browsing context, which is what causes
+                    // the child browsing context to be created.
+                    if self.upcast::<Node>().is_in_doc_with_browsing_context() {
+                        debug!("iframe {} src set while in browsing context.", self.frame_id);
                         self.process_the_iframe_attributes();
                     }
                 }
@@ -601,11 +616,11 @@ impl VirtualMethods for HTMLIFrameElement {
         }
     }
 
-    fn parse_plain_attribute(&self, name: &Atom, value: DOMString) -> AttrValue {
+    fn parse_plain_attribute(&self, name: &LocalName, value: DOMString) -> AttrValue {
         match name {
-            &atom!("sandbox") => AttrValue::from_serialized_tokenlist(value.into()),
-            &atom!("width") => AttrValue::from_dimension(value.into()),
-            &atom!("height") => AttrValue::from_dimension(value.into()),
+            &local_name!("sandbox") => AttrValue::from_serialized_tokenlist(value.into()),
+            &local_name!("width") => AttrValue::from_dimension(value.into()),
+            &local_name!("height") => AttrValue::from_dimension(value.into()),
             _ => self.super_type().unwrap().parse_plain_attribute(name, value),
         }
     }
@@ -615,7 +630,14 @@ impl VirtualMethods for HTMLIFrameElement {
             s.bind_to_tree(tree_in_doc);
         }
 
-        if tree_in_doc {
+        // https://html.spec.whatwg.org/multipage/#the-iframe-element
+        // "When an iframe element is inserted into a document that has
+        // a browsing context, the user agent must create a new
+        // browsing context, set the element's nested browsing context
+        // to the newly-created browsing context, and then process the
+        // iframe attributes for the "first time"."
+        if self.upcast::<Node>().is_in_doc_with_browsing_context() {
+            debug!("iframe {} bound to browsing context.", self.frame_id);
             self.process_the_iframe_attributes();
         }
     }

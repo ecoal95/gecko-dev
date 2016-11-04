@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #![feature(box_syntax)]
-#![feature(custom_derive)]
 #![feature(mpsc_select)]
 #![feature(plugin)]
 #![feature(proc_macro)]
@@ -12,6 +11,7 @@
 #![deny(unsafe_code)]
 
 extern crate backtrace;
+extern crate bluetooth_traits;
 extern crate canvas;
 extern crate canvas_traits;
 extern crate compositing;
