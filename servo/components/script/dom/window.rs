@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use app_units::Au;
-use bluetooth_traits::BluetoothMethodMsg;
+use bluetooth_traits::BluetoothRequest;
 use cssparser::Parser;
 use devtools_traits::{ScriptToDevtoolsControlMsg, TimelineMarker, TimelineMarkerType};
 use dom::bindings::callback::ExceptionHandling;
@@ -45,6 +45,7 @@ use dom::performance::Performance;
 use dom::promise::Promise;
 use dom::screen::Screen;
 use dom::storage::Storage;
+use dom::testrunner::TestRunner;
 use euclid::{Point2D, Rect, Size2D};
 use fetch;
 use ipc_channel::ipc::{self, IpcSender};
@@ -52,8 +53,8 @@ use js::jsapi::{HandleObject, HandleValue, JSAutoCompartment, JSContext};
 use js::jsapi::{JS_GC, JS_GetRuntime, SetWindowProxy};
 use js::jsval::UndefinedValue;
 use js::rust::Runtime;
-use msg::constellation_msg::{FrameType, PipelineId, ReferrerPolicy};
-use net_traits::ResourceThreads;
+use msg::constellation_msg::{FrameType, PipelineId};
+use net_traits::{ResourceThreads, ReferrerPolicy};
 use net_traits::image_cache_thread::{ImageCacheChan, ImageCacheThread};
 use net_traits::storage_thread::StorageType;
 use num_traits::ToPrimitive;
@@ -202,7 +203,7 @@ pub struct Window {
 
     /// A handle for communicating messages to the bluetooth thread.
     #[ignore_heap_size_of = "channels are hard"]
-    bluetooth_thread: IpcSender<BluetoothMethodMsg>,
+    bluetooth_thread: IpcSender<BluetoothRequest>,
 
     /// Pending scroll to fragment event, if any
     fragment_name: DOMRefCell<Option<String>>,
@@ -239,6 +240,8 @@ pub struct Window {
 
     /// All the MediaQueryLists we need to update
     media_query_lists: WeakMediaQueryListVec,
+
+    test_runner: MutNullableHeap<JS<TestRunner>>,
 }
 
 impl Window {
@@ -301,7 +304,7 @@ impl Window {
         self.browsing_context.get().unwrap()
     }
 
-    pub fn bluetooth_thread(&self) -> IpcSender<BluetoothMethodMsg> {
+    pub fn bluetooth_thread(&self) -> IpcSender<BluetoothRequest> {
         self.bluetooth_thread.clone()
     }
 
@@ -880,6 +883,10 @@ impl WindowMethods for Window {
     // https://fetch.spec.whatwg.org/#fetch-method
     fn Fetch(&self, input: RequestOrUSVString, init: &RequestInit) -> Rc<Promise> {
         fetch::Fetch(&self.upcast(), input, init)
+    }
+
+    fn TestRunner(&self) -> Root<TestRunner> {
+        self.test_runner.or_init(|| TestRunner::new(self.upcast()))
     }
 }
 
@@ -1514,7 +1521,7 @@ impl Window {
                image_cache_chan: ImageCacheChan,
                image_cache_thread: ImageCacheThread,
                resource_threads: ResourceThreads,
-               bluetooth_thread: IpcSender<BluetoothMethodMsg>,
+               bluetooth_thread: IpcSender<BluetoothRequest>,
                mem_profiler_chan: mem::ProfilerChan,
                time_profiler_chan: ProfilerChan,
                devtools_chan: Option<IpcSender<ScriptToDevtoolsControlMsg>>,
@@ -1588,6 +1595,7 @@ impl Window {
             error_reporter: error_reporter,
             scroll_offsets: DOMRefCell::new(HashMap::new()),
             media_query_lists: WeakMediaQueryListVec::new(),
+            test_runner: Default::default(),
         };
 
         WindowBinding::Wrap(runtime.cx(), win)

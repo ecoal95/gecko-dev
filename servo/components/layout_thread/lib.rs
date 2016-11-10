@@ -13,7 +13,6 @@
 #![plugin(plugins)]
 
 extern crate app_units;
-extern crate azure;
 extern crate core;
 extern crate euclid;
 extern crate fnv;
@@ -46,13 +45,13 @@ extern crate util;
 extern crate webrender_traits;
 
 use app_units::Au;
-use azure::azure_hl::Color;
 use euclid::point::Point2D;
 use euclid::rect::Rect;
 use euclid::scale_factor::ScaleFactor;
 use euclid::size::Size2D;
 use fnv::FnvHasher;
-use gfx::display_list::{ClippingRegion, OpaqueNode, WebRenderImageInfo};
+use gfx::display_list::{ClippingRegion, OpaqueNode};
+use gfx::display_list::WebRenderImageInfo;
 use gfx::font;
 use gfx::font_cache_thread::FontCacheThread;
 use gfx::font_context;
@@ -65,7 +64,7 @@ use layout::construct::ConstructionResult;
 use layout::context::{LayoutContext, SharedLayoutContext, heap_size_of_local_context};
 use layout::display_list_builder::ToGfxColor;
 use layout::flow::{self, Flow, ImmutableFlowUtils, MutableFlowUtils, MutableOwnedFlowUtils};
-use layout::flow_ref::{self, FlowRef};
+use layout::flow_ref::FlowRef;
 use layout::incremental::{LayoutDamageComputation, REFLOW_ENTIRE_DOCUMENT};
 use layout::layout_debug;
 use layout::parallel;
@@ -89,8 +88,6 @@ use profile_traits::time::{TimerMetadataFrameType, TimerMetadataReflowType};
 use script::layout_wrapper::{ServoLayoutDocument, ServoLayoutNode};
 use script_layout_interface::message::{Msg, NewLayoutThreadInfo, Reflow, ReflowQueryType, ScriptReflow};
 use script_layout_interface::reporter::CSSErrorReporter;
-use script_layout_interface::restyle_damage::{REFLOW, REFLOW_OUT_OF_FLOW, REPAINT, REPOSITION};
-use script_layout_interface::restyle_damage::STORE_OVERFLOW;
 use script_layout_interface::rpc::{LayoutRPC, MarginStyleResponse, NodeOverflowResponse, OffsetParentResponse};
 use script_layout_interface::wrapper_traits::LayoutNode;
 use script_traits::{ConstellationControlMsg, LayoutControlMsg, LayoutMsg as ConstellationMsg};
@@ -113,6 +110,7 @@ use style::media_queries::{Device, MediaType};
 use style::parallel::WorkQueueData;
 use style::parser::ParserContextExtraData;
 use style::selector_matching::Stylist;
+use style::servo::restyle_damage::{REFLOW, REFLOW_OUT_OF_FLOW, REPAINT, REPOSITION, STORE_OVERFLOW};
 use style::stylesheets::{Origin, Stylesheet, UserAgentStylesheets};
 use style::thread_state;
 use style::timer::Timer;
@@ -594,7 +592,7 @@ impl LayoutThread {
         let mut rw_data = possibly_locked_rw_data.lock();
 
         if let Some(mut root_flow) = self.root_flow.clone() {
-            let flow = flow::mut_base(flow_ref::deref_mut(&mut root_flow));
+            let flow = flow::mut_base(FlowRef::deref_mut(&mut root_flow));
             flow.restyle_damage.insert(REPAINT);
         }
 
@@ -836,7 +834,7 @@ impl LayoutThread {
             _ => return None,
         };
 
-        flow_ref::deref_mut(&mut flow).mark_as_root();
+        FlowRef::deref_mut(&mut flow).mark_as_root();
 
         Some(flow)
     }
@@ -908,8 +906,8 @@ impl LayoutThread {
                 match (data.goal, display_list_needed) {
                     (ReflowGoal::ForDisplay, _) | (ReflowGoal::ForScriptQuery, true) => {
                         let mut build_state =
-                             sequential::build_display_list_for_subtree(layout_root,
-                                                                        shared_layout_context);
+                            sequential::build_display_list_for_subtree(layout_root,
+                                                                       shared_layout_context);
 
                         debug!("Done building display list.");
 
@@ -969,11 +967,6 @@ impl LayoutThread {
                 epoch,
                 &mut frame_builder);
             let root_background_color = get_root_flow_background_color(layout_root);
-            let root_background_color =
-                webrender_traits::ColorF::new(root_background_color.r,
-                                              root_background_color.g,
-                                              root_background_color.b,
-                                              root_background_color.a);
 
             let viewport_size = Size2D::new(self.viewport_size.width.to_f32_px(),
                                             self.viewport_size.height.to_f32_px());
@@ -1120,7 +1113,7 @@ impl LayoutThread {
         }
         if needs_reflow {
             if let Some(mut flow) = self.try_get_layout_root(node) {
-                LayoutThread::reflow_all_nodes(flow_ref::deref_mut(&mut flow));
+                LayoutThread::reflow_all_nodes(FlowRef::deref_mut(&mut flow));
             }
         }
 
@@ -1177,6 +1170,16 @@ impl LayoutThread {
             node.dump_style();
         }
 
+        if opts::get().dump_rule_tree {
+            shared_layout_context.style_context.stylist.rule_tree.dump_stdout();
+        }
+
+        // GC The rule tree.
+        //
+        // FIXME(emilio): The whole point of the free list is not always freeing
+        // the list, find a good heuristic here for that.
+        unsafe { shared_layout_context.style_context.stylist.rule_tree.gc() }
+
         // Perform post-style recalculation layout passes.
         self.perform_post_style_recalc_layout_passes(&data.reflow_info,
                                                      Some(&data.query_type),
@@ -1197,7 +1200,7 @@ impl LayoutThread {
             Some(root_flow) => root_flow,
             None => return,
         };
-        let root_flow = flow_ref::deref_mut(&mut root_flow);
+        let root_flow = FlowRef::deref_mut(&mut root_flow);
         match *query_type {
             ReflowQueryType::ContentBoxQuery(node) => {
                 let node = unsafe { ServoLayoutNode::new(&node) };
@@ -1303,7 +1306,7 @@ impl LayoutThread {
                     self.time_profiler_chan.clone(),
                     || {
                         animation::recalc_style_for_animations(&layout_context,
-                                                               flow_ref::deref_mut(&mut root_flow),
+                                                               FlowRef::deref_mut(&mut root_flow),
                                                                &animations)
                     });
         }
@@ -1361,10 +1364,10 @@ impl LayoutThread {
                     || {
                 // Call `compute_layout_damage` even in non-incremental mode, because it sets flags
                 // that are needed in both incremental and non-incremental traversals.
-                let damage = flow_ref::deref_mut(&mut root_flow).compute_layout_damage();
+                let damage = FlowRef::deref_mut(&mut root_flow).compute_layout_damage();
 
                 if opts::get().nonincremental_layout || damage.contains(REFLOW_ENTIRE_DOCUMENT) {
-                    flow_ref::deref_mut(&mut root_flow).reflow_entire_document()
+                    FlowRef::deref_mut(&mut root_flow).reflow_entire_document()
                 }
             });
 
@@ -1376,13 +1379,13 @@ impl LayoutThread {
             profile(time::ProfilerCategory::LayoutGeneratedContent,
                     self.profiler_metadata(),
                     self.time_profiler_chan.clone(),
-                    || sequential::resolve_generated_content(flow_ref::deref_mut(&mut root_flow), &layout_context));
+                    || sequential::resolve_generated_content(FlowRef::deref_mut(&mut root_flow), &layout_context));
 
             // Guess float placement.
             profile(time::ProfilerCategory::LayoutFloatPlacementSpeculation,
                     self.profiler_metadata(),
                     self.time_profiler_chan.clone(),
-                    || sequential::guess_float_placement(flow_ref::deref_mut(&mut root_flow)));
+                    || sequential::guess_float_placement(FlowRef::deref_mut(&mut root_flow)));
 
             // Perform the primary layout passes over the flow tree to compute the locations of all
             // the boxes.
@@ -1395,12 +1398,12 @@ impl LayoutThread {
                     match self.parallel_traversal {
                         None => {
                             // Sequential mode.
-                            LayoutThread::solve_constraints(flow_ref::deref_mut(&mut root_flow), &layout_context)
+                            LayoutThread::solve_constraints(FlowRef::deref_mut(&mut root_flow), &layout_context)
                         }
                         Some(ref mut parallel) => {
                             // Parallel mode.
                             LayoutThread::solve_constraints_parallel(parallel,
-                                                                     flow_ref::deref_mut(&mut root_flow),
+                                                                     FlowRef::deref_mut(&mut root_flow),
                                                                      profiler_metadata,
                                                                      self.time_profiler_chan.clone(),
                                                                      &*layout_context);
@@ -1415,7 +1418,7 @@ impl LayoutThread {
                     || {
                 let layout_context = LayoutContext::new(&*layout_context);
                 sequential::store_overflow(&layout_context,
-                                           flow_ref::deref_mut(&mut root_flow) as &mut Flow);
+                                           FlowRef::deref_mut(&mut root_flow) as &mut Flow);
             });
 
             self.perform_post_main_layout_passes(data,
@@ -1437,7 +1440,7 @@ impl LayoutThread {
             self.compute_abs_pos_and_build_display_list(data,
                                                         query_type,
                                                         document,
-                                                        flow_ref::deref_mut(&mut root_flow),
+                                                        FlowRef::deref_mut(&mut root_flow),
                                                         &mut *layout_context,
                                                         rw_data);
             self.first_reflow = false;
@@ -1491,18 +1494,19 @@ impl LayoutThread {
 // clearing the frame buffer to white. This ensures that setting a background
 // color on an iframe element, while the iframe content itself has a default
 // transparent background color is handled correctly.
-fn get_root_flow_background_color(flow: &mut Flow) -> Color {
+fn get_root_flow_background_color(flow: &mut Flow) -> webrender_traits::ColorF {
+    let transparent = webrender_traits::ColorF { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
     if !flow.is_block_like() {
-        return Color::transparent()
+        return transparent;
     }
 
     let block_flow = flow.as_mut_block();
     let kid = match block_flow.base.children.iter_mut().next() {
-        None => return Color::transparent(),
+        None => return transparent,
         Some(kid) => kid,
     };
     if !kid.is_block_like() {
-        return Color::transparent()
+        return transparent;
     }
 
     let kid_block_flow = kid.as_block();

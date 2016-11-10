@@ -8,11 +8,10 @@
 //           completely converting layout to directly generate WebRender display lists, for example.
 
 use app_units::Au;
-use azure::azure_hl::Color;
-use euclid::{Point2D, Rect, Size2D};
+use euclid::{Matrix4D, Point2D, Rect, Size2D, TypedRect};
 use gfx::display_list::{BorderRadii, BoxShadowClipMode, ClippingRegion};
 use gfx::display_list::{DisplayItem, DisplayList, DisplayListTraversal};
-use gfx::display_list::{GradientStop, StackingContext, StackingContextType};
+use gfx::display_list::{StackingContext, StackingContextType};
 use gfx_traits::{FragmentType, ScrollPolicy, StackingContextId, ScrollRootId};
 use style::computed_values::{image_rendering, mix_blend_mode};
 use style::computed_values::filter::{self, Filter};
@@ -25,7 +24,8 @@ trait WebRenderStackingContextConverter {
                                 api: &mut webrender_traits::RenderApi,
                                 pipeline_id: webrender_traits::PipelineId,
                                 epoch: webrender_traits::Epoch,
-                                frame_builder: &mut WebRenderFrameBuilder)
+                                frame_builder: &mut WebRenderFrameBuilder,
+                                scroll_layer_id: Option<webrender_traits::ScrollLayerId>)
                                 -> webrender_traits::StackingContextId;
 
     fn convert_children_to_webrender<'a>(&self,
@@ -119,29 +119,6 @@ impl ToRectF for Rect<Au> {
         let w = self.size.width.to_f32_px();
         let h = self.size.height.to_f32_px();
         Rect::new(Point2D::new(x, y), Size2D::new(w, h))
-    }
-}
-
-trait ToColorF {
-    fn to_colorf(&self) -> webrender_traits::ColorF;
-}
-
-impl ToColorF for Color {
-    fn to_colorf(&self) -> webrender_traits::ColorF {
-        webrender_traits::ColorF::new(self.r, self.g, self.b, self.a)
-    }
-}
-
-trait ToGradientStop {
-    fn to_gradient_stop(&self) -> webrender_traits::GradientStop;
-}
-
-impl ToGradientStop for GradientStop {
-    fn to_gradient_stop(&self) -> webrender_traits::GradientStop {
-        webrender_traits::GradientStop {
-            offset: self.offset,
-            color: self.color.to_colorf(),
-        }
     }
 }
 
@@ -259,17 +236,39 @@ impl WebRenderStackingContextConverter for StackingContext {
                 &DisplayItem::PushStackingContext(ref stacking_context_item) => {
                     let stacking_context = &stacking_context_item.stacking_context;
                     debug_assert!(stacking_context.context_type == StackingContextType::Real);
-
-                    let stacking_context_id =
+                    builder.push_stacking_context(
                         stacking_context.convert_to_webrender(traversal,
                                                               api,
                                                               pipeline_id,
                                                               epoch,
-                                                              frame_builder);
-                    builder.push_stacking_context(stacking_context_id);
-
+                                                              frame_builder,
+                                                              None));
                 }
-                &DisplayItem::PopStackingContext(_) => return,
+                &DisplayItem::PushScrollRoot(ref item) => {
+                    let stacking_context = StackingContext::new(
+                        StackingContextId::new(0),
+                        StackingContextType::Real,
+                        &item.scroll_root.clip,
+                        &TypedRect::new(Point2D::zero(), item.scroll_root.size),
+                        0,
+                        filter::T::new(Vec::new()),
+                        mix_blend_mode::T::normal,
+                        Matrix4D::identity(),
+                        Matrix4D::identity(),
+                        true,
+                        ScrollPolicy::Scrollable,
+                        ScrollRootId::root());
+                    let scroll_layer_id =
+                        Some(frame_builder.next_scroll_layer_id(item.scroll_root.id));
+                    builder.push_stacking_context(
+                        stacking_context.convert_to_webrender(traversal,
+                                                              api,
+                                                              pipeline_id,
+                                                              epoch,
+                                                              frame_builder,
+                                                              scroll_layer_id));
+                }
+                &DisplayItem::PopStackingContext(_) | &DisplayItem::PopScrollRoot(_) => return,
                 _ => item.convert_to_webrender(builder, frame_builder),
             }
         }
@@ -280,19 +279,12 @@ impl WebRenderStackingContextConverter for StackingContext {
                                 api: &mut webrender_traits::RenderApi,
                                 pipeline_id: webrender_traits::PipelineId,
                                 epoch: webrender_traits::Epoch,
-                                frame_builder: &mut WebRenderFrameBuilder)
+                                frame_builder: &mut WebRenderFrameBuilder,
+                                scroll_layer_id: Option<webrender_traits::ScrollLayerId>)
                                 -> webrender_traits::StackingContextId {
         let webrender_scroll_policy = match self.scroll_policy {
             ScrollPolicy::Scrollable => webrender_traits::ScrollPolicy::Scrollable,
             ScrollPolicy::FixedPosition => webrender_traits::ScrollPolicy::Fixed,
-        };
-
-        let scroll_layer_id = if let Some(scroll_root_id) = self.overflow_scroll_id {
-            Some(frame_builder.next_scroll_layer_id(scroll_root_id))
-        } else if self.id == StackingContextId::root() {
-            Some(frame_builder.next_scroll_layer_id(ScrollRootId::root()))
-        } else {
-            None
         };
 
         let mut sc =
@@ -334,11 +326,14 @@ impl WebRenderDisplayListConverter for DisplayList {
         match item {
             Some(&DisplayItem::PushStackingContext(ref stacking_context_item)) => {
                 let stacking_context = &stacking_context_item.stacking_context;
+                let scroll_layer_id =
+                    Some(frame_builder.next_scroll_layer_id(ScrollRootId::root()));
                 stacking_context.convert_to_webrender(&mut traversal,
                                                       api,
                                                       pipeline_id,
                                                       epoch,
-                                                      frame_builder)
+                                                      frame_builder,
+                                                      scroll_layer_id)
             }
             _ => unreachable!("DisplayList did not start with StackingContext."),
 
@@ -352,7 +347,7 @@ impl WebRenderDisplayItemConverter for DisplayItem {
                             frame_builder: &mut WebRenderFrameBuilder) {
         match *self {
             DisplayItem::SolidColor(ref item) => {
-                let color = item.color.to_colorf();
+                let color = item.color;
                 if color.a > 0.0 {
                     builder.push_rect(item.base.bounds.to_rectf(),
                                       item.base.clip.to_clip_region(frame_builder),
@@ -388,7 +383,7 @@ impl WebRenderDisplayItemConverter for DisplayItem {
                                       item.base.clip.to_clip_region(frame_builder),
                                       glyphs,
                                       item.text_run.font_key,
-                                      item.text_color.to_colorf(),
+                                      item.text_color,
                                       item.text_run.actual_pt_size,
                                       item.blur_radius,
                                       &mut frame_builder.auxiliary_lists_builder);
@@ -416,22 +411,22 @@ impl WebRenderDisplayItemConverter for DisplayItem {
                 let rect = item.base.bounds.to_rectf();
                 let left = webrender_traits::BorderSide {
                     width: item.border_widths.left.to_f32_px(),
-                    color: item.color.left.to_colorf(),
+                    color: item.color.left,
                     style: item.style.left.to_border_style(),
                 };
                 let top = webrender_traits::BorderSide {
                     width: item.border_widths.top.to_f32_px(),
-                    color: item.color.top.to_colorf(),
+                    color: item.color.top,
                     style: item.style.top.to_border_style(),
                 };
                 let right = webrender_traits::BorderSide {
                     width: item.border_widths.right.to_f32_px(),
-                    color: item.color.right.to_colorf(),
+                    color: item.color.right,
                     style: item.style.right.to_border_style(),
                 };
                 let bottom = webrender_traits::BorderSide {
                     width: item.border_widths.bottom.to_f32_px(),
-                    color: item.color.bottom.to_colorf(),
+                    color: item.color.bottom,
                     style: item.style.bottom.to_border_style(),
                 };
                 let radius = item.radius.to_border_radius();
@@ -447,15 +442,11 @@ impl WebRenderDisplayItemConverter for DisplayItem {
                 let rect = item.base.bounds.to_rectf();
                 let start_point = item.start_point.to_pointf();
                 let end_point = item.end_point.to_pointf();
-                let mut stops = Vec::new();
-                for stop in &item.stops {
-                    stops.push(stop.to_gradient_stop());
-                }
                 builder.push_gradient(rect,
                                       item.base.clip.to_clip_region(frame_builder),
                                       start_point,
                                       end_point,
-                                      stops,
+                                      item.stops.clone(),
                                       &mut frame_builder.auxiliary_lists_builder);
             }
             DisplayItem::Line(..) => {
@@ -468,7 +459,7 @@ impl WebRenderDisplayItemConverter for DisplayItem {
                                         item.base.clip.to_clip_region(frame_builder),
                                         box_bounds,
                                         item.offset.to_pointf(),
-                                        item.color.to_colorf(),
+                                        item.color,
                                         item.blur_radius.to_f32_px(),
                                         item.spread_radius.to_f32_px(),
                                         item.border_radius.to_f32_px(),
@@ -481,7 +472,11 @@ impl WebRenderDisplayItemConverter for DisplayItem {
                                     item.base.clip.to_clip_region(frame_builder),
                                     pipeline_id);
             }
-            DisplayItem::PushStackingContext(_) | DisplayItem::PopStackingContext(_) => {}
+            DisplayItem::PushStackingContext(_) |
+            DisplayItem::PopStackingContext(_) |
+            DisplayItem::PushScrollRoot(_) |
+            DisplayItem::PopScrollRoot(_) =>
+                unreachable!("Tried to convert a scroll root or stacking context structure item."),
         }
     }
 }
@@ -523,8 +518,6 @@ impl WebRenderFrameBuilder {
                             stacking_context: &mut webrender_traits::StackingContext)
                             -> DisplayListId {
         let id = api.next_display_list_id();
-        stacking_context.has_stacking_contexts = stacking_context.has_stacking_contexts ||
-                                                 display_list.descriptor().has_stacking_contexts;
         stacking_context.display_lists.push(id);
         self.display_lists.push((id, display_list));
         id

@@ -25,7 +25,7 @@ use dom::node::{Node, document_from_node, window_from_node};
 use dom::urlhelper::UrlHelper;
 use dom::virtualmethods::VirtualMethods;
 use html5ever_atoms::LocalName;
-use msg::constellation_msg::ReferrerPolicy;
+use net_traits::ReferrerPolicy;
 use num_traits::ToPrimitive;
 use script_traits::MozBrowserEvent;
 use std::default::Default;
@@ -282,6 +282,23 @@ impl HTMLAnchorElementMethods for HTMLAnchorElement {
         self.upcast::<Element>().set_string_attribute(&local_name!("href"),
                                                       DOMString::from_string(value.0));
         self.set_url();
+    }
+
+    // https://html.spec.whatwg.org/multipage/#dom-hyperlink-origin
+    fn Origin(&self) -> USVString {
+        // Step 1.
+        self.reinitialize_url();
+
+        USVString(match *self.url.borrow() {
+            None => {
+                // Step 2.
+                "".to_owned()
+            },
+            Some(ref url) => {
+                // Step 3.
+                url.origin().unicode_serialization()
+            },
+        })
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-hyperlink-password

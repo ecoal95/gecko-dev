@@ -2,9 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use ReferrerPolicy;
 use hyper::header::Headers;
 use hyper::method::Method;
-use msg::constellation_msg::{PipelineId, ReferrerPolicy};
+use msg::constellation_msg::PipelineId;
 use std::cell::{Cell, RefCell};
 use std::default::Default;
 use std::mem::swap;
@@ -80,7 +81,7 @@ pub enum CacheMode {
 }
 
 /// [Redirect mode](https://fetch.spec.whatwg.org/#concept-request-redirect-mode)
-#[derive(Copy, Clone, PartialEq, HeapSizeOf)]
+#[derive(Copy, Clone, PartialEq, Serialize, Deserialize, HeapSizeOf)]
 pub enum RedirectMode {
     Follow,
     Error,
@@ -136,6 +137,7 @@ pub struct RequestInit {
     pub referrer_url: Option<Url>,
     pub referrer_policy: Option<ReferrerPolicy>,
     pub pipeline_id: Option<PipelineId>,
+    pub redirect_mode: RedirectMode,
 }
 
 impl Default for RequestInit {
@@ -157,6 +159,7 @@ impl Default for RequestInit {
             referrer_url: None,
             referrer_policy: None,
             pipeline_id: None,
+            redirect_mode: RedirectMode::Follow,
         }
     }
 }
@@ -265,6 +268,7 @@ impl Request {
         };
         req.referrer_policy.set(init.referrer_policy);
         req.pipeline_id.set(init.pipeline_id);
+        req.redirect_mode.set(init.redirect_mode);
         req
     }
 

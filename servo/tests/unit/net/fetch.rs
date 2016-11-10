@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use {DEFAULT_USER_AGENT, FetchResponseCollector, new_fetch_context, fetch_async, fetch_sync};
+use {DEFAULT_USER_AGENT, FetchResponseCollector, new_fetch_context, fetch_async, fetch_sync, make_server};
 use devtools_traits::DevtoolsControlMsg;
 use devtools_traits::HttpRequest as DevtoolsHttpRequest;
 use devtools_traits::HttpResponse as DevtoolsHttpResponse;
@@ -12,17 +12,17 @@ use hyper::header::{Accept, AccessControlAllowCredentials, AccessControlAllowHea
 use hyper::header::{AcceptEncoding, AcceptLanguage, AccessControlAllowMethods, AccessControlMaxAge};
 use hyper::header::{AccessControlRequestHeaders, AccessControlRequestMethod, Date, UserAgent};
 use hyper::header::{CacheControl, ContentLanguage, ContentLength, ContentType, Expires, LastModified};
-use hyper::header::{Encoding, Location, Pragma, SetCookie, qitem};
+use hyper::header::{Encoding, Location, Pragma, Quality, QualityItem, SetCookie, qitem};
 use hyper::header::{Headers, Host, HttpDate, Referer as HyperReferer};
 use hyper::method::Method;
 use hyper::mime::{Mime, SubLevel, TopLevel};
-use hyper::server::{Handler, Listening, Server};
 use hyper::server::{Request as HyperRequest, Response as HyperResponse};
 use hyper::status::StatusCode;
 use hyper::uri::RequestUri;
-use msg::constellation_msg::{ReferrerPolicy, TEST_PIPELINE_ID};
+use msg::constellation_msg::TEST_PIPELINE_ID;
 use net::fetch::cors_cache::CORSCache;
 use net::fetch::methods::{fetch, fetch_with_cors_cache};
+use net_traits::ReferrerPolicy;
 use net_traits::request::{Origin, RedirectMode, Referrer, Request, RequestMode};
 use net_traits::response::{CacheState, Response, ResponseBody, ResponseType};
 use std::fs::File;
@@ -37,16 +37,6 @@ use url::{Origin as UrlOrigin, Url};
 use util::resource_files::resources_dir_path;
 
 // TODO write a struct that impls Handler for storing test values
-
-fn make_server<H: Handler + 'static>(handler: H) -> (Listening, Url) {
-    // this is a Listening server because of handle_threads()
-    let server = Server::http("0.0.0.0:0").unwrap().handle_threads(handler, 1).unwrap();
-    let port = server.socket.port().to_string();
-    let mut url_string = "http://localhost:".to_owned();
-    url_string.push_str(&port);
-    let url = Url::parse(&url_string).unwrap();
-    (server, url)
-}
 
 #[test]
 fn test_fetch_response_is_not_network_error() {
@@ -129,7 +119,7 @@ fn test_fetch_blob() {
 
 
     let request = Request::new(url, Some(Origin::Origin(origin.origin())), false, None);
-    let fetch_response = fetch(Rc::new(request), &mut None, context);
+    let fetch_response = fetch(Rc::new(request), &mut None, &context);
 
     assert!(!fetch_response.is_network_error());
 
@@ -241,9 +231,9 @@ fn test_cors_preflight_cache_fetch() {
     let wrapped_request1 = Rc::new(request);
 
     let fetch_response0 = fetch_with_cors_cache(wrapped_request0.clone(), &mut cache,
-                                                &mut None, new_fetch_context(None));
+                                                &mut None, &new_fetch_context(None));
     let fetch_response1 = fetch_with_cors_cache(wrapped_request1.clone(), &mut cache,
-                                                &mut None, new_fetch_context(None));
+                                                &mut None, &new_fetch_context(None));
     let _ = server.close();
 
     assert!(!fetch_response0.is_network_error() && !fetch_response1.is_network_error());
@@ -786,7 +776,12 @@ fn test_fetch_with_devtools() {
     let mut en_us: LanguageTag = Default::default();
     en_us.language = Some("en".to_owned());
     en_us.region = Some("US".to_owned());
-    headers.set(AcceptLanguage(vec![qitem(en_us)]));
+    let mut en: LanguageTag = Default::default();
+    en.language = Some("en".to_owned());
+    headers.set(AcceptLanguage(vec![
+        qitem(en_us),
+        QualityItem::new(en, Quality(500)),
+    ]));
 
     headers.set(UserAgent(DEFAULT_USER_AGENT.to_owned()));
 

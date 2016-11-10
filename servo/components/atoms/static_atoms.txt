@@ -70,4 +70,10 @@ keydown
 abort
 beforescriptexecute
 afterscriptexecute
-
+invalid
+change
+open
+toggle
+statechange
+controllerchange
+fetch

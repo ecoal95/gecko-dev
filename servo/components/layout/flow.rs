@@ -30,9 +30,10 @@ use block::{BlockFlow, FormattingContextType};
 use context::{LayoutContext, SharedLayoutContext};
 use display_list_builder::DisplayListBuildState;
 use euclid::{Point2D, Size2D};
+use flex::FlexFlow;
 use floats::{Floats, SpeculatedFloatPlacement};
 use flow_list::{FlowList, MutFlowListIterator};
-use flow_ref::{self, FlowRef, WeakFlowRef};
+use flow_ref::{FlowRef, WeakFlowRef};
 use fragment::{Fragment, FragmentBorderBoxIterator, Overflow};
 use gfx::display_list::{ClippingRegion, StackingContext};
 use gfx_traits::{ScrollRootId, StackingContextId};
@@ -41,9 +42,7 @@ use inline::InlineFlow;
 use model::{CollapsibleMargins, IntrinsicISizes, MarginCollapseInfo};
 use multicol::MulticolFlow;
 use parallel::FlowParallelInfo;
-use rustc_serialize::{Encodable, Encoder};
-use script_layout_interface::restyle_damage::{RECONSTRUCT_FLOW, REFLOW, REFLOW_OUT_OF_FLOW};
-use script_layout_interface::restyle_damage::{REPAINT, REPOSITION, RestyleDamage};
+use serde::{Serialize, Serializer};
 use std::{fmt, mem, raw};
 use std::iter::Zip;
 use std::slice::IterMut;
@@ -54,6 +53,8 @@ use style::context::SharedStyleContext;
 use style::dom::TRestyleDamage;
 use style::logical_geometry::{LogicalRect, LogicalSize, WritingMode};
 use style::properties::ServoComputedValues;
+use style::selector_impl::RestyleDamage;
+use style::servo::restyle_damage::{RECONSTRUCT_FLOW, REFLOW, REFLOW_OUT_OF_FLOW, REPAINT, REPOSITION};
 use style::values::computed::LengthOrPercentageOrAuto;
 use table::{ColumnComputedInlineSize, ColumnIntrinsicInlineSize, TableFlow};
 use table_caption::TableCaptionFlow;
@@ -84,6 +85,16 @@ pub trait Flow: fmt::Debug + Sync + Send + 'static {
     fn as_mut_block(&mut self) -> &mut BlockFlow {
         debug!("called as_mut_block() on a flow of type {:?}", self.class());
         panic!("called as_mut_block() on a non-block flow")
+    }
+
+    /// If this is a flex flow, returns the underlying object. Fails otherwise.
+    fn as_flex(&self) -> &FlexFlow {
+        panic!("called as_flex() on a non-flex flow")
+    }
+
+    /// If this is a flex flow, returns the underlying object, borrowed mutably. Fails otherwise.
+    fn as_mut_flex(&mut self) -> &mut FlexFlow {
+        panic!("called as_mut_flex() on a non-flex flow")
     }
 
     /// If this is an inline flow, returns the underlying object. Fails otherwise.
@@ -212,7 +223,7 @@ pub trait Flow: fmt::Debug + Sync + Send + 'static {
     fn fragment(&mut self,
                 layout_context: &LayoutContext,
                 _fragmentation_context: Option<FragmentationContext>)
-                -> Option<FlowRef> {
+                -> Option<Arc<Flow>> {
         fn recursive_assign_block_size<F: ?Sized + Flow>(flow: &mut F, ctx: &LayoutContext) {
             for child in mut_base(flow).children.iter_mut() {
                 recursive_assign_block_size(child, ctx)
@@ -551,7 +562,7 @@ pub trait MutableOwnedFlowUtils {
                                             absolute_descendants: &mut AbsoluteDescendants);
 }
 
-#[derive(Copy, Clone, RustcEncodable, PartialEq, Debug)]
+#[derive(Copy, Clone, Serialize, PartialEq, Debug)]
 pub enum FlowClass {
     Block,
     Inline,
@@ -791,7 +802,7 @@ pub struct AbsoluteDescendantIter<'a> {
 impl<'a> Iterator for AbsoluteDescendantIter<'a> {
     type Item = &'a mut Flow;
     fn next(&mut self) -> Option<&'a mut Flow> {
-        self.iter.next().map(|info| flow_ref::deref_mut(&mut info.flow))
+        self.iter.next().map(|info| FlowRef::deref_mut(&mut info.flow))
     }
 }
 
@@ -821,7 +832,7 @@ impl EarlyAbsolutePositionInfo {
 
 /// Information needed to compute absolute (i.e. viewport-relative) flow positions (not to be
 /// confused with absolutely-positioned flows) that is computed during final position assignment.
-#[derive(RustcEncodable, Copy, Clone)]
+#[derive(Serialize, Copy, Clone)]
 pub struct LateAbsolutePositionInfo {
     /// The position of the absolute containing block relative to the nearest ancestor stacking
     /// context. If the absolute containing block establishes the stacking context for this flow,
@@ -978,44 +989,17 @@ impl fmt::Debug for BaseFlow {
     }
 }
 
-impl Encodable for BaseFlow {
-    fn encode<S: Encoder>(&self, e: &mut S) -> Result<(), S::Error> {
-        e.emit_struct("base", 5, |e| {
-            try!(e.emit_struct_field("id", 0, |e| self.debug_id().encode(e)));
-            try!(e.emit_struct_field("stacking_relative_position",
-                                     1,
-                                     |e| self.stacking_relative_position.encode(e)));
-            try!(e.emit_struct_field("intrinsic_inline_sizes",
-                                     2,
-                                     |e| self.intrinsic_inline_sizes.encode(e)));
-            try!(e.emit_struct_field("position", 3, |e| self.position.encode(e)));
-            e.emit_struct_field("children", 4, |e| {
-                e.emit_seq(self.children.len(), |e| {
-                    for (i, c) in self.children.iter().enumerate() {
-                        try!(e.emit_seq_elt(i, |e| {
-                            try!(e.emit_struct("flow", 2, |e| {
-                                try!(e.emit_struct_field("class", 0, |e| c.class().encode(e)));
-                                e.emit_struct_field("data", 1, |e| {
-                                    match c.class() {
-                                        FlowClass::Block => c.as_block().encode(e),
-                                        FlowClass::Inline => c.as_inline().encode(e),
-                                        FlowClass::Table => c.as_table().encode(e),
-                                        FlowClass::TableWrapper => c.as_table_wrapper().encode(e),
-                                        FlowClass::TableRowGroup => c.as_table_rowgroup().encode(e),
-                                        FlowClass::TableRow => c.as_table_row().encode(e),
-                                        FlowClass::TableCell => c.as_table_cell().encode(e),
-                                        _ => { Ok(()) }     // TODO: Support captions
-                                    }
-                                })
-                            }));
-                            Ok(())
-                        }));
-                    }
-                    Ok(())
-                })
-
-            })
-        })
+impl Serialize for BaseFlow {
+    fn serialize<S: Serializer>(&self, serializer: &mut S) -> Result<(), S::Error> {
+        let mut state = try!(serializer.serialize_struct("base", 5));
+        try!(serializer.serialize_struct_elt(&mut state, "id", self.debug_id()));
+        try!(serializer.serialize_struct_elt(&mut state, "stacking_relative_position",
+                                             &self.stacking_relative_position));
+        try!(serializer.serialize_struct_elt(&mut state, "intrinsic_inline_sizes",
+                                             &self.intrinsic_inline_sizes));
+        try!(serializer.serialize_struct_elt(&mut state, "position", &self.position));
+        try!(serializer.serialize_struct_elt(&mut state, "children", &self.children));
+        serializer.serialize_struct_end(state)
     }
 }
 
@@ -1403,11 +1387,11 @@ impl MutableOwnedFlowUtils for FlowRef {
     /// construction is allowed to possess.
     fn set_absolute_descendants(&mut self, abs_descendants: AbsoluteDescendants) {
         let this = self.clone();
-        let base = mut_base(flow_ref::deref_mut(self));
+        let base = mut_base(FlowRef::deref_mut(self));
         base.abs_descendants = abs_descendants;
         for descendant_link in base.abs_descendants.descendant_links.iter_mut() {
             debug_assert!(!descendant_link.has_reached_containing_block);
-            let descendant_base = mut_base(flow_ref::deref_mut(&mut descendant_link.flow));
+            let descendant_base = mut_base(FlowRef::deref_mut(&mut descendant_link.flow));
             descendant_base.absolute_cb.set(this.clone());
         }
     }
@@ -1433,7 +1417,7 @@ impl MutableOwnedFlowUtils for FlowRef {
         });
 
         let this = self.clone();
-        let base = mut_base(flow_ref::deref_mut(self));
+        let base = mut_base(FlowRef::deref_mut(self));
         base.abs_descendants = applicable_absolute_descendants;
         for descendant_link in base.abs_descendants.iter() {
             let descendant_base = mut_base(descendant_link);
@@ -1464,7 +1448,7 @@ impl ContainingBlockLink {
     }
 
     fn set(&mut self, link: FlowRef) {
-        self.link = Some(Arc::downgrade(&link))
+        self.link = Some(FlowRef::downgrade(&link))
     }
 
     #[inline]

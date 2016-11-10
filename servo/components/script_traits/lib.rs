@@ -38,7 +38,7 @@ extern crate url;
 mod script_msg;
 pub mod webdriver_msg;
 
-use bluetooth_traits::BluetoothMethodMsg;
+use bluetooth_traits::BluetoothRequest;
 use devtools_traits::{DevtoolScriptControlMsg, ScriptToDevtoolsControlMsg, WorkerId};
 use euclid::Size2D;
 use euclid::length::Length;
@@ -55,8 +55,8 @@ use hyper::method::Method;
 use ipc_channel::ipc::{IpcReceiver, IpcSender};
 use libc::c_void;
 use msg::constellation_msg::{FrameId, FrameType, Key, KeyModifiers, KeyState};
-use msg::constellation_msg::{PipelineId, PipelineNamespaceId, ReferrerPolicy, TraversalDirection};
-use net_traits::ResourceThreads;
+use msg::constellation_msg::{PipelineId, PipelineNamespaceId, TraversalDirection};
+use net_traits::{ReferrerPolicy, ResourceThreads};
 use net_traits::image::base::Image;
 use net_traits::image_cache_thread::ImageCacheThread;
 use net_traits::response::HttpsState;
@@ -195,6 +195,8 @@ pub enum ConstellationControlMsg {
     ResizeInactive(PipelineId, WindowSizeData),
     /// Notifies the script that a pipeline should be closed.
     ExitPipeline(PipelineId),
+    /// Notifies the script that the whole thread should be closed.
+    ExitScriptThread,
     /// Sends a DOM event.
     SendEvent(PipelineId, CompositorEvent),
     /// Notifies script of the viewport.
@@ -259,6 +261,7 @@ impl fmt::Debug for ConstellationControlMsg {
             Resize(..) => "Resize",
             ResizeInactive(..) => "ResizeInactive",
             ExitPipeline(..) => "ExitPipeline",
+            ExitScriptThread => "ExitScriptThread",
             SendEvent(..) => "SendEvent",
             Viewport(..) => "Viewport",
             SetScrollState(..) => "SetScrollState",
@@ -445,7 +448,7 @@ pub struct InitialScriptState {
     /// A channel to the resource manager thread.
     pub resource_threads: ResourceThreads,
     /// A channel to the bluetooth thread.
-    pub bluetooth_thread: IpcSender<BluetoothMethodMsg>,
+    pub bluetooth_thread: IpcSender<BluetoothRequest>,
     /// A channel to the image cache thread.
     pub image_cache_thread: ImageCacheThread,
     /// A channel to the time profiler thread.

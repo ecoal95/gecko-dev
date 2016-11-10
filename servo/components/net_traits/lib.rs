@@ -9,6 +9,7 @@
 
 #![deny(unsafe_code)]
 
+extern crate bluetooth_traits;
 extern crate cookie as cookie_rs;
 extern crate heapsize;
 #[macro_use] extern crate heapsize_derive;
@@ -32,6 +33,7 @@ extern crate uuid;
 extern crate webrender_traits;
 extern crate websocket;
 
+use bluetooth_traits::{BluetoothResponseListener, BluetoothResponseResult};
 use cookie_rs::Cookie;
 use filemanager_thread::FileManagerThreadMsg;
 use heapsize::HeapSizeOf;
@@ -42,7 +44,7 @@ use hyper::mime::{Attr, Mime};
 use hyper_serde::Serde;
 use ipc_channel::ipc::{self, IpcReceiver, IpcSender};
 use ipc_channel::router::ROUTER;
-use msg::constellation_msg::{PipelineId, ReferrerPolicy};
+use msg::constellation_msg::PipelineId;
 use request::{Request, RequestInit};
 use response::{HttpsState, Response};
 use std::io::Error as IOError;
@@ -107,6 +109,28 @@ impl CustomResponse {
 pub struct CustomResponseMediator {
     pub response_chan: IpcSender<Option<CustomResponse>>,
     pub load_url: Url
+}
+
+/// [Policies](https://w3c.github.io/webappsec-referrer-policy/#referrer-policy-states)
+/// for providing a referrer header for a request
+#[derive(Clone, Copy, Debug, Deserialize, HeapSizeOf, Serialize)]
+pub enum ReferrerPolicy {
+    /// "no-referrer"
+    NoReferrer,
+    /// "no-referrer-when-downgrade"
+    NoReferrerWhenDowngrade,
+    /// "origin"
+    Origin,
+    /// "same-origin"
+    SameOrigin,
+    /// "origin-when-cross-origin"
+    OriginWhenCrossOrigin,
+    /// "unsafe-url"
+    UnsafeUrl,
+    /// "strict-origin"
+    StrictOrigin,
+    /// "strict-origin-when-cross-origin"
+    StrictOriginWhenCrossOrigin,
 }
 
 #[derive(Clone, Deserialize, Serialize, HeapSizeOf)]
@@ -266,6 +290,13 @@ impl<T: FetchResponseListener> Action<T> for FetchResponseMsg {
             FetchResponseMsg::ProcessResponseChunk(data) => listener.process_response_chunk(data),
             FetchResponseMsg::ProcessResponseEOF(data) => listener.process_response_eof(data),
         }
+    }
+}
+
+impl<T: BluetoothResponseListener> Action<T> for BluetoothResponseResult {
+    /// Execute the default action on a provided listener.
+    fn process(self, listener: &mut T) {
+        listener.response(self)
     }
 }
 
