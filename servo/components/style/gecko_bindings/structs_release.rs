@@ -54,15 +54,6 @@ pub const NS_FONT_DISPLAY_BLOCK: ::std::os::raw::c_uint = 1;
 pub const NS_FONT_DISPLAY_SWAP: ::std::os::raw::c_uint = 2;
 pub const NS_FONT_DISPLAY_FALLBACK: ::std::os::raw::c_uint = 3;
 pub const NS_FONT_DISPLAY_OPTIONAL: ::std::os::raw::c_uint = 4;
-pub const NS_FONT_VARIANT_ALTERNATES_HISTORICAL: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_ALTERNATES_STYLISTIC: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_ALTERNATES_STYLESET: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_ALTERNATES_CHARACTER_VARIANT: ::std::os::raw::c_uint
-          =
-    1;
-pub const NS_FONT_VARIANT_ALTERNATES_SWASH: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_ALTERNATES_ORNAMENTS: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_ALTERNATES_ANNOTATION: ::std::os::raw::c_uint = 1;
 pub const NS_FONT_VARIANT_CAPS_NORMAL: ::std::os::raw::c_uint = 0;
 pub const NS_FONT_VARIANT_CAPS_SMALLCAPS: ::std::os::raw::c_uint = 1;
 pub const NS_FONT_VARIANT_CAPS_ALLSMALL: ::std::os::raw::c_uint = 2;
@@ -70,35 +61,6 @@ pub const NS_FONT_VARIANT_CAPS_PETITECAPS: ::std::os::raw::c_uint = 3;
 pub const NS_FONT_VARIANT_CAPS_ALLPETITE: ::std::os::raw::c_uint = 4;
 pub const NS_FONT_VARIANT_CAPS_TITLING: ::std::os::raw::c_uint = 5;
 pub const NS_FONT_VARIANT_CAPS_UNICASE: ::std::os::raw::c_uint = 6;
-pub const NS_FONT_VARIANT_EAST_ASIAN_JIS78: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_EAST_ASIAN_JIS83: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_EAST_ASIAN_JIS90: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_EAST_ASIAN_JIS04: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_EAST_ASIAN_SIMPLIFIED: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_EAST_ASIAN_TRADITIONAL: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_EAST_ASIAN_FULL_WIDTH: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_EAST_ASIAN_PROP_WIDTH: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_EAST_ASIAN_RUBY: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_LIGATURES_NONE: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_LIGATURES_COMMON: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_LIGATURES_NO_COMMON: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_LIGATURES_DISCRETIONARY: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_LIGATURES_NO_DISCRETIONARY: ::std::os::raw::c_uint =
-    1;
-pub const NS_FONT_VARIANT_LIGATURES_HISTORICAL: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_LIGATURES_NO_HISTORICAL: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_LIGATURES_CONTEXTUAL: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_LIGATURES_NO_CONTEXTUAL: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_NUMERIC_LINING: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_NUMERIC_OLDSTYLE: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_NUMERIC_PROPORTIONAL: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_NUMERIC_TABULAR: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_NUMERIC_DIAGONAL_FRACTIONS: ::std::os::raw::c_uint =
-    1;
-pub const NS_FONT_VARIANT_NUMERIC_STACKED_FRACTIONS: ::std::os::raw::c_uint =
-    1;
-pub const NS_FONT_VARIANT_NUMERIC_SLASHZERO: ::std::os::raw::c_uint = 1;
-pub const NS_FONT_VARIANT_NUMERIC_ORDINAL: ::std::os::raw::c_uint = 1;
 pub const NS_FONT_VARIANT_POSITION_NORMAL: ::std::os::raw::c_uint = 0;
 pub const NS_FONT_VARIANT_POSITION_SUPER: ::std::os::raw::c_uint = 1;
 pub const NS_FONT_VARIANT_POSITION_SUB: ::std::os::raw::c_uint = 2;
@@ -293,11 +255,11 @@ pub const NS_STYLE_VOLUME_LOUD: ::std::os::raw::c_uint = 4;
 pub const NS_STYLE_VOLUME_X_LOUD: ::std::os::raw::c_uint = 5;
 pub const NS_STYLE_COLOR_INHERIT_FROM_BODY: ::std::os::raw::c_uint = 2;
 pub const NS_STYLE_WILL_CHANGE_STACKING_CONTEXT: ::std::os::raw::c_uint = 1;
-pub const NS_STYLE_WILL_CHANGE_TRANSFORM: ::std::os::raw::c_uint = 1;
-pub const NS_STYLE_WILL_CHANGE_SCROLL: ::std::os::raw::c_uint = 1;
-pub const NS_STYLE_WILL_CHANGE_OPACITY: ::std::os::raw::c_uint = 1;
-pub const NS_STYLE_WILL_CHANGE_FIXPOS_CB: ::std::os::raw::c_uint = 1;
-pub const NS_STYLE_WILL_CHANGE_ABSPOS_CB: ::std::os::raw::c_uint = 1;
+pub const NS_STYLE_WILL_CHANGE_TRANSFORM: ::std::os::raw::c_uint = 2;
+pub const NS_STYLE_WILL_CHANGE_SCROLL: ::std::os::raw::c_uint = 4;
+pub const NS_STYLE_WILL_CHANGE_OPACITY: ::std::os::raw::c_uint = 8;
+pub const NS_STYLE_WILL_CHANGE_FIXPOS_CB: ::std::os::raw::c_uint = 16;
+pub const NS_STYLE_WILL_CHANGE_ABSPOS_CB: ::std::os::raw::c_uint = 32;
 pub const NS_STYLE_ANIMATION_ITERATION_COUNT_INFINITE: ::std::os::raw::c_uint
           =
     0;
@@ -317,10 +279,10 @@ pub const NS_STYLE_IMAGELAYER_ORIGIN_BORDER: ::std::os::raw::c_uint = 0;
 pub const NS_STYLE_IMAGELAYER_ORIGIN_PADDING: ::std::os::raw::c_uint = 1;
 pub const NS_STYLE_IMAGELAYER_ORIGIN_CONTENT: ::std::os::raw::c_uint = 2;
 pub const NS_STYLE_IMAGELAYER_POSITION_CENTER: ::std::os::raw::c_uint = 1;
-pub const NS_STYLE_IMAGELAYER_POSITION_TOP: ::std::os::raw::c_uint = 1;
-pub const NS_STYLE_IMAGELAYER_POSITION_BOTTOM: ::std::os::raw::c_uint = 1;
-pub const NS_STYLE_IMAGELAYER_POSITION_LEFT: ::std::os::raw::c_uint = 1;
-pub const NS_STYLE_IMAGELAYER_POSITION_RIGHT: ::std::os::raw::c_uint = 1;
+pub const NS_STYLE_IMAGELAYER_POSITION_TOP: ::std::os::raw::c_uint = 2;
+pub const NS_STYLE_IMAGELAYER_POSITION_BOTTOM: ::std::os::raw::c_uint = 4;
+pub const NS_STYLE_IMAGELAYER_POSITION_LEFT: ::std::os::raw::c_uint = 8;
+pub const NS_STYLE_IMAGELAYER_POSITION_RIGHT: ::std::os::raw::c_uint = 16;
 pub const NS_STYLE_IMAGELAYER_REPEAT_NO_REPEAT: ::std::os::raw::c_uint = 0;
 pub const NS_STYLE_IMAGELAYER_REPEAT_REPEAT_X: ::std::os::raw::c_uint = 1;
 pub const NS_STYLE_IMAGELAYER_REPEAT_REPEAT_Y: ::std::os::raw::c_uint = 2;
@@ -404,11 +366,14 @@ pub const NS_STYLE_WRITING_MODE_HORIZONTAL_TB: ::std::os::raw::c_uint = 0;
 pub const NS_STYLE_WRITING_MODE_VERTICAL_RL: ::std::os::raw::c_uint = 1;
 pub const NS_STYLE_WRITING_MODE_VERTICAL_LR: ::std::os::raw::c_uint = 3;
 pub const NS_STYLE_WRITING_MODE_SIDEWAYS_MASK: ::std::os::raw::c_uint = 4;
+pub const NS_STYLE_WRITING_MODE_SIDEWAYS_RL: ::std::os::raw::c_uint = 5;
+pub const NS_STYLE_WRITING_MODE_SIDEWAYS_LR: ::std::os::raw::c_uint = 7;
 pub const NS_STYLE_CONTAIN_NONE: ::std::os::raw::c_uint = 0;
 pub const NS_STYLE_CONTAIN_STRICT: ::std::os::raw::c_uint = 1;
 pub const NS_STYLE_CONTAIN_LAYOUT: ::std::os::raw::c_uint = 2;
 pub const NS_STYLE_CONTAIN_STYLE: ::std::os::raw::c_uint = 4;
 pub const NS_STYLE_CONTAIN_PAINT: ::std::os::raw::c_uint = 8;
+pub const NS_STYLE_CONTAIN_ALL_BITS: ::std::os::raw::c_uint = 14;
 pub const NS_STYLE_ALIGN_AUTO: ::std::os::raw::c_uint = 0;
 pub const NS_STYLE_ALIGN_NORMAL: ::std::os::raw::c_uint = 1;
 pub const NS_STYLE_ALIGN_START: ::std::os::raw::c_uint = 2;
@@ -432,6 +397,29 @@ pub const NS_STYLE_ALIGN_UNSAFE: ::std::os::raw::c_uint = 128;
 pub const NS_STYLE_ALIGN_FLAG_BITS: ::std::os::raw::c_uint = 224;
 pub const NS_STYLE_ALIGN_ALL_BITS: ::std::os::raw::c_uint = 255;
 pub const NS_STYLE_ALIGN_ALL_SHIFT: ::std::os::raw::c_uint = 8;
+pub const NS_STYLE_JUSTIFY_AUTO: ::std::os::raw::c_uint = 0;
+pub const NS_STYLE_JUSTIFY_NORMAL: ::std::os::raw::c_uint = 1;
+pub const NS_STYLE_JUSTIFY_START: ::std::os::raw::c_uint = 2;
+pub const NS_STYLE_JUSTIFY_END: ::std::os::raw::c_uint = 3;
+pub const NS_STYLE_JUSTIFY_FLEX_START: ::std::os::raw::c_uint = 4;
+pub const NS_STYLE_JUSTIFY_FLEX_END: ::std::os::raw::c_uint = 5;
+pub const NS_STYLE_JUSTIFY_CENTER: ::std::os::raw::c_uint = 6;
+pub const NS_STYLE_JUSTIFY_LEFT: ::std::os::raw::c_uint = 7;
+pub const NS_STYLE_JUSTIFY_RIGHT: ::std::os::raw::c_uint = 8;
+pub const NS_STYLE_JUSTIFY_BASELINE: ::std::os::raw::c_uint = 9;
+pub const NS_STYLE_JUSTIFY_LAST_BASELINE: ::std::os::raw::c_uint = 10;
+pub const NS_STYLE_JUSTIFY_STRETCH: ::std::os::raw::c_uint = 11;
+pub const NS_STYLE_JUSTIFY_SELF_START: ::std::os::raw::c_uint = 12;
+pub const NS_STYLE_JUSTIFY_SELF_END: ::std::os::raw::c_uint = 13;
+pub const NS_STYLE_JUSTIFY_SPACE_BETWEEN: ::std::os::raw::c_uint = 14;
+pub const NS_STYLE_JUSTIFY_SPACE_AROUND: ::std::os::raw::c_uint = 15;
+pub const NS_STYLE_JUSTIFY_SPACE_EVENLY: ::std::os::raw::c_uint = 16;
+pub const NS_STYLE_JUSTIFY_LEGACY: ::std::os::raw::c_uint = 32;
+pub const NS_STYLE_JUSTIFY_SAFE: ::std::os::raw::c_uint = 64;
+pub const NS_STYLE_JUSTIFY_UNSAFE: ::std::os::raw::c_uint = 128;
+pub const NS_STYLE_JUSTIFY_FLAG_BITS: ::std::os::raw::c_uint = 224;
+pub const NS_STYLE_JUSTIFY_ALL_BITS: ::std::os::raw::c_uint = 255;
+pub const NS_STYLE_JUSTIFY_ALL_SHIFT: ::std::os::raw::c_uint = 8;
 pub const NS_STYLE_FLEX_DIRECTION_ROW: ::std::os::raw::c_uint = 0;
 pub const NS_STYLE_FLEX_DIRECTION_ROW_REVERSE: ::std::os::raw::c_uint = 1;
 pub const NS_STYLE_FLEX_DIRECTION_COLUMN: ::std::os::raw::c_uint = 2;
@@ -440,6 +428,11 @@ pub const NS_STYLE_FLEX_WRAP_NOWRAP: ::std::os::raw::c_uint = 0;
 pub const NS_STYLE_FLEX_WRAP_WRAP: ::std::os::raw::c_uint = 1;
 pub const NS_STYLE_FLEX_WRAP_WRAP_REVERSE: ::std::os::raw::c_uint = 2;
 pub const NS_STYLE_ORDER_INITIAL: ::std::os::raw::c_uint = 0;
+pub const NS_STYLE_JUSTIFY_CONTENT_FLEX_START: ::std::os::raw::c_uint = 4;
+pub const NS_STYLE_JUSTIFY_CONTENT_FLEX_END: ::std::os::raw::c_uint = 5;
+pub const NS_STYLE_JUSTIFY_CONTENT_CENTER: ::std::os::raw::c_uint = 6;
+pub const NS_STYLE_JUSTIFY_CONTENT_SPACE_BETWEEN: ::std::os::raw::c_uint = 14;
+pub const NS_STYLE_JUSTIFY_CONTENT_SPACE_AROUND: ::std::os::raw::c_uint = 15;
 pub const NS_STYLE_FILTER_NONE: ::std::os::raw::c_uint = 0;
 pub const NS_STYLE_FILTER_URL: ::std::os::raw::c_uint = 1;
 pub const NS_STYLE_FILTER_BLUR: ::std::os::raw::c_uint = 2;
@@ -452,6 +445,11 @@ pub const NS_STYLE_FILTER_SATURATE: ::std::os::raw::c_uint = 8;
 pub const NS_STYLE_FILTER_SEPIA: ::std::os::raw::c_uint = 9;
 pub const NS_STYLE_FILTER_HUE_ROTATE: ::std::os::raw::c_uint = 10;
 pub const NS_STYLE_FILTER_DROP_SHADOW: ::std::os::raw::c_uint = 11;
+pub const NS_STYLE_FONT_STYLE_NORMAL: ::std::os::raw::c_uint = 0;
+pub const NS_STYLE_FONT_STYLE_ITALIC: ::std::os::raw::c_uint = 1;
+pub const NS_STYLE_FONT_STYLE_OBLIQUE: ::std::os::raw::c_uint = 2;
+pub const NS_STYLE_FONT_WEIGHT_NORMAL: ::std::os::raw::c_uint = 400;
+pub const NS_STYLE_FONT_WEIGHT_BOLD: ::std::os::raw::c_uint = 700;
 pub const NS_STYLE_FONT_WEIGHT_BOLDER: ::std::os::raw::c_int = -1;
 pub const NS_STYLE_FONT_WEIGHT_LIGHTER: ::std::os::raw::c_int = -2;
 pub const NS_STYLE_FONT_SIZE_XXSMALL: ::std::os::raw::c_uint = 0;
@@ -464,6 +462,15 @@ pub const NS_STYLE_FONT_SIZE_XXLARGE: ::std::os::raw::c_uint = 6;
 pub const NS_STYLE_FONT_SIZE_XXXLARGE: ::std::os::raw::c_uint = 7;
 pub const NS_STYLE_FONT_SIZE_LARGER: ::std::os::raw::c_uint = 8;
 pub const NS_STYLE_FONT_SIZE_SMALLER: ::std::os::raw::c_uint = 9;
+pub const NS_STYLE_FONT_STRETCH_ULTRA_CONDENSED: ::std::os::raw::c_int = -4;
+pub const NS_STYLE_FONT_STRETCH_EXTRA_CONDENSED: ::std::os::raw::c_int = -3;
+pub const NS_STYLE_FONT_STRETCH_CONDENSED: ::std::os::raw::c_int = -2;
+pub const NS_STYLE_FONT_STRETCH_SEMI_CONDENSED: ::std::os::raw::c_int = -1;
+pub const NS_STYLE_FONT_STRETCH_NORMAL: ::std::os::raw::c_uint = 0;
+pub const NS_STYLE_FONT_STRETCH_SEMI_EXPANDED: ::std::os::raw::c_uint = 1;
+pub const NS_STYLE_FONT_STRETCH_EXPANDED: ::std::os::raw::c_uint = 2;
+pub const NS_STYLE_FONT_STRETCH_EXTRA_EXPANDED: ::std::os::raw::c_uint = 3;
+pub const NS_STYLE_FONT_STRETCH_ULTRA_EXPANDED: ::std::os::raw::c_uint = 4;
 pub const NS_STYLE_FONT_CAPTION: ::std::os::raw::c_uint = 1;
 pub const NS_STYLE_FONT_ICON: ::std::os::raw::c_uint = 2;
 pub const NS_STYLE_FONT_MENU: ::std::os::raw::c_uint = 3;
@@ -481,8 +488,8 @@ pub const NS_STYLE_FONT_PULL_DOWN_MENU: ::std::os::raw::c_uint = 14;
 pub const NS_STYLE_FONT_LIST: ::std::os::raw::c_uint = 15;
 pub const NS_STYLE_FONT_FIELD: ::std::os::raw::c_uint = 16;
 pub const NS_STYLE_GRID_AUTO_FLOW_ROW: ::std::os::raw::c_uint = 1;
-pub const NS_STYLE_GRID_AUTO_FLOW_COLUMN: ::std::os::raw::c_uint = 1;
-pub const NS_STYLE_GRID_AUTO_FLOW_DENSE: ::std::os::raw::c_uint = 1;
+pub const NS_STYLE_GRID_AUTO_FLOW_COLUMN: ::std::os::raw::c_uint = 2;
+pub const NS_STYLE_GRID_AUTO_FLOW_DENSE: ::std::os::raw::c_uint = 4;
 pub const NS_STYLE_GRID_TEMPLATE_SUBGRID: ::std::os::raw::c_uint = 0;
 pub const NS_STYLE_GRID_TRACK_BREADTH_MAX_CONTENT: ::std::os::raw::c_uint = 1;
 pub const NS_STYLE_GRID_TRACK_BREADTH_MIN_CONTENT: ::std::os::raw::c_uint = 2;
@@ -604,12 +611,15 @@ pub const NS_STYLE_TEXT_DECORATION_LINE_PREF_ANCHORS: ::std::os::raw::c_uint =
     16;
 pub const NS_STYLE_TEXT_DECORATION_LINE_OVERRIDE_ALL: ::std::os::raw::c_uint =
     32;
+pub const NS_STYLE_TEXT_DECORATION_LINE_LINES_MASK: ::std::os::raw::c_uint =
+    7;
 pub const NS_STYLE_TEXT_DECORATION_STYLE_NONE: ::std::os::raw::c_uint = 0;
 pub const NS_STYLE_TEXT_DECORATION_STYLE_DOTTED: ::std::os::raw::c_uint = 1;
 pub const NS_STYLE_TEXT_DECORATION_STYLE_DASHED: ::std::os::raw::c_uint = 2;
 pub const NS_STYLE_TEXT_DECORATION_STYLE_SOLID: ::std::os::raw::c_uint = 3;
 pub const NS_STYLE_TEXT_DECORATION_STYLE_DOUBLE: ::std::os::raw::c_uint = 4;
 pub const NS_STYLE_TEXT_DECORATION_STYLE_WAVY: ::std::os::raw::c_uint = 5;
+pub const NS_STYLE_TEXT_DECORATION_STYLE_MAX: ::std::os::raw::c_uint = 5;
 pub const NS_STYLE_TEXT_OVERFLOW_CLIP: ::std::os::raw::c_uint = 0;
 pub const NS_STYLE_TEXT_OVERFLOW_ELLIPSIS: ::std::os::raw::c_uint = 1;
 pub const NS_STYLE_TEXT_OVERFLOW_STRING: ::std::os::raw::c_uint = 2;
@@ -619,10 +629,10 @@ pub const NS_STYLE_TEXT_TRANSFORM_LOWERCASE: ::std::os::raw::c_uint = 2;
 pub const NS_STYLE_TEXT_TRANSFORM_UPPERCASE: ::std::os::raw::c_uint = 3;
 pub const NS_STYLE_TEXT_TRANSFORM_FULL_WIDTH: ::std::os::raw::c_uint = 4;
 pub const NS_STYLE_TOUCH_ACTION_NONE: ::std::os::raw::c_uint = 1;
-pub const NS_STYLE_TOUCH_ACTION_AUTO: ::std::os::raw::c_uint = 1;
-pub const NS_STYLE_TOUCH_ACTION_PAN_X: ::std::os::raw::c_uint = 1;
-pub const NS_STYLE_TOUCH_ACTION_PAN_Y: ::std::os::raw::c_uint = 1;
-pub const NS_STYLE_TOUCH_ACTION_MANIPULATION: ::std::os::raw::c_uint = 1;
+pub const NS_STYLE_TOUCH_ACTION_AUTO: ::std::os::raw::c_uint = 2;
+pub const NS_STYLE_TOUCH_ACTION_PAN_X: ::std::os::raw::c_uint = 4;
+pub const NS_STYLE_TOUCH_ACTION_PAN_Y: ::std::os::raw::c_uint = 8;
+pub const NS_STYLE_TOUCH_ACTION_MANIPULATION: ::std::os::raw::c_uint = 16;
 pub const NS_STYLE_TOP_LAYER_NONE: ::std::os::raw::c_uint = 0;
 pub const NS_STYLE_TOP_LAYER_TOP: ::std::os::raw::c_uint = 1;
 pub const NS_STYLE_TRANSFORM_BOX_BORDER_BOX: ::std::os::raw::c_uint = 0;
@@ -768,6 +778,7 @@ pub const NS_STYLE_PAINT_ORDER_NORMAL: ::std::os::raw::c_uint = 0;
 pub const NS_STYLE_PAINT_ORDER_FILL: ::std::os::raw::c_uint = 1;
 pub const NS_STYLE_PAINT_ORDER_STROKE: ::std::os::raw::c_uint = 2;
 pub const NS_STYLE_PAINT_ORDER_MARKERS: ::std::os::raw::c_uint = 3;
+pub const NS_STYLE_PAINT_ORDER_LAST_VALUE: ::std::os::raw::c_uint = 3;
 pub const NS_STYLE_PAINT_ORDER_BITWIDTH: ::std::os::raw::c_uint = 2;
 pub const NS_STYLE_SHAPE_RENDERING_AUTO: ::std::os::raw::c_uint = 0;
 pub const NS_STYLE_SHAPE_RENDERING_OPTIMIZESPEED: ::std::os::raw::c_uint = 1;
@@ -786,13 +797,16 @@ pub const NS_STYLE_TEXT_ANCHOR_START: ::std::os::raw::c_uint = 0;
 pub const NS_STYLE_TEXT_ANCHOR_MIDDLE: ::std::os::raw::c_uint = 1;
 pub const NS_STYLE_TEXT_ANCHOR_END: ::std::os::raw::c_uint = 2;
 pub const NS_STYLE_TEXT_EMPHASIS_POSITION_OVER: ::std::os::raw::c_uint = 1;
-pub const NS_STYLE_TEXT_EMPHASIS_POSITION_UNDER: ::std::os::raw::c_uint = 1;
-pub const NS_STYLE_TEXT_EMPHASIS_POSITION_LEFT: ::std::os::raw::c_uint = 1;
-pub const NS_STYLE_TEXT_EMPHASIS_POSITION_RIGHT: ::std::os::raw::c_uint = 1;
+pub const NS_STYLE_TEXT_EMPHASIS_POSITION_UNDER: ::std::os::raw::c_uint = 2;
+pub const NS_STYLE_TEXT_EMPHASIS_POSITION_LEFT: ::std::os::raw::c_uint = 4;
+pub const NS_STYLE_TEXT_EMPHASIS_POSITION_RIGHT: ::std::os::raw::c_uint = 8;
+pub const NS_STYLE_TEXT_EMPHASIS_POSITION_DEFAULT: ::std::os::raw::c_uint = 9;
+pub const NS_STYLE_TEXT_EMPHASIS_POSITION_DEFAULT_ZH: ::std::os::raw::c_uint =
+    10;
 pub const NS_STYLE_TEXT_EMPHASIS_STYLE_NONE: ::std::os::raw::c_uint = 0;
-pub const NS_STYLE_TEXT_EMPHASIS_STYLE_FILL_MASK: ::std::os::raw::c_uint = 1;
+pub const NS_STYLE_TEXT_EMPHASIS_STYLE_FILL_MASK: ::std::os::raw::c_uint = 8;
 pub const NS_STYLE_TEXT_EMPHASIS_STYLE_FILLED: ::std::os::raw::c_uint = 0;
-pub const NS_STYLE_TEXT_EMPHASIS_STYLE_OPEN: ::std::os::raw::c_uint = 1;
+pub const NS_STYLE_TEXT_EMPHASIS_STYLE_OPEN: ::std::os::raw::c_uint = 8;
 pub const NS_STYLE_TEXT_EMPHASIS_STYLE_SHAPE_MASK: ::std::os::raw::c_uint = 7;
 pub const NS_STYLE_TEXT_EMPHASIS_STYLE_DOT: ::std::os::raw::c_uint = 1;
 pub const NS_STYLE_TEXT_EMPHASIS_STYLE_CIRCLE: ::std::os::raw::c_uint = 2;
@@ -872,11 +886,7 @@ pub const NS_STYLE_SCAN_INTERLACE: ::std::os::raw::c_uint = 1;
 pub const NS_STYLE_DISPLAY_MODE_BROWSER: ::std::os::raw::c_uint = 0;
 pub const NS_STYLE_DISPLAY_MODE_MINIMAL_UI: ::std::os::raw::c_uint = 1;
 pub const NS_STYLE_DISPLAY_MODE_STANDALONE: ::std::os::raw::c_uint = 2;
-pub const NS_STYLE_DISPLAY_MODE_FULLSCREEN: ::std::os::raw::c_uint = 3;
-pub const NS_STYLE_INHERIT_BIT: ::std::os::raw::c_uint = 1;
 pub const NS_STYLE_INHERIT_MASK: ::std::os::raw::c_uint = 16777215;
-pub const NS_STYLE_INHERITED_STRUCT_MASK: ::std::os::raw::c_uint = 1;
-pub const NS_STYLE_RESET_STRUCT_MASK: ::std::os::raw::c_uint = 1;
 pub const NS_STYLE_HAS_TEXT_DECORATION_LINES: ::std::os::raw::c_uint =
     16777216;
 pub const NS_STYLE_HAS_PSEUDO_ELEMENT_DATA: ::std::os::raw::c_uint = 33554432;
@@ -1409,6 +1419,7 @@ pub enum nsresult {
     NS_ERROR_DOM_MEDIA_MEDIASINK_ERR = 2154692619,
     NS_ERROR_DOM_MEDIA_DEMUXER_ERR = 2154692620,
     NS_ERROR_DOM_MEDIA_CDM_ERR = 2154692621,
+    NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER = 2154692622,
     NS_ERROR_DOM_MEDIA_CUBEB_INITIALIZATION_ERR = 2154692709,
     NS_ERROR_DOWNLOAD_COMPLETE = 2155347969,
     NS_ERROR_DOWNLOAD_NOT_PARTIAL = 2155347970,
@@ -5188,10 +5199,7 @@ extern "C" {
 }
 pub const PLDHashTable_kDefaultInitialLength: u32 = 4;
 pub const PLDHashTable_kHashBits: u32 = 32;
-extern "C" {
-    #[link_name = "_ZN12PLDHashTable12kGoldenRatioE"]
-    pub static PLDHashTable_kGoldenRatio: u32;
-}
+pub const PLDHashTable_kGoldenRatio: u32 = 2654435769;
 pub const PLDHashTable_kCollisionFlag: PLDHashNumber = 1;
 #[test]
 fn bindgen_test_layout_PLDHashTable() {
@@ -5506,7 +5514,7 @@ pub struct FragmentOrElement_nsDOMSlots {
     /**
      * Holds any SMIL override style declaration for this element.
      */
-    pub mSMILOverrideStyleDeclaration: RefPtr<Declaration>,
+    pub mSMILOverrideStyleDeclaration: RefPtr<DeclarationBlock>,
     /**
      * An object implementing nsIDOMMozNamedAttrMap for this content (attributes)
      * @see FragmentOrElement::GetAttributes
@@ -7368,6 +7376,14 @@ fn bindgen_test_layout_nsAttrName() {
     assert_eq!(::std::mem::align_of::<nsAttrName>() , 8usize);
 }
 #[repr(C)]
+#[derive(Debug, Copy)]
+pub struct DeclarationBlock {
+    pub _address: u8,
+}
+impl Clone for DeclarationBlock {
+    fn clone(&self) -> Self { *self }
+}
+#[repr(C)]
 #[derive(Debug)]
 pub struct URLValue {
     pub _base: URLValueData,
@@ -7514,14 +7530,6 @@ pub struct nsDOMStringMap {
     pub _address: u8,
 }
 impl Clone for nsDOMStringMap {
-    fn clone(&self) -> Self { *self }
-}
-#[repr(C)]
-#[derive(Debug, Copy)]
-pub struct Declaration {
-    pub _address: u8,
-}
-impl Clone for Declaration {
     fn clone(&self) -> Self { *self }
 }
 /**
@@ -8861,7 +8869,7 @@ pub enum nsCSSPropertyID {
     eCSSProperty_flex_grow = 106,
     eCSSProperty_flex_shrink = 107,
     eCSSProperty_flex_wrap = 108,
-    eCSSProperty_float = 109,
+    eCSSProperty_float_ = 109,
     eCSSProperty_float_edge = 110,
     eCSSProperty_flood_color = 111,
     eCSSProperty_flood_opacity = 112,
