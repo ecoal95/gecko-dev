@@ -1036,8 +1036,7 @@ PluginInstanceParent*
 PluginModuleChromeParent::GetManagingInstance(mozilla::ipc::IProtocol* aProtocol)
 {
     MOZ_ASSERT(aProtocol);
-    mozilla::ipc::MessageListener* listener =
-        static_cast<mozilla::ipc::MessageListener*>(aProtocol);
+    mozilla::ipc::IProtocol* listener = aProtocol;
     switch (listener->GetProtocolTypeId()) {
         case PPluginInstanceMsgStart:
             // In this case, aProtocol is the instance itself. Just cast it.
@@ -2731,6 +2730,17 @@ PluginModuleParent::NPP_NewInternal(NPMIMEType pluginType, NPP instance,
                values.AppendElement(opaqueAttributeValue);
            }
         }
+
+      // Update the flashvar bgcolor if it's not set, fixes a rendering problem with
+      // async plugin painting and transparent flash.
+      if (supportsAsyncRender) {
+        NS_NAMED_LITERAL_CSTRING(bgcolorAttributeName, "bgcolor");
+        NS_NAMED_LITERAL_CSTRING(bgcolorAttributeDefault, "#FFFFFF");
+        if (!names.Contains(bgcolorAttributeName)) {
+          names.AppendElement(bgcolorAttributeName);
+          values.AppendElement(bgcolorAttributeDefault);
+        }
+      }
 #endif
     }
 

@@ -79,7 +79,6 @@ var PlacesOrganizer = {
             break;
           default:
             throw new Error("Invalid container type found: " + container);
-            break;
         }
         PlacesUtils.asContainer(this._places.selectedNode).containerOpen = true;
       }
@@ -572,7 +571,6 @@ var PlacesOrganizer = {
      * state in a bookmark->folder->bookmark scenario.
      */
     var infoBox = document.getElementById("infoBox");
-    var infoBoxExpander = document.getElementById("infoBoxExpander");
     var infoBoxExpanderWrapper = document.getElementById("infoBoxExpanderWrapper");
     var additionalInfoBroadcaster = document.getElementById("additionalInfoBroadcaster");
 
@@ -645,23 +643,6 @@ var PlacesOrganizer = {
 
     if (selectedNode && !PlacesUtils.nodeIsSeparator(selectedNode)) {
       detailsDeck.selectedIndex = 1;
-      // Using the concrete itemId is arguably wrong.  The bookmarks API
-      // does allow setting properties for folder shortcuts as well, but since
-      // the UI does not distinct between the couple, we better just show
-      // the concrete item properties for shortcuts to root nodes.
-      let concreteId = PlacesUtils.getConcreteItemId(selectedNode);
-      var isRootItem = concreteId != -1 && PlacesUtils.isRootItem(concreteId);
-      var readOnly = isRootItem ||
-                     selectedNode.parent.itemId == PlacesUIUtils.leftPaneFolderId;
-      var useConcreteId = isRootItem ||
-                          PlacesUtils.nodeIsTagQuery(selectedNode);
-      var itemId = -1;
-      if (concreteId != -1 && useConcreteId)
-        itemId = concreteId;
-      else if (selectedNode.itemId != -1)
-        itemId = selectedNode.itemId;
-      else
-        itemId = PlacesUtils._uri(selectedNode.uri);
 
       gEditItemOverlay.initPanel({ node: selectedNode
                                  , hiddenRows: ["folderPicker"] });
@@ -974,7 +955,6 @@ var PlacesQueryBuilder = {
         break;
       default:
         throw "Invalid search scope";
-        break;
     }
 
     // Update the search box.  Re-search if there's an active search.
@@ -1062,9 +1042,6 @@ var ViewMenu = {
     var popup = event.target;
     var pivot = this._clean(popup, startID, endID);
 
-    // If no column is "sort-active", the "Unsorted" item needs to be checked,
-    // so track whether or not we find a column that is sort-active.
-    var isSorted = false;
     var content = document.getElementById("placeContent");
     var columns = content.columns;
     for (var i = 0; i < columns.count; ++i) {
@@ -1090,7 +1067,6 @@ var ViewMenu = {
         // This column is the sort key. Its item is checked.
         if (column.getAttribute("sortDirection") != "") {
           menuitem.setAttribute("checked", "true");
-          isSorted = true;
         }
       }
       else if (type == "checkbox") {
@@ -1370,7 +1346,7 @@ var ContentArea = {
     // Use ContentTree options as default.
     let viewOptions = ContentTree.viewOptions;
     if (this._specialViews.has(this.currentPlace)) {
-      let { view, options } = this._specialViews.get(this.currentPlace);
+      let { options } = this._specialViews.get(this.currentPlace);
       for (let option in options) {
         viewOptions[option] = options[option];
       }

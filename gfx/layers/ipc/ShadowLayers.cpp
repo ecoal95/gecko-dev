@@ -192,6 +192,21 @@ ShadowLayerForwarder::ShadowLayerForwarder(ClientLayerManager* aClientLayerManag
   mActiveResourceTracker = MakeUnique<ActiveResourceTracker>(1000, "CompositableForwarder");
 }
 
+template<typename T>
+struct ReleaseOnMainThreadTask : public Runnable
+{
+  UniquePtr<T> mObj;
+
+  explicit ReleaseOnMainThreadTask(UniquePtr<T>& aObj)
+    : mObj(Move(aObj))
+  {}
+
+  NS_IMETHOD Run() override {
+    mObj = nullptr;
+    return NS_OK;
+  }
+};
+
 ShadowLayerForwarder::~ShadowLayerForwarder()
 {
   MOZ_ASSERT(mTxn->Finished(), "unfinished transaction?");
@@ -199,6 +214,10 @@ ShadowLayerForwarder::~ShadowLayerForwarder()
   if (mShadowManager) {
     mShadowManager->SetForwarder(nullptr);
     mShadowManager->Destroy();
+  }
+  if (!NS_IsMainThread()) {
+    NS_DispatchToMainThread(
+      new ReleaseOnMainThreadTask<ActiveResourceTracker>(mActiveResourceTracker));
   }
 }
 
@@ -749,7 +768,14 @@ ShadowLayerForwarder::ConstructShadowFor(ShadowableLayer* aLayer)
   if (!IPCOpen()) {
     return nullptr;
   }
-  return mShadowManager->SendPLayerConstructor(new ShadowLayerChild(aLayer));
+
+  ShadowLayerChild* child = new ShadowLayerChild();
+  if (!mShadowManager->SendPLayerConstructor(child)) {
+    return nullptr;
+  }
+
+  child->SetShadowableLayer(aLayer);
+  return child;
 }
 
 #if !defined(MOZ_HAVE_PLATFORM_SPECIFIC_LAYER_BUFFERS)
@@ -853,6 +879,9 @@ GetAddressFromDescriptor(const SurfaceDescriptor& aDescriptor)
 already_AddRefed<gfx::DataSourceSurface>
 GetSurfaceForDescriptor(const SurfaceDescriptor& aDescriptor)
 {
+  if (aDescriptor.type() != SurfaceDescriptor::TSurfaceDescriptorBuffer) {
+    return nullptr;
+  }
   uint8_t* data = GetAddressFromDescriptor(aDescriptor);
   auto rgb = aDescriptor.get_SurfaceDescriptorBuffer().desc().get_RGBDescriptor();
   uint32_t stride = ImageDataSerializer::GetRGBStride(rgb);
@@ -869,6 +898,29 @@ GetDrawTargetForDescriptor(const SurfaceDescriptor& aDescriptor, gfx::BackendTyp
   return gfx::Factory::CreateDrawTargetForData(gfx::BackendType::CAIRO,
                                                data, rgb.size(),
                                                stride, rgb.format());
+}
+
+void
+DestroySurfaceDescriptor(IShmemAllocator* aAllocator, SurfaceDescriptor* aSurface)
+{
+  MOZ_ASSERT(aSurface);
+
+  SurfaceDescriptorBuffer& desc = aSurface->get_SurfaceDescriptorBuffer();
+  switch (desc.data().type()) {
+    case MemoryOrShmem::TShmem: {
+      aAllocator->DeallocShmem(desc.data().get_Shmem());
+      break;
+    }
+    case MemoryOrShmem::Tuintptr_t: {
+      uint8_t* ptr = (uint8_t*)desc.data().get_uintptr_t();
+      GfxMemoryImageReporter::WillFree(ptr);
+      delete [] ptr;
+      break;
+    }
+    default:
+      NS_RUNTIMEABORT("surface type not implemented!");
+  }
+  *aSurface = SurfaceDescriptor();
 }
 
 bool
@@ -942,22 +994,7 @@ ShadowLayerForwarder::DestroySurfaceDescriptor(SurfaceDescriptor* aSurface)
     return;
   }
 
-  SurfaceDescriptorBuffer& desc = aSurface->get_SurfaceDescriptorBuffer();
-  switch (desc.data().type()) {
-    case MemoryOrShmem::TShmem: {
-      GetTextureForwarder()->DeallocShmem(desc.data().get_Shmem());
-      break;
-    }
-    case MemoryOrShmem::Tuintptr_t: {
-      uint8_t* ptr = (uint8_t*)desc.data().get_uintptr_t();
-      GfxMemoryImageReporter::WillFree(ptr);
-      delete [] ptr;
-      break;
-    }
-    default:
-      NS_RUNTIMEABORT("surface type not implemented!");
-  }
-  *aSurface = SurfaceDescriptor();
+  ::mozilla::layers::DestroySurfaceDescriptor(GetTextureForwarder(), aSurface);
 }
 
 void

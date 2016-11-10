@@ -169,13 +169,15 @@ public:
   RecvInitRendering(
     Endpoint<PCompositorBridgeChild>&& aCompositor,
     Endpoint<PImageBridgeChild>&& aImageBridge,
-    Endpoint<PVRManagerChild>&& aVRBridge) override;
+    Endpoint<PVRManagerChild>&& aVRBridge,
+    Endpoint<PVideoDecoderManagerChild>&& aVideoManager) override;
 
   bool
   RecvReinitRendering(
     Endpoint<PCompositorBridgeChild>&& aCompositor,
     Endpoint<PImageBridgeChild>&& aImageBridge,
-    Endpoint<PVRManagerChild>&& aVRBridge) override;
+    Endpoint<PVRManagerChild>&& aVRBridge,
+    Endpoint<PVideoDecoderManagerChild>&& aVideoManager) override;
 
   PProcessHangMonitorChild*
   AllocPProcessHangMonitorChild(Transport* aTransport,
@@ -222,13 +224,6 @@ public:
 
   virtual bool
   DeallocPHeapSnapshotTempFileHelperChild(PHeapSnapshotTempFileHelperChild*) override;
-
-  PIccChild*
-  SendPIccConstructor(PIccChild* aActor, const uint32_t& aServiceId);
-
-  virtual PIccChild* AllocPIccChild(const uint32_t& aClientId) override;
-
-  virtual bool DeallocPIccChild(PIccChild* aActor) override;
 
   virtual PMemoryReportRequestChild*
   AllocPMemoryReportRequestChild(const uint32_t& aGeneration,
@@ -279,16 +274,6 @@ public:
   virtual bool RecvPTestShellConstructor(PTestShellChild*) override;
 
   jsipc::CPOWManager* GetCPOWManager() override;
-
-  PMobileConnectionChild*
-  SendPMobileConnectionConstructor(PMobileConnectionChild* aActor,
-                                   const uint32_t& aClientId);
-
-  virtual PMobileConnectionChild*
-  AllocPMobileConnectionChild(const uint32_t& aClientId) override;
-
-  virtual bool
-  DeallocPMobileConnectionChild(PMobileConnectionChild* aActor) override;
 
   virtual PNeckoChild* AllocPNeckoChild() override;
 
@@ -359,8 +344,6 @@ public:
 
   virtual bool
   RecvNotifyPresentationReceiverCleanUp(const nsString& aSessionId) override;
-
-  virtual bool RecvNotifyGMPsChanged() override;
 
   virtual bool RecvNotifyEmptyHTTPCache() override;
 

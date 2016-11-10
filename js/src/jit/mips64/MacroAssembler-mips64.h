@@ -982,19 +982,9 @@ class MacroAssemblerMIPS64Compat : public MacroAssemblerMIPS64
     // convert it to double. Else, branch to failure.
     void ensureDouble(const ValueOperand& source, FloatRegister dest, Label* failure);
 
-    template <typename T1, typename T2>
-    void cmpPtrSet(Assembler::Condition cond, T1 lhs, T2 rhs, Register dest)
-    {
-        ma_cmp_set(dest, lhs, rhs, cond);
-    }
     void cmpPtrSet(Assembler::Condition cond, Address lhs, ImmPtr rhs, Register dest);
     void cmpPtrSet(Assembler::Condition cond, Register lhs, Address rhs, Register dest);
 
-    template <typename T1, typename T2>
-    void cmp32Set(Assembler::Condition cond, T1 lhs, T2 rhs, Register dest)
-    {
-        ma_cmp_set(dest, lhs, rhs, cond);
-    }
     void cmp32Set(Assembler::Condition cond, Register lhs, Address rhs, Register dest);
 
     void cmp64Set(Assembler::Condition cond, Register lhs, Imm32 rhs, Register dest)
@@ -1030,12 +1020,12 @@ class MacroAssemblerMIPS64Compat : public MacroAssemblerMIPS64
     }
 
     void loadWasmGlobalPtr(uint32_t globalDataOffset, Register dest) {
-        loadPtr(Address(GlobalReg, globalDataOffset - AsmJSGlobalRegBias), dest);
+        loadPtr(Address(GlobalReg, globalDataOffset - WasmGlobalRegBias), dest);
     }
     void loadWasmPinnedRegsFromTls() {
         loadPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, memoryBase)), HeapReg);
         loadPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, globalData)), GlobalReg);
-        ma_daddu(GlobalReg, Imm32(AsmJSGlobalRegBias));
+        ma_daddu(GlobalReg, Imm32(WasmGlobalRegBias));
     }
 
     // Instrumentation for entering and leaving the profiler.

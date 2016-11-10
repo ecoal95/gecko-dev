@@ -109,7 +109,7 @@ task_description_schema = Schema({
         # indexed task iff it has a higher rank.  If unspecified,
         # 'by-tier' behavior will be used.
         'rank': Any(
-            # Rank is equal the timestamp of the pushdate for tier-1
+            # Rank is equal the timestamp of the build_date for tier-1
             # tasks, and zero for non-tier-1.  This sorts tier-{2,3}
             # builds below tier-1 in the index.
             'by-tier',
@@ -118,10 +118,10 @@ task_description_schema = Schema({
             # sure a task is last in the index).
             int,
 
-            # Rank is equal to the timestamp of the pushdate.  This
+            # Rank is equal to the timestamp of the build_date.  This
             # option can be used to override the 'by-tier' behavior
             # for non-tier-1 tasks.
-            'pushdate',
+            'build_date',
         ),
     },
 
@@ -250,6 +250,30 @@ task_description_schema = Schema({
             'product': basestring,
             Extra: basestring,  # additional properties are allowed
         },
+    }, {
+        'implementation': 'macosx-engine',
+
+        # A link for an executable to download
+        Optional('link'): basestring,
+
+        # the command to run
+        Required('command'): [taskref_or_string],
+
+        # environment variables
+        Optional('env'): {basestring: taskref_or_string},
+
+        # artifacts to extract from the task image after completion
+        Optional('artifacts'): [{
+            # type of artifact -- simple file, or recursive directory
+            Required('type'): Any('file', 'directory'),
+
+            # task image path from which to read artifact
+            Required('path'): basestring,
+
+            # name of the produced artifact (root of the names for
+            # type=directory)
+            Required('name'): basestring,
+        }],
     }),
 
     # The "when" section contains descriptions of the circumstances
@@ -293,7 +317,7 @@ BUILDBOT_ROUTE_TEMPLATES = [
 
 V2_ROUTE_TEMPLATES = [
     "index.gecko.v2.{project}.latest.{product}.{job-name-gecko-v2}",
-    "index.gecko.v2.{project}.pushdate.{pushdate_long}.{product}.{job-name-gecko-v2}",
+    "index.gecko.v2.{project}.pushdate.{build_date_long}.{product}.{job-name-gecko-v2}",
     "index.gecko.v2.{project}.revision.{head_rev}.{product}.{job-name-gecko-v2}",
 ]
 
@@ -430,6 +454,23 @@ def build_generic_worker_payload(config, task, task_def):
         raise Exception("retry-exit-status not supported in generic-worker")
 
 
+@payload_builder('macosx-engine')
+def build_macosx_engine_payload(config, task, task_def):
+    worker = task['worker']
+    artifacts = map(lambda artifact: {
+        'name': artifact['name'],
+        'path': artifact['path'],
+        'type': artifact['type'],
+        'expires': task_def['expires'],
+    }, worker['artifacts'])
+
+    task_def['payload'] = {
+        'link': worker['link'],
+        'command': worker['command'],
+        'env': worker['env'],
+        'artifacts': artifacts,
+    }
+
 transforms = TransformSequence()
 
 
@@ -466,9 +507,8 @@ def add_index_routes(config, tasks):
         subs = config.params.copy()
         for n in job_name:
             subs['job-name-' + n] = job_name[n]
-        subs['pushdate_long'] = time.strftime(
-            "%Y.%m.%d.%Y%m%d%H%M%S",
-            time.gmtime(config.params['pushdate']))
+        subs['build_date_long'] = time.strftime("%Y.%m.%d.%Y%m%d%H%M%S",
+                                                time.gmtime(config.params['build_date']))
         subs['product'] = index['product']
 
         if 'buildbot' in job_name:
@@ -486,9 +526,9 @@ def add_index_routes(config, tasks):
             # rank is zero for non-tier-1 tasks and based on pushid for others;
             # this sorts tier-{2,3} builds below tier-1 in the index
             tier = task.get('treeherder', {}).get('tier', 3)
-            extra_index['rank'] = 0 if tier > 1 else int(config.params['pushdate'])
-        elif rank == 'pushdate':
-            extra_index['rank'] = int(config.params['pushdate'])
+            extra_index['rank'] = 0 if tier > 1 else int(config.params['build_date'])
+        elif rank == 'build_date':
+            extra_index['rank'] = int(config.params['build_date'])
         else:
             extra_index['rank'] = rank
 
@@ -598,7 +638,7 @@ def check_v2_routes():
             ('{index}', 'index'),
             ('{build_product}', '{product}'),
             ('{build_name}-{build_type}', '{job-name-gecko-v2}'),
-            ('{year}.{month}.{day}.{pushdate}', '{pushdate_long}')]:
+            ('{year}.{month}.{day}.{pushdate}', '{build_date_long}')]:
         routes = [r.replace(mh, tg) for r in routes]
 
     if sorted(routes) != sorted(V2_ROUTE_TEMPLATES):

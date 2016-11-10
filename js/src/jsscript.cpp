@@ -3084,7 +3084,7 @@ js::DescribeScriptedCallerForCompilation(JSContext* cx, MutableHandleScript mayb
     *mutedErrors = iter.mutedErrors();
 
     // These values are only used for introducer fields which are debugging
-    // information and can be safely left null for asm.js frames.
+    // information and can be safely left null for wasm frames.
     if (iter.hasScript()) {
         maybeScript.set(iter.script());
         *pcOffset = iter.pc() - maybeScript->code();

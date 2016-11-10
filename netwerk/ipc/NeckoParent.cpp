@@ -191,11 +191,6 @@ NeckoParent::GetValidatedAppInfo(const SerializedLoadContext& aSerialized,
       continue;
     }
 
-    if (!aSerialized.mOriginAttributes.mSignedPkg.IsEmpty() &&
-        aSerialized.mOriginAttributes.mSignedPkg != tabContext.OriginAttributesRef().mSignedPkg) {
-      debugString.Append("s,");
-      continue;
-    }
     if (aSerialized.mOriginAttributes.mUserContextId != tabContext.OriginAttributesRef().mUserContextId) {
       debugString.Append("(");
       debugString.AppendInt(aSerialized.mOriginAttributes.mUserContextId);
@@ -207,7 +202,6 @@ NeckoParent::GetValidatedAppInfo(const SerializedLoadContext& aSerialized,
     aAttrs = DocShellOriginAttributes();
     aAttrs.mAppId = appId;
     aAttrs.mInIsolatedMozBrowser = inBrowserElement;
-    aAttrs.mSignedPkg = aSerialized.mOriginAttributes.mSignedPkg;
     aAttrs.mUserContextId = aSerialized.mOriginAttributes.mUserContextId;
     aAttrs.mPrivateBrowsingId = aSerialized.mOriginAttributes.mPrivateBrowsingId;
     aAttrs.mFirstPartyDomain = aSerialized.mOriginAttributes.mFirstPartyDomain;
@@ -679,15 +673,18 @@ NeckoParent::DeallocPDNSRequestParent(PDNSRequestParent* aParent)
 }
 
 bool
-NeckoParent::RecvSpeculativeConnect(const URIParams& aURI, const bool& aAnonymous)
+NeckoParent::RecvSpeculativeConnect(const URIParams& aURI,
+                                    const Principal& aPrincipal,
+                                    const bool& aAnonymous)
 {
   nsCOMPtr<nsISpeculativeConnect> speculator(gIOService);
   nsCOMPtr<nsIURI> uri = DeserializeURI(aURI);
+  nsCOMPtr<nsIPrincipal> principal(aPrincipal);
   if (uri && speculator) {
     if (aAnonymous) {
-      speculator->SpeculativeAnonymousConnect(uri, nullptr);
+      speculator->SpeculativeAnonymousConnect2(uri, principal, nullptr);
     } else {
-      speculator->SpeculativeConnect(uri, nullptr);
+      speculator->SpeculativeConnect2(uri, principal, nullptr);
     }
 
   }
@@ -746,18 +743,6 @@ NeckoParent::DeallocPTransportProviderParent(PTransportProviderParent* aActor)
   RefPtr<TransportProviderParent> provider =
     dont_AddRef(static_cast<TransportProviderParent*>(aActor));
   return true;
-}
-
-mozilla::ipc::IProtocol*
-NeckoParent::CloneProtocol(Channel* aChannel,
-                           mozilla::ipc::ProtocolCloneContext* aCtx)
-{
-  ContentParent* contentParent = aCtx->GetContentParent();
-  nsAutoPtr<PNeckoParent> actor(contentParent->AllocPNeckoParent());
-  if (!actor || !contentParent->RecvPNeckoConstructor(actor)) {
-    return nullptr;
-  }
-  return actor.forget();
 }
 
 namespace {

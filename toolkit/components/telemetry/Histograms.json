@@ -3772,6 +3772,15 @@
     "n_buckets": 10,
     "description": "Time spent per dbservice lookup (ms)"
   },
+  "URLCLASSIFIER_SHUTDOWN_TIME": {
+    "alert_emails": ["safebrowsing-telemetry@mozilla.org"],
+    "expires_in_version": "58",
+    "kind": "exponential",
+    "high": 60000,
+    "n_buckets": 50,
+    "bug_numbers": [1315140],
+    "description": "Time spent per dbservice shutdown (ms)"
+  },
   "URLCLASSIFIER_CL_CHECK_TIME": {
     "alert_emails": ["safebrowsing-telemetry@mozilla.org"],
     "expires_in_version": "never",
@@ -3884,6 +3893,14 @@
     "n_values": 10,
     "bug_numbers": [1305801],
     "description": "An error was encountered while parsing a partial update returned by a Safe Browsing V4 server (0 = addition of an already existing prefix, 1 = parser got into an infinite loop, 2 = removal index out of bounds, 3 = checksum mismatch, 4 = missing checksum)"
+  },
+  "URLCLASSIFIER_PREFIX_MATCH": {
+    "alert_emails": ["safebrowsing-telemetry@mozilla.org"],
+    "expires_in_version": "58",
+    "kind": "enumerated",
+    "n_values": 4,
+    "bug_numbers": [1298257],
+    "description": "Classifier prefix matching result (0 = no match, 1 = match only V2, 2 = match only V4, 3 = match both V2 and V4)"
   },
   "CSP_DOCUMENTS_COUNT": {
     "alert_emails": ["seceng@mozilla.com"],
@@ -7880,6 +7897,14 @@
     "n_values": 10,
     "releaseChannelCollection": "opt-out",
     "description": "How often are secure cookies set from non-secure origins, and vice-versa? 0=nonsecure/http, 1=nonsecure/https, 2=secure/http, 3=secure/https"
+  },
+  "COOKIE_LEAVE_SECURE_ALONE": {
+    "alert_emails": ["seceng@mozilla.org"],
+    "expires_in_version": "57",
+    "kind": "enumerated",
+    "n_values": 10,
+    "releaseChannelCollection": "opt-out",
+    "description": "Measuring the effects of draft-ietf-httpbis-cookie-alone blocking. 0=blocked http setting secure cookie; 1=blocked http downgrading secure cookie; 2=blocked evicting secure cookie; 3=evicting newer insecure cookie; 4=evicting the oldest insecure cookie; 5=evicting the preferred cookie; 6=evicting the secure blocked"
   },
   "NTLM_MODULE_USED_2": {
     "expires_in_version": "never",

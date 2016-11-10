@@ -9,7 +9,9 @@ from .marionette_test import (
     expectedFailure,
     MarionetteJSTestCase,
     MarionetteTestCase,
+    run_if_e10s,
     skip,
+    skip_if_chrome,
     skip_if_desktop,
     skip_if_mobile,
     SkipTest,
@@ -32,4 +34,5 @@ from .runner import (
     TestManifest,
     TestResult,
     TestResultCollection,
+    WindowManagerMixin,
 )

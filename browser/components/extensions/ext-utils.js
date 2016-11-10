@@ -598,6 +598,10 @@ ExtensionTabManager.prototype = {
     }
   },
 
+  revokeActiveTabPermission(tab = TabManager.activeTab) {
+    this.hasTabPermissionFor.delete(tab);
+  },
+
   // Returns true if the extension has the "activeTab" permission for this tab.
   // This is somewhat more permissive than the generic "tabs" permission, as
   // checked by |hasTabPermission|, in that it also allows programmatic script
@@ -657,6 +661,23 @@ ExtensionTabManager.prototype = {
         result.favIconUrl = icon;
       }
     }
+
+    return result;
+  },
+
+  // Converts tabs returned from SessionStore.getClosedTabData and
+  // SessionStore.getClosedWindowData into API tab objects
+  convertFromSessionStoreClosedData(tab, window) {
+    let result = {
+      sessionId: String(tab.closedId),
+      index: tab.pos ? tab.pos : 0,
+      windowId: WindowManager.getId(window),
+      selected: false,
+      highlighted: false,
+      active: false,
+      pinned: false,
+      incognito: Boolean(tab.state && tab.state.isPrivate),
+    };
 
     return result;
   },
@@ -908,6 +929,19 @@ global.WindowManager = {
     return null;
   },
 
+  getState(window) {
+    const STATES = {
+      [window.STATE_MAXIMIZED]: "maximized",
+      [window.STATE_MINIMIZED]: "minimized",
+      [window.STATE_NORMAL]: "normal",
+    };
+    let state = STATES[window.windowState];
+    if (window.fullScreen) {
+      state = "fullscreen";
+    }
+    return state;
+  },
+
   setState(window, state) {
     if (state != "fullscreen" && window.fullScreen) {
       window.fullScreen = false;
@@ -948,16 +982,6 @@ global.WindowManager = {
   },
 
   convert(extension, window, getInfo) {
-    const STATES = {
-      [window.STATE_MAXIMIZED]: "maximized",
-      [window.STATE_MINIMIZED]: "minimized",
-      [window.STATE_NORMAL]: "normal",
-    };
-    let state = STATES[window.windowState];
-    if (window.fullScreen) {
-      state = "fullscreen";
-    }
-
     let xulWindow = window.QueryInterface(Ci.nsIInterfaceRequestor)
                           .getInterface(Ci.nsIDocShell)
                           .treeOwner.QueryInterface(Ci.nsIInterfaceRequestor)
@@ -972,12 +996,34 @@ global.WindowManager = {
       height: window.outerHeight,
       incognito: PrivateBrowsingUtils.isWindowPrivate(window),
       type: this.windowType(window),
-      state,
+      state: this.getState(window),
       alwaysOnTop: xulWindow.zLevel >= Ci.nsIXULWindow.raisedZ,
     };
 
     if (getInfo && getInfo.populate) {
       result.tabs = TabManager.for(extension).getTabs(window);
+    }
+
+    return result;
+  },
+
+  // Converts windows returned from SessionStore.getClosedWindowData
+  // into API window objects
+  convertFromSessionStoreClosedData(window, extension) {
+    let result = {
+      sessionId: String(window.closedId),
+      focused: false,
+      incognito: false,
+      type: "normal", // this is always "normal" for a closed window
+      state: this.getState(window),
+      alwaysOnTop: false,
+    };
+
+    if (window.tabs.length) {
+      result.tabs = [];
+      window.tabs.forEach((tab, index) => {
+        result.tabs.push(TabManager.for(extension).convertFromSessionStoreClosedData(tab, window, index));
+      });
     }
 
     return result;

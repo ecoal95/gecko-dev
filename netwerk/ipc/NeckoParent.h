@@ -155,7 +155,9 @@ protected:
                                           const uint32_t& flags,
                                           const nsCString& aNetworkInterface) override;
   virtual bool DeallocPDNSRequestParent(PDNSRequestParent*) override;
-  virtual bool RecvSpeculativeConnect(const URIParams& aURI, const bool& aAnonymous) override;
+  virtual bool RecvSpeculativeConnect(const URIParams& aURI,
+                                      const Principal& aPrincipal,
+                                      const bool& aAnonymous) override;
   virtual bool RecvHTMLDNSPrefetch(const nsString& hostname,
                                    const uint16_t& flags) override;
   virtual bool RecvCancelHTMLDNSPrefetch(const nsString& hostname,
@@ -164,10 +166,6 @@ protected:
   virtual PWebSocketEventListenerParent*
     AllocPWebSocketEventListenerParent(const uint64_t& aInnerWindowID) override;
   virtual bool DeallocPWebSocketEventListenerParent(PWebSocketEventListenerParent*) override;
-
-  virtual mozilla::ipc::IProtocol*
-  CloneProtocol(Channel* aChannel,
-                mozilla::ipc::ProtocolCloneContext* aCtx) override;
 
   virtual PDataChannelParent*
     AllocPDataChannelParent(const uint32_t& channelId) override;

@@ -21,6 +21,7 @@
 #include "jit/Ion.h"
 #include "jit/MIR.h"
 #include "jit/MIRGenerator.h"
+#include "jit/MIRGraph.h"
 
 #include "threading/LockGuard.h"
 
@@ -110,7 +111,7 @@ FilterContainsLocation(JSScript* function)
     if (!filter || !filter[0])
         return true;
 
-    // Disable asm.js output when filter is set.
+    // Disable wasm output when filter is set.
     if (!function)
         return false;
 
@@ -302,6 +303,13 @@ GraphSpewer::spewPass(const char* pass)
     jsonSpewer_.endPass();
 
     ionspewer.spewPass(this);
+
+    // As this function is used for debugging, we ignore any of the previous
+    // failures and ensure there is enough ballast space, such that we do not
+    // exhaust the ballast space before running the next phase.
+    AutoEnterOOMUnsafeRegion oomUnsafe;
+    if (!graph_->alloc().ensureBallast())
+        oomUnsafe.crash("Could not ensure enough ballast space after spewing graph information.");
 }
 
 void

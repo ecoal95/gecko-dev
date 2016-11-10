@@ -87,7 +87,7 @@ public:
   void FireDOMVRDisplayDisconnectEvent();
   void FireDOMVRDisplayPresentChangeEvent();
 
-  virtual void FatalError(const char* const aName, const char* const aMsg) const override;
+  virtual void HandleFatalError(const char* aName, const char* aMsg) const override;
 
 protected:
   explicit VRManagerChild();
@@ -130,7 +130,7 @@ protected:
                                 ipc::SharedMemory::SharedMemoryType aType,
                                 ipc::Shmem* aShmem) override;
 
-  virtual void DeallocShmem(ipc::Shmem& aShmem) override;
+  virtual bool DeallocShmem(ipc::Shmem& aShmem) override;
 
   virtual bool IsSameProcess() const override
   {

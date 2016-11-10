@@ -984,6 +984,8 @@ public:
     return mPageUnloadingEventTimeStamp;
   }
 
+  virtual void NotifyLayerManagerRecreated() = 0;
+
 protected:
   virtual Element *GetRootElementInternal() const = 0;
 
@@ -2839,6 +2841,8 @@ public:
   }
 
   bool HasScriptsBlockedBySandbox();
+
+  bool InlineScriptAllowedByCSP();
 
   void ReportHasScrollLinkedEffect();
   bool HasScrollLinkedEffect() const

@@ -60,7 +60,7 @@ struct RuntimeStats;
 } // namespace JS
 
 namespace mozilla {
-class TaskQueue;
+class ThrottledEventQueue;
 namespace dom {
 class Function;
 class MessagePort;
@@ -168,7 +168,6 @@ protected:
 
   SharedMutex mMutex;
   mozilla::CondVar mCondVar;
-  mozilla::CondVar mMemoryReportCondVar;
 
   // Protected by mMutex.
   RefPtr<EventTarget> mEventTarget;
@@ -943,7 +942,7 @@ class WorkerPrivate : public WorkerPrivateParent<WorkerPrivate>
   nsTObserverArray<WorkerHolder*> mHolders;
   nsTArray<nsAutoPtr<TimeoutInfo>> mTimeouts;
   uint32_t mDebuggerEventLoopLevel;
-  RefPtr<TaskQueue> mMainThreadTaskQueue;
+  RefPtr<ThrottledEventQueue> mMainThreadThrottledEventQueue;
   nsCOMPtr<nsIEventTarget> mMainThreadEventTarget;
 
   struct SyncLoopInfo
@@ -984,8 +983,6 @@ class WorkerPrivate : public WorkerPrivateParent<WorkerPrivate>
   bool mTimerRunning;
   bool mRunningExpiredTimeouts;
   bool mPendingEventQueueClearing;
-  bool mMemoryReporterRunning;
-  bool mBlockedForMemoryReporter;
   bool mCancelAllPendingRunnables;
   bool mPeriodicGCTimerRunning;
   bool mIdleGCTimerRunning;
@@ -1208,7 +1205,7 @@ public:
   ScheduleDeletion(WorkerRanOrNot aRanOrNot);
 
   bool
-  BlockAndCollectRuntimeStats(JS::RuntimeStats* aRtStats, bool aAnonymize);
+  CollectRuntimeStats(JS::RuntimeStats* aRtStats, bool aAnonymize);
 
 #ifdef JS_GC_ZEAL
   void
@@ -1372,7 +1369,7 @@ public:
 
   // Get the event target to use when dispatching to the main thread
   // from this Worker thread.  This may be the main thread itself or
-  // a TaskQueue throttling runnables to the main thread.
+  // a ThrottledEventQueue to the main thread.
   nsIEventTarget*
   MainThreadEventTarget();
 

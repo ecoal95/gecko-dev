@@ -919,7 +919,7 @@ js::FindBody(JSContext* cx, HandleFunction fun, HandleLinearString src, size_t* 
     CompileOptions options(cx);
     options.setFileAndLine("internal-findBody", 0);
 
-    // For asm.js modules, there's no script.
+    // For asm.js/wasm modules, there's no script.
     if (fun->hasScript())
         options.setVersion(fun->nonLazyScript()->getVersion());
 
@@ -930,7 +930,7 @@ js::FindBody(JSContext* cx, HandleFunction fun, HandleLinearString src, size_t* 
         return false;
 
     const mozilla::Range<const char16_t> srcChars = stableChars.twoByteRange();
-    TokenStream ts(cx, options, srcChars.start().get(), srcChars.length(), nullptr);
+    TokenStream ts(cx, options, srcChars.begin().get(), srcChars.length(), nullptr);
     int nest = 0;
     bool onward = true;
     // Skip arguments list.
@@ -975,7 +975,7 @@ js::FindBody(JSContext* cx, HandleFunction fun, HandleLinearString src, size_t* 
         for (; unicode::IsSpaceOrBOM2(end[-1]); end--)
             ;
     }
-    *bodyEnd = end - srcChars.start();
+    *bodyEnd = end - srcChars.begin();
     MOZ_ASSERT(*bodyStart <= *bodyEnd);
     return true;
 }
@@ -991,7 +991,7 @@ js::FunctionToString(JSContext* cx, HandleFunction fun, bool lambdaParen)
     if (IsAsmJSFunction(fun))
         return AsmJSFunctionToString(cx, fun);
 
-    if (IsWrappedAsyncFunction(cx, fun)) {
+    if (IsWrappedAsyncFunction(fun)) {
         RootedFunction unwrapped(cx, GetUnwrappedAsyncFunction(fun));
         return FunctionToString(cx, unwrapped, lambdaParen);
     }
@@ -1900,7 +1900,7 @@ FunctionConstructor(JSContext* cx, unsigned argc, Value* vp, GeneratorKind gener
                                               ? SourceBufferHolder::GiveOwnership
                                               : SourceBufferHolder::NoOwnership;
     bool ok;
-    SourceBufferHolder srcBuf(chars.start().get(), chars.length(), ownership);
+    SourceBufferHolder srcBuf(chars.begin().get(), chars.length(), ownership);
     if (isAsync)
         ok = frontend::CompileAsyncFunctionBody(cx, &fun, options, formals, srcBuf);
     else if (isStarGenerator)
@@ -1930,10 +1930,13 @@ js::AsyncFunctionConstructor(JSContext* cx, unsigned argc, Value* vp)
     if (!FunctionConstructor(cx, argc, vp, StarGenerator, AsyncFunction))
         return false;
 
-    FixedInvokeArgs<1> args2(cx);
-    args2[0].set(args.rval());
-    return CallSelfHostedFunction(cx, cx->names().AsyncFunction_wrap,
-                                  NullHandleValue, args2, args.rval());
+    RootedFunction unwrapped(cx, &args.rval().toObject().as<JSFunction>());
+    RootedObject wrapped(cx, WrapAsyncFunction(cx, unwrapped));
+    if (!wrapped)
+        return false;
+
+    args.rval().setObject(*wrapped);
+    return true;
 }
 
 bool

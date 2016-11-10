@@ -22,11 +22,15 @@ if platform.architecture()[0] == "64bit":
     MINIDUMP_STACKWALK_PATH = "linux64-minidump_stackwalk"
     VALGRIND_SUPP_ARCH = os.path.join(VALGRIND_SUPP_DIR,
                                       "x86_64-redhat-linux-gnu.sup")
+    NODEJS_PATH = "node-linux-x64/bin/node"
+    NODEJS_TOOLTOOL_MANIFEST_PATH = "config/tooltool-manifests/linux64/nodejs.manifest"
 else:
     TOOLTOOL_MANIFEST_PATH = "config/tooltool-manifests/linux32/releng.manifest"
     MINIDUMP_STACKWALK_PATH = "linux32-minidump_stackwalk"
     VALGRIND_SUPP_ARCH = os.path.join(VALGRIND_SUPP_DIR,
                                       "i386-redhat-linux-gnu.sup")
+    NODEJS_PATH = "node-linux-x86/bin/node"
+    NODEJS_TOOLTOOL_MANIFEST_PATH = "config/tooltool-manifests/linux32/nodejs.manifest"
 
 #####
 config = {
@@ -194,6 +198,7 @@ config = {
         "mochitest-gl": ["--subsuite=webgl"],
         "mochitest-devtools-chrome": ["--flavor=browser", "--subsuite=devtools"],
         "mochitest-devtools-chrome-chunked": ["--flavor=browser", "--subsuite=devtools", "--chunk-by-runtime"],
+        "mochitest-devtools-chrome-coverage": ["--flavor=browser", "--subsuite=devtools", "--chunk-by-runtime", "--timeout=1200"],
         "jetpack-package": ["--flavor=jetpack-package"],
         "jetpack-package-clipboard": ["--flavor=jetpack-package", "--subsuite=clipboard"],
         "jetpack-addon": ["--flavor=jetpack-addon"],
@@ -201,10 +206,6 @@ config = {
     },
     # local reftest suites
     "all_reftest_suites": {
-        "reftest": {
-            "options": ["--suite=reftest"],
-            "tests": ["tests/reftest/tests/layout/reftests/reftest.list"]
-        },
         "reftest-stylo": {
             "options": ["--suite=reftest",
                         "--disable-e10s"],
@@ -219,33 +220,14 @@ config = {
                        "--suite=jstestbrowser"],
             "tests": ["tests/jsreftest/tests/jstests.list"]
         },
-        "reftest-ipc": {
-            "env": {
-                "MOZ_OMTC_ENABLED": "1",
-                "MOZ_DISABLE_CONTEXT_SHARING_GLX": "1"
-            },
-            "options": ["--suite=reftest",
-                        "--setpref=browser.tabs.remote=true",
-                        "--setpref=browser.tabs.remote.autostart=true",
-                        "--setpref=extensions.e10sBlocksEnabling=false",
-                        "--setpref=layers.async-pan-zoom.enabled=true"],
-            "tests": ["tests/reftest/tests/layout/reftests/reftest-sanity/reftest.list"]
+        "reftest": {
+            "options": ["--suite=reftest"],
+            "tests": ["tests/reftest/tests/layout/reftests/reftest.list"]
         },
         "reftest-no-accel": {
             "options": ["--suite=reftest",
                         "--setpref=layers.acceleration.force-enabled=disabled"],
             "tests": ["tests/reftest/tests/layout/reftests/reftest.list"]},
-        "crashtest-ipc": {
-            "env": {
-                "MOZ_OMTC_ENABLED": "1",
-                "MOZ_DISABLE_CONTEXT_SHARING_GLX": "1"
-            },
-            "options": ["--suite=crashtest",
-                        "--setpref=browser.tabs.remote=true",
-                        "--setpref=browser.tabs.remote.autostart=true",
-                        "--setpref=extensions.e10sBlocksEnabling=false",
-                        "--setpref=layers.async-pan-zoom.enabled=true"],
-            "tests": ["tests/reftest/tests/testing/crashtest/crashtests.list"]
         },
     },
     "all_xpcshell_suites": {
@@ -323,4 +305,7 @@ config = {
     "minidump_stackwalk_path": MINIDUMP_STACKWALK_PATH,
     "minidump_tooltool_manifest_path": TOOLTOOL_MANIFEST_PATH,
     "tooltool_cache": "/builds/tooltool_cache",
+    "download_nodejs": True,
+    "nodejs_path": NODEJS_PATH,
+    "nodejs_tooltool_manifest_path": NODEJS_TOOLTOOL_MANIFEST_PATH,
 }

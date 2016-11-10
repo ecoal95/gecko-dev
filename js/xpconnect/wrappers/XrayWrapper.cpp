@@ -431,10 +431,10 @@ TryResolvePropertyFromSpecs(JSContext* cx, HandleId id, HandleObject holder,
             }
             desc.setAttributes(flags);
         } else {
-            RootedString atom(cx, JS_AtomizeString(cx, psMatch->string.value));
-            if (!atom)
+            RootedValue v(cx);
+            if (!psMatch->getValue(cx, &v))
                 return false;
-            desc.value().setString(atom);
+            desc.value().set(v);
             desc.setAttributes(flags & ~JSPROP_INTERNAL_USE_BIT);
         }
 
@@ -1691,6 +1691,14 @@ DOMXrayTraits::resolveOwnProperty(JSContext* cx, const Wrapper& jsWrapper, Handl
 }
 
 bool
+DOMXrayTraits::delete_(JSContext* cx, JS::HandleObject wrapper,
+                       JS::HandleId id, JS::ObjectOpResult& result)
+{
+    RootedObject target(cx, getTargetObject(wrapper));
+    return XrayDeleteNamedProperty(cx, wrapper, target, id, result);
+}
+
+bool
 DOMXrayTraits::defineProperty(JSContext* cx, HandleObject wrapper, HandleId id,
                               Handle<PropertyDescriptor> desc,
                               Handle<PropertyDescriptor> existingDesc,
@@ -2183,7 +2191,13 @@ XrayWrapper<Base, Traits>::delete_(JSContext* cx, HandleObject wrapper,
 
     if (expando) {
         JSAutoCompartment ac(cx, expando);
-        return JS_DeletePropertyById(cx, expando, id, result);
+        bool hasProp;
+        if (!JS_HasPropertyById(cx, expando, id, &hasProp)) {
+            return false;
+        }
+        if (hasProp) {
+            return JS_DeletePropertyById(cx, expando, id, result);
+        }
     }
 
     return Traits::singleton.delete_(cx, wrapper, id, result);

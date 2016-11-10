@@ -42,8 +42,6 @@
 #include "jsweakmap.h"
 #include "jswrapper.h"
 
-#include "asmjs/AsmJS.h"
-#include "asmjs/WasmModule.h"
 #include "builtin/AtomicsObject.h"
 #include "builtin/Eval.h"
 #include "builtin/Intl.h"
@@ -90,6 +88,8 @@
 #include "vm/TypedArrayCommon.h"
 #include "vm/WrapperObject.h"
 #include "vm/Xdr.h"
+#include "wasm/AsmJS.h"
+#include "wasm/WasmModule.h"
 
 #include "jsatominlines.h"
 #include "jsfuninlines.h"
@@ -3087,6 +3087,24 @@ JS_DefineConstIntegers(JSContext* cx, HandleObject obj, const JSConstIntegerSpec
     return DefineConstScalar(cx, obj, cis);
 }
 
+bool
+JSPropertySpec::getValue(JSContext* cx, MutableHandleValue vp) const
+{
+    MOZ_ASSERT(!isAccessor());
+
+    if (value.type == JSVAL_TYPE_STRING) {
+        RootedAtom atom(cx, Atomize(cx, value.string, strlen(value.string)));
+        if (!atom)
+            return false;
+        vp.setString(atom);
+    } else {
+        MOZ_ASSERT(value.type == JSVAL_TYPE_INT32);
+        vp.setInt32(value.int32);
+    }
+
+    return true;
+}
+
 static JS::SymbolCode
 PropertySpecNameToSymbolCode(const char* name)
 {
@@ -3149,11 +3167,10 @@ JS_DefineProperties(JSContext* cx, HandleObject obj, const JSPropertySpec* ps)
                 }
             }
         } else {
-            RootedAtom atom(cx, Atomize(cx, ps->string.value, strlen(ps->string.value)));
-            if (!atom)
+            RootedValue v(cx);
+            if (!ps->getValue(cx, &v))
                 return false;
 
-            RootedValue v(cx, StringValue(atom));
             if (!DefinePropertyById(cx, obj, id, v, NativeOpWrapper(nullptr),
                                     NativeOpWrapper(nullptr), ps->flags & ~JSPROP_INTERNAL_USE_BIT, 0))
             {
@@ -3876,7 +3893,7 @@ JS::CompileOptions::CompileOptions(JSContext* cx, JSVersion version)
     werrorOption = cx->options().werror();
     if (!cx->options().asmJS())
         asmJSOption = AsmJSOption::Disabled;
-    else if (cx->compartment()->debuggerObservesAsmJS())
+    else if (cx->compartment()->debuggerObservesWasm())
         asmJSOption = AsmJSOption::DisabledByDebugger;
     else
         asmJSOption = AsmJSOption::Enabled;
@@ -5136,7 +5153,7 @@ JS_CopyStringChars(JSContext* cx, mozilla::Range<char16_t> dest, JSString* str)
         return false;
 
     MOZ_ASSERT(linear->length() <= dest.length());
-    CopyChars(dest.start().get(), *linear);
+    CopyChars(dest.begin().get(), *linear);
     return true;
 }
 
@@ -6224,6 +6241,15 @@ JS_SetGlobalJitCompilerOption(JSContext* cx, JSJitCompilerOption opt, uint32_t v
             JitSpew(js::jit::JitSpew_IonScripts, "IonBuilder: Disable non-IC optimizations.");
         }
         break;
+      case JSJITCOMPILER_ION_CHECK_RANGE_ANALYSIS:
+        if (value == 0) {
+            jit::JitOptions.checkRangeAnalysis = false;
+            JitSpew(js::jit::JitSpew_IonScripts, "IonBuilder: Enable range analysis checks.");
+        } else {
+            jit::JitOptions.checkRangeAnalysis = true;
+            JitSpew(js::jit::JitSpew_IonScripts, "IonBuilder: Disable range analysis checks.");
+        }
+        break;
       case JSJITCOMPILER_ION_ENABLE:
         if (value == 1) {
             JS::ContextOptionsRef(cx).setIon(true);
@@ -6295,6 +6321,9 @@ JS_GetGlobalJitCompilerOption(JSContext* cx, JSJitCompilerOption opt, uint32_t* 
       case JSJITCOMPILER_ION_FORCE_IC:
         *valueOut = jit::JitOptions.forceInlineCaches;
         break;
+      case JSJITCOMPILER_ION_CHECK_RANGE_ANALYSIS:
+        *valueOut = jit::JitOptions.checkRangeAnalysis;
+        break;
       case JSJITCOMPILER_ION_ENABLE:
         *valueOut = JS::ContextOptionsRef(cx).ion();
         break;
@@ -6350,7 +6379,7 @@ JS_IndexToId(JSContext* cx, uint32_t index, MutableHandleId id)
 JS_PUBLIC_API(bool)
 JS_CharsToId(JSContext* cx, JS::TwoByteChars chars, MutableHandleId idp)
 {
-    RootedAtom atom(cx, AtomizeChars(cx, chars.start().get(), chars.length()));
+    RootedAtom atom(cx, AtomizeChars(cx, chars.begin().get(), chars.length()));
     if (!atom)
         return false;
 #ifdef DEBUG

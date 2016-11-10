@@ -29,8 +29,8 @@ using mozilla::CountLeadingZeroes32;
 
 void dbg_break() {}
 
-// The ABIArgGenerator is used for making system ABI calls and for inter-AsmJS
-// calls. The system ABI can either be SoftFp or HardFp, and inter-AsmJS calls
+// The ABIArgGenerator is used for making system ABI calls and for inter-wasm
+// calls. The system ABI can either be SoftFp or HardFp, and inter-wasm calls
 // are always HardFp calls. The initialization defaults to HardFp, and the ABI
 // choice is made before any system ABI calls with the method "setUseHardFp".
 ABIArgGenerator::ABIArgGenerator()
@@ -134,10 +134,8 @@ ABIArgGenerator::hardNext(MIRType type)
         break;
       case MIRType::Float32:
         if (floatRegIndex_ == NumFloatArgRegs) {
-            static const uint32_t align = sizeof(double) - 1;
-            stackOffset_ = (stackOffset_ + align) & ~align;
             current_ = ABIArg(stackOffset_);
-            stackOffset_ += sizeof(uint64_t);
+            stackOffset_ += sizeof(uint32_t);
             break;
         }
         current_ = ABIArg(VFPRegister(floatRegIndex_, VFPRegister::Single));

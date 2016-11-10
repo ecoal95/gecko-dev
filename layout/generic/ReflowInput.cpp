@@ -87,6 +87,12 @@ ReflowInput::ReflowInput(nsPresContext*       aPresContext,
   if (aFlags & STATIC_POS_IS_CB_ORIGIN) {
     mFlags.mStaticPosIsCBOrigin = true;
   }
+  if (aFlags & I_CLAMP_MARGIN_BOX_MIN_SIZE) {
+    mFlags.mIClampMarginBoxMinSize = true;
+  }
+  if (aFlags & B_CLAMP_MARGIN_BOX_MIN_SIZE) {
+    mFlags.mBClampMarginBoxMinSize = true;
+  }
 
   if (!(aFlags & CALLER_WILL_INIT)) {
     Init(aPresContext);
@@ -234,6 +240,8 @@ ReflowInput::ReflowInput(
   mFlags.mUseAutoBSize = !!(aFlags & COMPUTE_SIZE_USE_AUTO_BSIZE);
   mFlags.mStaticPosIsCBOrigin = !!(aFlags & STATIC_POS_IS_CB_ORIGIN);
   mFlags.mIOffsetsNeedCSSAlign = mFlags.mBOffsetsNeedCSSAlign = false;
+  mFlags.mIClampMarginBoxMinSize = !!(aFlags & I_CLAMP_MARGIN_BOX_MIN_SIZE);
+  mFlags.mBClampMarginBoxMinSize = !!(aFlags & B_CLAMP_MARGIN_BOX_MIN_SIZE);
 
   mDiscoveredClearance = nullptr;
   mPercentBSizeObserver = (aParentReflowInput.mPercentBSizeObserver &&
@@ -257,11 +265,11 @@ SizeComputationInput::ComputeISizeValue(nscoord aContainingBlockISize,
                                     nscoord aBoxSizingToMarginEdge,
                                     const nsStyleCoord& aCoord) const
 {
-  return nsLayoutUtils::ComputeISizeValue(mRenderingContext, mFrame,
-                                          aContainingBlockISize,
-                                          aContentEdgeToBoxSizing,
-                                          aBoxSizingToMarginEdge,
-                                          aCoord);
+  return mFrame->ComputeISizeValue(mRenderingContext,
+                                   aContainingBlockISize,
+                                   aContentEdgeToBoxSizing,
+                                   aBoxSizingToMarginEdge,
+                                   aCoord);
 }
 
 nscoord
@@ -1407,8 +1415,11 @@ ReflowInput::CalculateHypotheticalPosition
   // Second, determine the hypothetical box's mIStart.
   // How we determine the hypothetical box depends on whether the element
   // would have been inline-level or block-level
-  if (mStyleDisplay->IsOriginalDisplayInlineOutsideStyle()) {
-    // The placeholder represents the left edge of the hypothetical box
+  if (mStyleDisplay->IsOriginalDisplayInlineOutsideStyle() ||
+      mFlags.mIOffsetsNeedCSSAlign) {
+    // The placeholder represents the IStart edge of the hypothetical box.
+    // (Or if mFlags.mIOffsetsNeedCSSAlign is set, it represents the IStart
+    // edge of the Alignment Container.)
     aHypotheticalPos.mIStart = placeholderOffset.I(wm);
   } else {
     aHypotheticalPos.mIStart = blockIStartContentEdge;
@@ -1556,32 +1567,31 @@ ReflowInput::InitAbsoluteConstraints(nsPresContext* aPresContext,
   // have been if it had been in the flow
   nsHypotheticalPosition hypotheticalPos;
   if ((iStartIsAuto && iEndIsAuto) || (bStartIsAuto && bEndIsAuto)) {
+    nsIFrame* placeholderFrame =
+      aPresContext->PresShell()->GetPlaceholderFrameFor(mFrame);
+    NS_ASSERTION(placeholderFrame, "no placeholder frame");
+
+    if (placeholderFrame->HasAnyStateBits(
+          PLACEHOLDER_STATICPOS_NEEDS_CSSALIGN)) {
+      DebugOnly<nsIFrame*> placeholderParent = placeholderFrame->GetParent();
+      MOZ_ASSERT(placeholderParent, "shouldn't have unparented placeholders");
+      MOZ_ASSERT(placeholderParent->IsFlexOrGridContainer(),
+                 "This flag should only be set on grid/flex children");
+
+      // If the (as-yet unknown) static position will determine the inline
+      // and/or block offsets, set flags to note those offsets aren't valid
+      // until we can do CSS Box Alignment on the OOF frame.
+      mFlags.mIOffsetsNeedCSSAlign = (iStartIsAuto && iEndIsAuto);
+      mFlags.mBOffsetsNeedCSSAlign = (bStartIsAuto && bEndIsAuto);
+    }
+
     if (mFlags.mStaticPosIsCBOrigin) {
-      // XXXdholbert This whole clause should be removed in bug 1269017, where
-      // we'll be making abpsos grid children share our CSS Box Alignment code.
       hypotheticalPos.mWritingMode = cbwm;
       hypotheticalPos.mIStart = nscoord(0);
       hypotheticalPos.mBStart = nscoord(0);
     } else {
-      nsIFrame* placeholderFrame =
-        aPresContext->PresShell()->GetPlaceholderFrameFor(mFrame);
-      NS_ASSERTION(placeholderFrame, "no placeholder frame");
       CalculateHypotheticalPosition(aPresContext, placeholderFrame, cbrs,
                                     hypotheticalPos, aFrameType);
-
-      if (placeholderFrame->HasAnyStateBits(
-            PLACEHOLDER_STATICPOS_NEEDS_CSSALIGN)) {
-        DebugOnly<nsIFrame*> placeholderParent = placeholderFrame->GetParent();
-        MOZ_ASSERT(placeholderParent, "shouldn't have unparented placeholders");
-        MOZ_ASSERT(placeholderParent->IsFlexOrGridContainer(),
-                   "This flag should only be set on grid/flex children");
-
-        // If the (as-yet unknown) static position will determine the inline
-        // and/or block offsets, set flags to note those offsets aren't valid
-        // until we can do CSS Box Alignment on the OOF frame.
-        mFlags.mIOffsetsNeedCSSAlign = (iStartIsAuto && iEndIsAuto);
-        mFlags.mBOffsetsNeedCSSAlign = (bStartIsAuto && bEndIsAuto);
-      }
     }
   }
 
@@ -1640,6 +1650,14 @@ ReflowInput::InitAbsoluteConstraints(nsPresContext* aPresContext,
 
   typedef nsIFrame::ComputeSizeFlags ComputeSizeFlags;
   ComputeSizeFlags computeSizeFlags = ComputeSizeFlags::eDefault;
+  if (mFlags.mIClampMarginBoxMinSize) {
+    computeSizeFlags = ComputeSizeFlags(computeSizeFlags |
+                         ComputeSizeFlags::eIClampMarginBoxMinSize);
+  }
+  if (mFlags.mBClampMarginBoxMinSize) {
+    computeSizeFlags = ComputeSizeFlags(computeSizeFlags |
+                         ComputeSizeFlags::eBClampMarginBoxMinSize);
+  }
   if (mFlags.mShrinkWrap) {
     computeSizeFlags =
       ComputeSizeFlags(computeSizeFlags | ComputeSizeFlags::eShrinkWrap);
@@ -2345,6 +2363,14 @@ ReflowInput::InitConstraints(nsPresContext*     aPresContext,
       typedef nsIFrame::ComputeSizeFlags ComputeSizeFlags;
       ComputeSizeFlags computeSizeFlags =
         isBlock ? ComputeSizeFlags::eDefault : ComputeSizeFlags::eShrinkWrap;
+      if (mFlags.mIClampMarginBoxMinSize) {
+        computeSizeFlags = ComputeSizeFlags(computeSizeFlags |
+                             ComputeSizeFlags::eIClampMarginBoxMinSize);
+      }
+      if (mFlags.mBClampMarginBoxMinSize) {
+        computeSizeFlags = ComputeSizeFlags(computeSizeFlags |
+                             ComputeSizeFlags::eBClampMarginBoxMinSize);
+      }
       if (mFlags.mShrinkWrap) {
         computeSizeFlags =
           ComputeSizeFlags(computeSizeFlags | ComputeSizeFlags::eShrinkWrap);

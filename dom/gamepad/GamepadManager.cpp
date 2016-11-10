@@ -177,6 +177,10 @@ GamepadManager::RemoveListener(nsGlobalWindow* aWindow)
     return; // doesn't exist
   }
 
+  for (auto iter = mGamepads.Iter(); !iter.Done(); iter.Next()) {
+      aWindow->RemoveGamepad(iter.Key());
+  }
+
   mListeners.RemoveElement(aWindow);
 
   if (mListeners.IsEmpty()) {
@@ -586,7 +590,8 @@ GamepadManager::Update(const GamepadChangeEvent& aEvent)
   if (aEvent.type() == GamepadChangeEvent::TGamepadAdded) {
     const GamepadAdded& a = aEvent.get_GamepadAdded();
     AddGamepad(a.index(), a.id(),
-               a.mapping(), a.service_type(),
+               static_cast<GamepadMappingType>(a.mapping()),
+               a.service_type(),
                a.num_buttons(), a.num_axes());
     return;
   }

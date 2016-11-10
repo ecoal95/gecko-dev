@@ -25,6 +25,7 @@
 #include "mozilla/docshell/OfflineCacheUpdateChild.h"
 #include "mozilla/dom/ContentBridgeChild.h"
 #include "mozilla/dom/ContentBridgeParent.h"
+#include "mozilla/dom/VideoDecoderManagerChild.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/DataTransfer.h"
 #include "mozilla/dom/DOMStorageIPC.h"
@@ -171,8 +172,6 @@
 #endif
 
 #include "mozilla/dom/File.h"
-#include "mozilla/dom/icc/IccChild.h"
-#include "mozilla/dom/mobileconnection/MobileConnectionChild.h"
 #include "mozilla/dom/devicestorage/DeviceStorageRequestChild.h"
 #include "mozilla/dom/PPresentationChild.h"
 #include "mozilla/dom/PresentationIPCService.h"
@@ -194,7 +193,6 @@
 #include "mozilla/widget/PuppetBidiKeyboard.h"
 #include "mozilla/RemoteSpellCheckEngineChild.h"
 #include "GMPServiceChild.h"
-#include "GMPDecoderModule.h"
 #include "gfxPlatform.h"
 #include "nscore.h" // for NS_FREE_PERMANENT_DATA
 #include "VRManagerChild.h"
@@ -202,9 +200,7 @@
 using namespace mozilla;
 using namespace mozilla::docshell;
 using namespace mozilla::dom::devicestorage;
-using namespace mozilla::dom::icc;
 using namespace mozilla::dom::ipc;
-using namespace mozilla::dom::mobileconnection;
 using namespace mozilla::dom::workers;
 using namespace mozilla::media;
 using namespace mozilla::embedding;
@@ -1186,7 +1182,8 @@ ContentChild::RecvGMPsChanged(nsTArray<GMPCapabilityData>&& capabilities)
 bool
 ContentChild::RecvInitRendering(Endpoint<PCompositorBridgeChild>&& aCompositor,
                                 Endpoint<PImageBridgeChild>&& aImageBridge,
-                                Endpoint<PVRManagerChild>&& aVRBridge)
+                                Endpoint<PVRManagerChild>&& aVRBridge,
+                                Endpoint<PVideoDecoderManagerChild>&& aVideoManager)
 {
   if (!CompositorBridgeChild::InitForContent(Move(aCompositor))) {
     return false;
@@ -1197,13 +1194,15 @@ ContentChild::RecvInitRendering(Endpoint<PCompositorBridgeChild>&& aCompositor,
   if (!gfx::VRManagerChild::InitForContent(Move(aVRBridge))) {
     return false;
   }
+  VideoDecoderManagerChild::InitForContent(Move(aVideoManager));
   return true;
 }
 
 bool
 ContentChild::RecvReinitRendering(Endpoint<PCompositorBridgeChild>&& aCompositor,
                                   Endpoint<PImageBridgeChild>&& aImageBridge,
-                                  Endpoint<PVRManagerChild>&& aVRBridge)
+                                  Endpoint<PVRManagerChild>&& aVRBridge,
+                                  Endpoint<PVideoDecoderManagerChild>&& aVideoManager)
 {
   nsTArray<RefPtr<TabChild>> tabs = TabChild::GetAll();
 
@@ -1231,6 +1230,8 @@ ContentChild::RecvReinitRendering(Endpoint<PCompositorBridgeChild>&& aCompositor
       tabChild->ReinitRendering();
     }
   }
+
+  VideoDecoderManagerChild::InitForContent(Move(aVideoManager));
   return true;
 }
 
@@ -1706,14 +1707,6 @@ ContentChild::RecvNotifyPresentationReceiverCleanUp(const nsString& aSessionId)
 }
 
 bool
-ContentChild::RecvNotifyGMPsChanged()
-{
-  GMPDecoderModule::UpdateUsableCodecs();
-  MOZ_ASSERT(NS_IsMainThread());
-  return true;
-}
-
-bool
 ContentChild::RecvNotifyEmptyHTTPCache()
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -1767,31 +1760,6 @@ ContentChild::DeallocPHeapSnapshotTempFileHelperChild(
   return true;
 }
 
-PIccChild*
-ContentChild::SendPIccConstructor(PIccChild* aActor,
-                                  const uint32_t& aServiceId)
-{
-  // Add an extra ref for IPDL. Will be released in
-  // ContentChild::DeallocPIccChild().
-  static_cast<IccChild*>(aActor)->AddRef();
-  return PContentChild::SendPIccConstructor(aActor, aServiceId);
-}
-
-PIccChild*
-ContentChild::AllocPIccChild(const uint32_t& aServiceId)
-{
-  MOZ_CRASH("No one should be allocating PIccChild actors");
-  return nullptr;
-}
-
-bool
-ContentChild::DeallocPIccChild(PIccChild* aActor)
-{
-  // IccChild is refcounted, must not be freed manually.
-  static_cast<IccChild*>(aActor)->Release();
-  return true;
-}
-
 PTestShellChild*
 ContentChild::AllocPTestShellChild()
 {
@@ -1831,43 +1799,6 @@ ContentChild::DeallocPDeviceStorageRequestChild(PDeviceStorageRequestChild* aDev
 {
   delete aDeviceStorage;
   return true;
-}
-
-PMobileConnectionChild*
-ContentChild::SendPMobileConnectionConstructor(PMobileConnectionChild* aActor,
-                                               const uint32_t& aClientId)
-{
-#ifdef MOZ_B2G_RIL
-  // Add an extra ref for IPDL. Will be released in
-  // ContentChild::DeallocPMobileConnectionChild().
-  static_cast<MobileConnectionChild*>(aActor)->AddRef();
-  return PContentChild::SendPMobileConnectionConstructor(aActor, aClientId);
-#else
-  MOZ_CRASH("No support for mobileconnection on this platform!");
-#endif
-}
-
-PMobileConnectionChild*
-ContentChild::AllocPMobileConnectionChild(const uint32_t& aClientId)
-{
-#ifdef MOZ_B2G_RIL
-  MOZ_CRASH("No one should be allocating PMobileConnectionChild actors");
-  return nullptr;
-#else
-  MOZ_CRASH("No support for mobileconnection on this platform!");
-#endif
-}
-
-bool
-ContentChild::DeallocPMobileConnectionChild(PMobileConnectionChild* aActor)
-{
-#ifdef MOZ_B2G_RIL
-  // MobileConnectionChild is refcounted, must not be freed manually.
-  static_cast<MobileConnectionChild*>(aActor)->Release();
-  return true;
-#else
-  MOZ_CRASH("No support for mobileconnection on this platform!");
-#endif
 }
 
 PNeckoChild*
