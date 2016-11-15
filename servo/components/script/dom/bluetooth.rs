@@ -148,14 +148,14 @@ pub fn response_async<T: AsyncBluetoothListener + Reflectable + 'static>(
         promise: &Rc<Promise>,
         receiver: &T) -> IpcSender<BluetoothResponseResult> {
     let (action_sender, action_receiver) = ipc::channel().unwrap();
-    let chan = receiver.global().networking_task_source();
+    let task_source = receiver.global().networking_task_source();
     let context = Arc::new(Mutex::new(BluetoothContext {
         promise: Some(TrustedPromise::new(promise.clone())),
         receiver: Trusted::new(receiver),
     }));
     let listener = NetworkListener {
         context: context,
-        script_chan: chan,
+        task_source: task_source,
         wrapper: None,
     };
     ROUTER.add_route(action_receiver.to_opaque(), box move |message| {
@@ -194,7 +194,7 @@ fn convert_request_device_options(filters: &Option<Vec<BluetoothRequestDeviceFil
 
             // Step 2.7.
             // Note: What we are doing here is adding the not blacklisted UUIDs to the result vector,
-            // insted of removing them from an already filled vector.
+            // instead of removing them from an already filled vector.
             if !uuid_is_blacklisted(uuid.as_ref(), Blacklist::All) {
                 optional_services_uuids.push(uuid);
             }
@@ -337,11 +337,7 @@ impl BluetoothMethods for Bluetooth {
             return p;
         }
         // Step 2.
-        if !option.acceptAllDevices {
-            self.request_bluetooth_devices(&p, &option.filters, &option.optionalServices);
-        } else {
-            self.request_bluetooth_devices(&p, &None, &option.optionalServices);
-        }
+        self.request_bluetooth_devices(&p, &option.filters, &option.optionalServices);
         // TODO(#4282): Step 3-5: Reject and resolve promise.
         return p;
     }

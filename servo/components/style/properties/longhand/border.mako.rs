@@ -3,26 +3,26 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 <%namespace name="helpers" file="/helpers.mako.rs" />
-<% from data import Method %>
+<% from data import Method, PHYSICAL_SIDES, ALL_SIDES %>
 
 <% data.new_style_struct("Border", inherited=False,
                    additional_methods=[Method("border_" + side + "_has_nonzero_width",
                                               "bool") for side in ["top", "right", "bottom", "left"]]) %>
 
-% for side in ["top", "right", "bottom", "left"]:
-    ${helpers.predefined_type("border-%s-color" % side, "CSSColor",
+% for side in ALL_SIDES:
+    ${helpers.predefined_type("border-%s-color" % side[0], "CSSColor",
                               "::cssparser::Color::CurrentColor",
-                              animatable=True)}
+                              animatable=True, logical = side[1])}
 % endfor
 
-% for side in ["top", "right", "bottom", "left"]:
-    ${helpers.predefined_type("border-%s-style" % side, "BorderStyle",
+% for side in ALL_SIDES:
+    ${helpers.predefined_type("border-%s-style" % side[0], "BorderStyle",
                               "specified::BorderStyle::none",
-                              need_clone=True, animatable=False)}
+                              need_clone=True, animatable=False, logical = side[1])}
 % endfor
 
-% for side in ["top", "right", "bottom", "left"]:
-    <%helpers:longhand name="border-${side}-width" animatable="True">
+% for side in ALL_SIDES:
+    <%helpers:longhand name="border-${side[0]}-width" animatable="True" logical="${side[1]}">
         use app_units::Au;
         use std::fmt;
         use style_traits::ToCss;
@@ -107,6 +107,11 @@ ${helpers.single_keyword("-moz-float-edge", "content-box margin-box",
         computed_value::T(None)
     }
 
+    #[inline]
+    pub fn get_initial_specified_value() -> SpecifiedValue {
+        SpecifiedValue(None)
+    }
+
     impl ToComputedValue for SpecifiedValue {
         type ComputedValue = computed_value::T;
 
@@ -141,7 +146,7 @@ ${helpers.single_keyword("-moz-float-edge", "content-box margin-box",
     use std::fmt;
     use style_traits::ToCss;
     use values::HasViewportPercentage;
-    use values::specified::LengthOrNumber;
+    use values::specified::{LengthOrNumber, Number};
 
     impl HasViewportPercentage for SpecifiedValue {
         fn has_viewport_percentage(&self) -> bool {
@@ -194,6 +199,11 @@ ${helpers.single_keyword("-moz-float-edge", "content-box margin-box",
                           computed::LengthOrNumber::Number(0.0),
                           computed::LengthOrNumber::Number(0.0),
                           computed::LengthOrNumber::Number(0.0))
+    }
+
+    #[inline]
+    pub fn get_initial_specified_value() -> SpecifiedValue {
+        SpecifiedValue(vec![LengthOrNumber::Number(Number(0.0))])
     }
 
     impl ToComputedValue for SpecifiedValue {
@@ -299,6 +309,11 @@ ${helpers.single_keyword("-moz-float-edge", "content-box margin-box",
     #[inline]
     pub fn get_initial_value() -> computed_value::T {
         computed_value::T(RepeatKeyword::Stretch, RepeatKeyword::Stretch)
+    }
+
+    #[inline]
+    pub fn get_initial_specified_value() -> SpecifiedValue {
+        SpecifiedValue(RepeatKeyword::Stretch, None)
     }
 
     impl ToComputedValue for SpecifiedValue {
@@ -447,6 +462,11 @@ ${helpers.single_keyword("-moz-float-edge", "content-box margin-box",
                           computed_value::SingleComputedValue::Number(1.0),
                           computed_value::SingleComputedValue::Number(1.0),
                           computed_value::SingleComputedValue::Number(1.0))
+    }
+
+    #[inline]
+    pub fn get_initial_specified_value() -> SpecifiedValue {
+        SpecifiedValue(vec![SingleSpecifiedValue::Number(Number(1.0))])
     }
 
     impl ToComputedValue for SpecifiedValue {
@@ -636,6 +656,14 @@ ${helpers.single_keyword("-moz-float-edge", "content-box margin-box",
                           computed_value::PercentageOrNumber::Percentage(Percentage(1.0)),
                           computed_value::PercentageOrNumber::Percentage(Percentage(1.0)),
                           computed_value::PercentageOrNumber::Percentage(Percentage(1.0))],
+            fill: false,
+        }
+    }
+
+    #[inline]
+    pub fn get_initial_specified_value() -> SpecifiedValue {
+        SpecifiedValue {
+            corners: vec![PercentageOrNumber::Percentage(Percentage(1.0))],
             fill: false,
         }
     }

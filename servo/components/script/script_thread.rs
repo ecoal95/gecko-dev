@@ -51,8 +51,6 @@ use dom::node::{Node, NodeDamage, window_from_node};
 use dom::serviceworker::TrustedServiceWorkerAddress;
 use dom::serviceworkerregistration::ServiceWorkerRegistration;
 use dom::servoparser::{ParserContext, ServoParser};
-use dom::servoparser::html::{ParseContext, parse_html};
-use dom::servoparser::xml::{self, parse_xml};
 use dom::transitionevent::TransitionEvent;
 use dom::uievent::UIEvent;
 use dom::window::{ReflowReason, Window};
@@ -659,7 +657,7 @@ impl ScriptThread {
             chan: MainThreadScriptChan(chan.clone()),
             dom_manipulation_task_source: DOMManipulationTaskSource(chan.clone()),
             user_interaction_task_source: UserInteractionTaskSource(chan.clone()),
-            networking_task_source: NetworkingTaskSource(chan.clone()),
+            networking_task_source: NetworkingTaskSource(boxed_script_sender.clone()),
             history_traversal_task_source: HistoryTraversalTaskSource(chan),
             file_reading_task_source: FileReadingTaskSource(boxed_script_sender),
 
@@ -1623,7 +1621,6 @@ impl ScriptThread {
         let MainThreadScriptChan(ref sender) = self.chan;
         let DOMManipulationTaskSource(ref dom_sender) = self.dom_manipulation_task_source;
         let UserInteractionTaskSource(ref user_sender) = self.user_interaction_task_source;
-        let NetworkingTaskSource(ref network_sender) = self.networking_task_source;
         let HistoryTraversalTaskSource(ref history_sender) = self.history_traversal_task_source;
 
         let (ipc_timer_event_chan, ipc_timer_event_port) = ipc::channel().unwrap();
@@ -1635,7 +1632,7 @@ impl ScriptThread {
                                  MainThreadScriptChan(sender.clone()),
                                  DOMManipulationTaskSource(dom_sender.clone()),
                                  UserInteractionTaskSource(user_sender.clone()),
-                                 NetworkingTaskSource(network_sender.clone()),
+                                 self.networking_task_source.clone(),
                                  HistoryTraversalTaskSource(history_sender.clone()),
                                  self.file_reading_task_source.clone(),
                                  self.image_cache_channel.clone(),
@@ -1780,15 +1777,17 @@ impl ScriptThread {
         };
 
         if is_xml {
-            parse_xml(&document,
-                      parse_input,
-                      final_url,
-                      xml::ParseContext::Owner(Some(incomplete.pipeline_id)));
+            ServoParser::parse_xml_document(
+                &document,
+                parse_input,
+                final_url,
+                Some(incomplete.pipeline_id));
         } else {
-            parse_html(&document,
-                       parse_input,
-                       final_url,
-                       ParseContext::Owner(Some(incomplete.pipeline_id)));
+            ServoParser::parse_html_document(
+                &document,
+                parse_input,
+                final_url,
+                Some(incomplete.pipeline_id));
         }
 
         if incomplete.is_frozen {
@@ -2050,7 +2049,7 @@ impl ScriptThread {
         let (action_sender, action_receiver) = ipc::channel().unwrap();
         let listener = NetworkListener {
             context: context,
-            script_chan: self.chan.clone(),
+            task_source: self.networking_task_source.clone(),
             wrapper: None,
         };
         ROUTER.add_route(action_receiver.to_opaque(), box move |message| {

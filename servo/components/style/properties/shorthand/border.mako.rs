@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 <%namespace name="helpers" file="/helpers.mako.rs" />
-<% from data import to_rust_ident %>
+<% from data import to_rust_ident, ALL_SIDES %>
 
 ${helpers.four_sides_shorthand("border-color", "border-%s-color", "specified::CSSColor::parse")}
 ${helpers.four_sides_shorthand("border-style", "border-%s-style",
@@ -83,7 +83,7 @@ pub fn parse_border(context: &ParserContext, input: &mut Parser)
     if any { Ok((color, style, width)) } else { Err(()) }
 }
 
-% for side in ["top", "right", "bottom", "left"]:
+% for side in map(lambda x: x[0], ALL_SIDES):
     <%helpers:shorthand name="border-${side}" sub_properties="${' '.join(
         'border-%s-%s' % (side, prop)
         for prop in ['color', 'style', 'width']
@@ -92,9 +92,9 @@ pub fn parse_border(context: &ParserContext, input: &mut Parser)
     pub fn parse_value(context: &ParserContext, input: &mut Parser) -> Result<Longhands, ()> {
         let (color, style, width) = try!(super::parse_border(context, input));
         Ok(Longhands {
-            border_${side}_color: color,
-            border_${side}_style: style,
-            border_${side}_width: width
+            border_${to_rust_ident(side)}_color: color,
+            border_${to_rust_ident(side)}_style: style,
+            border_${to_rust_ident(side)}_width: width
         })
     }
 
@@ -102,9 +102,9 @@ pub fn parse_border(context: &ParserContext, input: &mut Parser)
         fn to_css_declared<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
             super::serialize_directional_border(
                 dest,
-                self.border_${side}_width,
-                self.border_${side}_style,
-                self.border_${side}_color
+                self.border_${to_rust_ident(side)}_width,
+                self.border_${to_rust_ident(side)}_style,
+                self.border_${to_rust_ident(side)}_color
             )
         }
     }
@@ -149,6 +149,7 @@ pub fn parse_border(context: &ParserContext, input: &mut Parser)
      for corner in ['top-left', 'top-right', 'bottom-right', 'bottom-left']
 )}">
     use values::specified::basic_shape::BorderRadius;
+    use parser::Parse;
 
     pub fn parse_value(context: &ParserContext, input: &mut Parser) -> Result<Longhands, ()> {
         let _ignored = context;
@@ -177,6 +178,134 @@ pub fn parse_border(context: &ParserContext, input: &mut Parser)
             try!(write!(dest, " "));
 
             self.border_bottom_left_radius.to_css(dest)
+        }
+    }
+</%helpers:shorthand>
+
+// https://drafts.csswg.org/css-backgrounds-3/#border-image
+<%helpers:shorthand name="border-image" products="gecko" sub_properties="border-image-outset
+    border-image-repeat border-image-slice border-image-source border-image-width">
+    use properties::longhands::{border_image_outset, border_image_repeat, border_image_slice};
+    use properties::longhands::{border_image_source, border_image_width};
+
+    pub fn parse_value(context: &ParserContext, input: &mut Parser) -> Result<Longhands, ()> {
+        % for name in "outset repeat slice source width".split():
+            let mut border_image_${name} = border_image_${name}::get_initial_specified_value();
+        % endfor
+
+        try!(input.try(|input| {
+            % for name in "outset repeat slice source width".split():
+                let mut ${name} = None;
+            % endfor
+            loop {
+                if slice.is_none() {
+                    if let Ok(value) = input.try(|input| border_image_slice::parse(context, input)) {
+                        slice = Some(value);
+                        // Parse border image width and outset, if applicable.
+                        let maybe_width_outset: Result<_, ()> = input.try(|input| {
+                            try!(input.expect_delim('/'));
+
+                            // Parse border image width, if applicable.
+                            let w = input.try(|input|
+                                border_image_width::parse(context, input)).ok();
+
+                            // Parse border image outset if applicable.
+                            let o = input.try(|input| {
+                                try!(input.expect_delim('/'));
+                                border_image_outset::parse(context, input)
+                            }).ok();
+                            Ok((w, o))
+                        });
+                        if let Ok((w, o)) = maybe_width_outset {
+                            width = w;
+                            outset = o;
+                        }
+
+                        continue
+                    }
+                }
+                % for name in "source repeat".split():
+                    if ${name}.is_none() {
+                        if let Ok(value) = input.try(|input| border_image_${name}::parse(context, input)) {
+                            ${name} = Some(value);
+                            continue
+                        }
+                    }
+                % endfor
+                break
+            }
+            let mut any = false;
+            % for name in "outset repeat slice source width".split():
+                any = any || ${name}.is_some();
+            % endfor
+            if any {
+                % for name in "outset repeat slice source width".split():
+                    if let Some(b_${name}) = ${name} {
+                        border_image_${name} = b_${name};
+                    }
+                % endfor
+                Ok(())
+            } else {
+                Err(())
+            }
+        }));
+
+        Ok(Longhands {
+            % for name in "outset repeat slice source width".split():
+                border_image_${name}: Some(border_image_${name}),
+            % endfor
+         })
+    }
+
+    impl<'a> LonghandsToSerialize<'a>  {
+        fn to_css_declared<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+            % for name in "outset repeat slice source width".split():
+                let ${name} = if let DeclaredValue::Value(ref value) = *self.border_image_${name} {
+                    Some(value)
+                } else {
+                    None
+                };
+            % endfor
+
+            if let Some(source) = source {
+                try!(source.to_css(dest));
+            } else {
+                try!(write!(dest, "none"));
+            }
+
+            try!(write!(dest, " "));
+
+            if let Some(slice) = slice {
+                try!(slice.to_css(dest));
+            } else {
+                try!(write!(dest, "100%"));
+            }
+
+            try!(write!(dest, " / "));
+
+            if let Some(width) = width {
+                try!(width.to_css(dest));
+            } else {
+                try!(write!(dest, "1"));
+            }
+
+            try!(write!(dest, " / "));
+
+            if let Some(outset) = outset {
+                try!(outset.to_css(dest));
+            } else {
+                try!(write!(dest, "0"));
+            }
+
+            try!(write!(dest, " "));
+
+            if let Some(repeat) = repeat {
+                try!(repeat.to_css(dest));
+            } else {
+                try!(write!(dest, "stretch"));
+            }
+
+            Ok(())
         }
     }
 </%helpers:shorthand>
