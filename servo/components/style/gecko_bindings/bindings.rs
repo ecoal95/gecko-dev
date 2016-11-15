@@ -649,7 +649,7 @@ extern "C" {
 }
 extern "C" {
     pub fn Gecko_CSSValue_SetFunction(css_value: nsCSSValueBorrowedMut,
-                                   len: i32);
+                                      len: i32);
 }
 extern "C" {
     pub fn Gecko_CSSValue_GetArrayItem(css_value: nsCSSValueBorrowedMut,
@@ -914,6 +914,10 @@ extern "C" {
 }
 extern "C" {
     pub fn Servo_Node_ClearNodeData(node: RawGeckoNodeBorrowed);
+}
+extern "C" {
+    pub fn Servo_StyleSheet_Empty(parsing_mode: SheetParsingMode)
+     -> RawServoStyleSheetStrong;
 }
 extern "C" {
     pub fn Servo_StyleSheet_FromUTF8Bytes(data: *const nsACString_internal,
