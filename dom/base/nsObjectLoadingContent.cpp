@@ -157,9 +157,9 @@ public:
   explicit nsAsyncInstantiateEvent(nsObjectLoadingContent* aContent)
   : mContent(aContent) {}
 
-  ~nsAsyncInstantiateEvent() {}
+  ~nsAsyncInstantiateEvent() override = default;
 
-  NS_IMETHOD Run();
+  NS_IMETHOD Run() override;
 
 private:
   nsCOMPtr<nsIObjectLoadingContent> mContent;
@@ -190,9 +190,9 @@ public:
   explicit CheckPluginStopEvent(nsObjectLoadingContent* aContent)
   : mContent(aContent) {}
 
-  ~CheckPluginStopEvent() {}
+  ~CheckPluginStopEvent() override = default;
 
-  NS_IMETHOD Run();
+  NS_IMETHOD Run() override;
 
 private:
   nsCOMPtr<nsIObjectLoadingContent> mContent;
@@ -288,9 +288,9 @@ public:
     MOZ_ASSERT(aTarget && aDocument);
   }
 
-  ~nsSimplePluginEvent() {}
+  ~nsSimplePluginEvent() override = default;
 
-  NS_IMETHOD Run();
+  NS_IMETHOD Run() override;
 
 private:
   nsCOMPtr<nsISupports> mTarget;
@@ -336,9 +336,9 @@ public:
       mSubmittedCrashReport(submittedCrashReport)
   {}
 
-  ~nsPluginCrashedEvent() {}
+  ~nsPluginCrashedEvent() override = default;
 
-  NS_IMETHOD Run();
+  NS_IMETHOD Run() override;
 };
 
 NS_IMETHODIMP
@@ -393,7 +393,7 @@ public:
   NS_IMETHOD Notify(nsITimer* timer) override;
 
 protected:
-  virtual ~nsStopPluginRunnable() {}
+  ~nsStopPluginRunnable() override = default;
 
 private:
   nsCOMPtr<nsITimer> mTimer;
@@ -1185,8 +1185,6 @@ nsObjectLoadingContent::OnStopRequest(nsIRequest *aRequest,
     }
   }
 
-  NS_ENSURE_TRUE(nsContentUtils::LegacyIsCallerChromeOrNativeCode(), NS_ERROR_NOT_AVAILABLE);
-
   if (aRequest != mChannel) {
     return NS_BINDING_ABORTED;
   }
@@ -1212,8 +1210,6 @@ nsObjectLoadingContent::OnDataAvailable(nsIRequest *aRequest,
                                         nsIInputStream *aInputStream,
                                         uint64_t aOffset, uint32_t aCount)
 {
-  NS_ENSURE_TRUE(nsContentUtils::LegacyIsCallerChromeOrNativeCode(), NS_ERROR_NOT_AVAILABLE);
-
   if (aRequest != mChannel) {
     return NS_BINDING_ABORTED;
   }
@@ -1245,17 +1241,6 @@ nsObjectLoadingContent::GetFrameLoader()
 {
   RefPtr<nsFrameLoader> loader = mFrameLoader;
   return loader.forget();
-}
-
-NS_IMETHODIMP
-nsObjectLoadingContent::GetParentApplication(mozIApplication** aApplication)
-{
-  if (!aApplication) {
-    return NS_ERROR_FAILURE;
-  }
-
-  *aApplication = nullptr;
-  return NS_OK;
 }
 
 void
@@ -1381,7 +1366,7 @@ public:
   {}
 
 protected:
-  ~ObjectInterfaceRequestorShim() {}
+  ~ObjectInterfaceRequestorShim() = default;
   nsCOMPtr<nsIObjectLoadingContent> mContent;
 };
 
@@ -3348,14 +3333,6 @@ nsObjectLoadingContent::DefaultFallbackType()
 }
 
 NS_IMETHODIMP
-nsObjectLoadingContent::GetHasRunningPlugin(bool *aHasPlugin)
-{
-  NS_ENSURE_TRUE(nsContentUtils::IsCallerChrome(), NS_ERROR_NOT_AVAILABLE);
-  *aHasPlugin = HasRunningPlugin();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsObjectLoadingContent::GetRunID(uint32_t* aRunID)
 {
   if (NS_WARN_IF(!nsContentUtils::IsCallerChrome())) {
@@ -3888,10 +3865,6 @@ nsObjectLoadingContent::MaybeFireErrorEvent()
 nsObjectLoadingContent::SetupProtoChainRunner::SetupProtoChainRunner(
     nsObjectLoadingContent* aContent)
   : mContent(aContent)
-{
-}
-
-nsObjectLoadingContent::SetupProtoChainRunner::~SetupProtoChainRunner()
 {
 }
 

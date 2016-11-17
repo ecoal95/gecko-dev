@@ -2709,7 +2709,9 @@ WebConsoleFrame.prototype = {
   */
   _onToolboxPrefChanged: function (event, data) {
     if (data.pref == PREF_MESSAGE_TIMESTAMP) {
-      if (data.newValue) {
+      if (this.NEW_CONSOLE_OUTPUT_ENABLED) {
+        this.newConsoleOutput.dispatchTimestampsToggle(data.newValue);
+      } else if (data.newValue) {
         this.outputNode.classList.remove("hideTimestamps");
       } else {
         this.outputNode.classList.add("hideTimestamps");
@@ -3299,9 +3301,6 @@ WebConsoleConnectionProxy.prototype = {
     messages.sort((a, b) => a.timeStamp - b.timeStamp);
 
     if (this.webConsoleFrame.NEW_CONSOLE_OUTPUT_ENABLED) {
-      // Filter out CSS page errors.
-      messages = messages.filter(message => !(message._type == "PageError"
-          && Utils.categoryForScriptError(message) === CATEGORY_CSS));
       this.dispatchMessagesAdd(messages);
     } else {
       this.webConsoleFrame.displayCachedMessages(messages);
@@ -3327,10 +3326,7 @@ WebConsoleConnectionProxy.prototype = {
   _onPageError: function (type, packet) {
     if (this.webConsoleFrame && packet.from == this._consoleActor) {
       if (this.webConsoleFrame.NEW_CONSOLE_OUTPUT_ENABLED) {
-        let category = Utils.categoryForScriptError(packet.pageError);
-        if (category !== CATEGORY_CSS) {
-          this.dispatchMessageAdd(packet);
-        }
+        this.dispatchMessageAdd(packet);
         return;
       }
       this.webConsoleFrame.handlePageError(packet.pageError);
