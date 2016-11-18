@@ -76,6 +76,7 @@ use script_traits::{DocumentState, TimerEvent, TimerEventId};
 use script_traits::{ScriptMsg as ConstellationMsg, TimerEventRequest, WindowSizeData, WindowSizeType};
 use script_traits::webdriver_msg::{WebDriverJSError, WebDriverJSResult};
 use servo_atoms::Atom;
+use servo_url::ServoUrl;
 use std::ascii::AsciiExt;
 use std::borrow::ToOwned;
 use std::cell::Cell;
@@ -102,7 +103,6 @@ use time;
 use timers::{IsInterval, TimerCallback};
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 use tinyfiledialogs::{self, MessageBoxIcon};
-use url::Url;
 use util::geometry::{self, max_rect};
 use util::opts;
 use util::prefs::PREFS;
@@ -483,8 +483,10 @@ impl WindowMethods for Window {
         self.navigator.or_init(|| Navigator::new(self))
     }
 
+    #[allow(unsafe_code)]
     // https://html.spec.whatwg.org/multipage/#dom-windowtimers-settimeout
-    fn SetTimeout(&self, _cx: *mut JSContext, callback: Rc<Function>, timeout: i32, args: Vec<HandleValue>) -> i32 {
+    unsafe fn SetTimeout(&self, _cx: *mut JSContext, callback: Rc<Function>, timeout: i32,
+                         args: Vec<HandleValue>) -> i32 {
         self.upcast::<GlobalScope>().set_timeout_or_interval(
             TimerCallback::FunctionTimerCallback(callback),
             args,
@@ -492,8 +494,10 @@ impl WindowMethods for Window {
             IsInterval::NonInterval)
     }
 
+    #[allow(unsafe_code)]
     // https://html.spec.whatwg.org/multipage/#dom-windowtimers-settimeout
-    fn SetTimeout_(&self, _cx: *mut JSContext, callback: DOMString, timeout: i32, args: Vec<HandleValue>) -> i32 {
+    unsafe fn SetTimeout_(&self, _cx: *mut JSContext, callback: DOMString,
+                          timeout: i32, args: Vec<HandleValue>) -> i32 {
         self.upcast::<GlobalScope>().set_timeout_or_interval(
             TimerCallback::StringTimerCallback(callback),
             args,
@@ -506,8 +510,10 @@ impl WindowMethods for Window {
         self.upcast::<GlobalScope>().clear_timeout_or_interval(handle);
     }
 
+    #[allow(unsafe_code)]
     // https://html.spec.whatwg.org/multipage/#dom-windowtimers-setinterval
-    fn SetInterval(&self, _cx: *mut JSContext, callback: Rc<Function>, timeout: i32, args: Vec<HandleValue>) -> i32 {
+    unsafe fn SetInterval(&self, _cx: *mut JSContext, callback: Rc<Function>,
+                          timeout: i32, args: Vec<HandleValue>) -> i32 {
         self.upcast::<GlobalScope>().set_timeout_or_interval(
             TimerCallback::FunctionTimerCallback(callback),
             args,
@@ -515,8 +521,10 @@ impl WindowMethods for Window {
             IsInterval::Interval)
     }
 
+    #[allow(unsafe_code)]
     // https://html.spec.whatwg.org/multipage/#dom-windowtimers-setinterval
-    fn SetInterval_(&self, _cx: *mut JSContext, callback: DOMString, timeout: i32, args: Vec<HandleValue>) -> i32 {
+    unsafe fn SetInterval_(&self, _cx: *mut JSContext, callback: DOMString,
+                           timeout: i32, args: Vec<HandleValue>) -> i32 {
         self.upcast::<GlobalScope>().set_timeout_or_interval(
             TimerCallback::StringTimerCallback(callback),
             args,
@@ -610,8 +618,9 @@ impl WindowMethods for Window {
         doc.cancel_animation_frame(ident);
     }
 
+    #[allow(unsafe_code)]
     // https://html.spec.whatwg.org/multipage/#dom-window-postmessage
-    fn PostMessage(&self,
+    unsafe fn PostMessage(&self,
                    cx: *mut JSContext,
                    message: HandleValue,
                    origin: DOMString)
@@ -624,7 +633,7 @@ impl WindowMethods for Window {
                 //               object, not self's.
                 Some(self.Document().origin().copy())
             },
-            url => match Url::parse(&url) {
+            url => match ServoUrl::parse(&url) {
                 Ok(url) => Some(Origin::new(&url)),
                 Err(_) => return Err(Error::Syntax),
             }
@@ -670,8 +679,8 @@ impl WindowMethods for Window {
     }
 
     #[allow(unsafe_code)]
-    fn WebdriverCallback(&self, cx: *mut JSContext, val: HandleValue) {
-        let rv = unsafe { jsval_to_webdriver(cx, val) };
+    unsafe fn WebdriverCallback(&self, cx: *mut JSContext, val: HandleValue) {
+        let rv = jsval_to_webdriver(cx, val);
         let opt_chan = self.webdriver_script_chan.borrow_mut().take();
         if let Some(chan) = opt_chan {
             chan.send(rv).unwrap();
@@ -860,7 +869,7 @@ impl WindowMethods for Window {
 
     // check-tidy: no specs after this line
     fn OpenURLInDefaultBrowser(&self, href: DOMString) -> ErrorResult {
-        let url = try!(Url::parse(&href).map_err(|e| {
+        let url = try!(ServoUrl::parse(&href).map_err(|e| {
             Error::Type(format!("Couldn't parse URL: {}", e))
         }));
         match open::that(url.as_str()) {
@@ -1322,7 +1331,7 @@ impl Window {
     }
 
     /// Commence a new URL load which will either replace this window or scroll to a fragment.
-    pub fn load_url(&self, url: Url, replace: bool, referrer_policy: Option<ReferrerPolicy>) {
+    pub fn load_url(&self, url: ServoUrl, replace: bool, referrer_policy: Option<ReferrerPolicy>) {
         let doc = self.Document();
         let referrer_policy = referrer_policy.or(doc.get_referrer_policy());
 
@@ -1355,7 +1364,7 @@ impl Window {
         self.window_size.get()
     }
 
-    pub fn get_url(&self) -> Url {
+    pub fn get_url(&self) -> ServoUrl {
         (*self.Document().url()).clone()
     }
 
@@ -1511,6 +1520,7 @@ impl Window {
 }
 
 impl Window {
+    #[allow(unsafe_code)]
     pub fn new(runtime: Rc<Runtime>,
                script_chan: MainThreadScriptChan,
                dom_task_source: DOMManipulationTaskSource,
@@ -1598,7 +1608,9 @@ impl Window {
             test_runner: Default::default(),
         };
 
-        WindowBinding::Wrap(runtime.cx(), win)
+        unsafe {
+            WindowBinding::Wrap(runtime.cx(), win)
+        }
     }
 }
 

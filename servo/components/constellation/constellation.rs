@@ -32,7 +32,7 @@ use msg::constellation_msg::{Key, KeyModifiers, KeyState};
 use msg::constellation_msg::{PipelineNamespace, PipelineNamespaceId, TraversalDirection};
 use net_traits::{self, IpcSend, ResourceThreads};
 use net_traits::image_cache_thread::ImageCacheThread;
-use net_traits::storage_thread::StorageThreadMsg;
+use net_traits::storage_thread::{StorageThreadMsg, StorageType};
 use offscreen_gl_context::{GLContextAttributes, GLLimits};
 use pipeline::{ChildProcess, InitialPipelineState, Pipeline};
 use profile_traits::mem;
@@ -46,6 +46,7 @@ use script_traits::{LayoutMsg as FromLayoutMsg, ScriptMsg as FromScriptMsg, Scri
 use script_traits::{LogEntry, ServiceWorkerMsg, webdriver_msg};
 use script_traits::{MozBrowserErrorType, MozBrowserEvent, WebDriverCommandMsg, WindowSizeData};
 use script_traits::{SWManagerMsg, ScopeThings, WindowSizeType};
+use servo_url::ServoUrl;
 use std::borrow::ToOwned;
 use std::collections::{HashMap, VecDeque};
 use std::io::Error as IOError;
@@ -62,7 +63,6 @@ use style_traits::PagePx;
 use style_traits::cursor::Cursor;
 use style_traits::viewport::ViewportConstraints;
 use timer_scheduler::TimerScheduler;
-use url::Url;
 use util::opts;
 use util::prefs::PREFS;
 use util::remutex::ReentrantMutex;
@@ -1026,6 +1026,9 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
                     warn!("Unable to forward DOMMessage for postMessage call");
                 }
             }
+            FromScriptMsg::BroadcastStorageEvent(pipeline_id, storage, url, key, old_value, new_value) => {
+                self.handle_broadcast_storage_event(pipeline_id, storage, url, key, old_value, new_value);
+            }
         }
     }
 
@@ -1044,11 +1047,26 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
         }
     }
 
-    fn handle_register_serviceworker(&self, scope_things: ScopeThings, scope: Url) {
+    fn handle_register_serviceworker(&self, scope_things: ScopeThings, scope: ServoUrl) {
         if let Some(ref mgr) = self.swmanager_chan {
             let _ = mgr.send(ServiceWorkerMsg::RegisterServiceWorker(scope_things, scope));
         } else {
             warn!("sending scope info to service worker manager failed");
+        }
+    }
+
+    fn handle_broadcast_storage_event(&self, pipeline_id: PipelineId, storage: StorageType, url: ServoUrl,
+                                      key: Option<String>, old_value: Option<String>, new_value: Option<String>) {
+        let origin = url.origin();
+        for pipeline in self.pipelines.values() {
+            if (pipeline.id != pipeline_id) && (pipeline.url.origin() == origin) {
+                let msg = ConstellationControlMsg::DispatchStorageEvent(
+                    pipeline.id, storage, url.clone(), key.clone(), old_value.clone(), new_value.clone()
+                );
+                if let Err(err) = pipeline.script_chan.send(msg) {
+                    warn!("Failed to broadcast storage event to pipeline {} ({:?}).", pipeline.id, err);
+                }
+            }
         }
     }
 
@@ -1186,7 +1204,7 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
                 self.close_pipeline(pending_pipeline_id, ExitPipelineMode::Force);
             }
 
-            let failure_url = Url::parse("about:failure").expect("infallible");
+            let failure_url = ServoUrl::parse("about:failure").expect("infallible");
 
             if let Some(pipeline_url) = pipeline_url {
                 if pipeline_url == failure_url {
@@ -1227,7 +1245,7 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
         }
     }
 
-    fn handle_init_load(&mut self, url: Url) {
+    fn handle_init_load(&mut self, url: ServoUrl) {
         let window_size = self.window_size.visible_viewport;
         let root_pipeline_id = PipelineId::new();
         let root_frame_id = self.root_frame_id;
@@ -1313,7 +1331,7 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
             let load_data = load_info.load_data.unwrap_or_else(|| {
                 let url = match old_pipeline {
                     Some(old_pipeline) => old_pipeline.url.clone(),
-                    None => Url::parse("about:blank").expect("infallible"),
+                    None => ServoUrl::parse("about:blank").expect("infallible"),
                 };
 
                 // TODO - loaddata here should have referrer info (not None, None)

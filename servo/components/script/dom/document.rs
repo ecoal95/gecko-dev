@@ -59,10 +59,7 @@ use dom::htmlheadelement::HTMLHeadElement;
 use dom::htmlhtmlelement::HTMLHtmlElement;
 use dom::htmliframeelement::HTMLIFrameElement;
 use dom::htmlimageelement::HTMLImageElement;
-use dom::htmllinkelement::HTMLLinkElement;
-use dom::htmlmetaelement::HTMLMetaElement;
 use dom::htmlscriptelement::HTMLScriptElement;
-use dom::htmlstyleelement::HTMLStyleElement;
 use dom::htmltitleelement::HTMLTitleElement;
 use dom::keyboardevent::KeyboardEvent;
 use dom::location::Location;
@@ -111,6 +108,7 @@ use script_traits::{ScriptMsg as ConstellationMsg, TouchpadPressurePhase};
 use script_traits::{TouchEventType, TouchId};
 use script_traits::UntrustedNodeAddress;
 use servo_atoms::Atom;
+use servo_url::ServoUrl;
 use std::ascii::AsciiExt;
 use std::borrow::ToOwned;
 use std::boxed::FnBox;
@@ -125,11 +123,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use style::attr::AttrValue;
 use style::context::ReflowGoal;
-use style::selector_impl::Snapshot;
+use style::restyle_hints::RestyleHint;
+use style::selector_impl::{RestyleDamage, Snapshot};
 use style::str::{split_html_space_chars, str_join};
 use style::stylesheets::Stylesheet;
 use time;
-use url::Url;
 use url::percent_encoding::percent_decode;
 use util::prefs::PREFS;
 
@@ -152,10 +150,33 @@ enum ParserBlockedByScript {
 
 #[derive(JSTraceable, HeapSizeOf)]
 #[must_root]
-struct StylesheetInDocument {
-    node: JS<Node>,
+pub struct StylesheetInDocument {
+    pub node: JS<Node>,
     #[ignore_heap_size_of = "Arc"]
-    stylesheet: Arc<Stylesheet>,
+    pub stylesheet: Arc<Stylesheet>,
+}
+
+#[derive(Debug, HeapSizeOf)]
+pub struct PendingRestyle {
+    /// If this element had a state or attribute change since the last restyle, track
+    /// the original condition of the element.
+    pub snapshot: Option<Snapshot>,
+
+    /// Any explicit restyles hints that have been accumulated for this element.
+    pub hint: RestyleHint,
+
+    /// Any explicit restyles damage that have been accumulated for this element.
+    pub damage: RestyleDamage,
+}
+
+impl PendingRestyle {
+    pub fn new() -> Self {
+        PendingRestyle {
+            snapshot: None,
+            hint: RestyleHint::empty(),
+            damage: RestyleDamage::empty(),
+        }
+    }
 }
 
 // https://dom.spec.whatwg.org/#document
@@ -171,7 +192,7 @@ pub struct Document {
     last_modified: Option<String>,
     encoding: Cell<EncodingRef>,
     is_html_document: bool,
-    url: Url,
+    url: ServoUrl,
     quirks_mode: Cell<QuirksMode>,
     /// Caches for the getElement methods
     id_map: DOMRefCell<HashMap<Atom, Vec<JS<Element>>>>,
@@ -189,6 +210,7 @@ pub struct Document {
     stylesheets: DOMRefCell<Option<Vec<StylesheetInDocument>>>,
     /// Whether the list of stylesheets has changed since the last reflow was triggered.
     stylesheets_changed_since_reflow: Cell<bool>,
+    stylesheet_list: MutNullableHeap<JS<StyleSheetList>>,
     ready_state: Cell<DocumentReadyState>,
     /// Whether the DOMContentLoaded event has already been dispatched.
     domcontentloaded_dispatched: Cell<bool>,
@@ -234,9 +256,9 @@ pub struct Document {
     /// This field is set to the document itself for inert documents.
     /// https://html.spec.whatwg.org/multipage/#appropriate-template-contents-owner-document
     appropriate_template_contents_owner_document: MutNullableHeap<JS<Document>>,
-    /// For each element that has had a state or attribute change since the last restyle,
-    /// track the original condition of the element.
-    modified_elements: DOMRefCell<HashMap<JS<Element>, Snapshot>>,
+    /// Information on elements needing restyle to ship over to the layout thread when the
+    /// time comes.
+    pending_restyles: DOMRefCell<HashMap<JS<Element>, PendingRestyle>>,
     /// This flag will be true if layout suppressed a reflow attempt that was
     /// needed in order for the page to be painted.
     needs_paint: Cell<bool>,
@@ -376,12 +398,12 @@ impl Document {
     }
 
     // https://dom.spec.whatwg.org/#concept-document-url
-    pub fn url(&self) -> &Url {
+    pub fn url(&self) -> &ServoUrl {
         &self.url
     }
 
     // https://html.spec.whatwg.org/multipage/#fallback-base-url
-    pub fn fallback_base_url(&self) -> Url {
+    pub fn fallback_base_url(&self) -> ServoUrl {
         // Step 1: iframe srcdoc (#4767).
         // Step 2: about:blank with a creator browsing context.
         // Step 3.
@@ -389,7 +411,7 @@ impl Document {
     }
 
     // https://html.spec.whatwg.org/multipage/#document-base-url
-    pub fn base_url(&self) -> Url {
+    pub fn base_url(&self) -> ServoUrl {
         match self.base_element() {
             // Step 1.
             None => self.fallback_base_url(),
@@ -410,7 +432,7 @@ impl Document {
             Some(root) => {
                 root.upcast::<Node>().is_dirty() ||
                 root.upcast::<Node>().has_dirty_descendants() ||
-                !self.modified_elements.borrow().is_empty() ||
+                !self.pending_restyles.borrow().is_empty() ||
                 self.needs_paint()
             }
             None => false,
@@ -453,7 +475,7 @@ impl Document {
     }
 
     pub fn content_and_heritage_changed(&self, node: &Node, damage: NodeDamage) {
-        node.force_dirty_ancestors(damage);
+        node.dirty(damage);
     }
 
     /// Reflows and disarms the timer if the reflow timer has expired.
@@ -1708,7 +1730,7 @@ pub enum DocumentSource {
 #[allow(unsafe_code)]
 pub trait LayoutDocumentHelpers {
     unsafe fn is_html_document_for_layout(&self) -> bool;
-    unsafe fn drain_modified_elements(&self) -> Vec<(LayoutJS<Element>, Snapshot)>;
+    unsafe fn drain_pending_restyles(&self) -> Vec<(LayoutJS<Element>, PendingRestyle)>;
     unsafe fn needs_paint_from_layout(&self);
     unsafe fn will_paint(&self);
 }
@@ -1722,8 +1744,8 @@ impl LayoutDocumentHelpers for LayoutJS<Document> {
 
     #[inline]
     #[allow(unrooted_must_root)]
-    unsafe fn drain_modified_elements(&self) -> Vec<(LayoutJS<Element>, Snapshot)> {
-        let mut elements = (*self.unsafe_get()).modified_elements.borrow_mut_for_layout();
+    unsafe fn drain_pending_restyles(&self) -> Vec<(LayoutJS<Element>, PendingRestyle)> {
+        let mut elements = (*self.unsafe_get()).pending_restyles.borrow_mut_for_layout();
         let result = elements.drain().map(|(k, v)| (k.to_layout(), v)).collect();
         result
     }
@@ -1740,7 +1762,7 @@ impl LayoutDocumentHelpers for LayoutJS<Document> {
 }
 
 /// https://url.spec.whatwg.org/#network-scheme
-fn url_has_network_scheme(url: &Url) -> bool {
+fn url_has_network_scheme(url: &ServoUrl) -> bool {
     match url.scheme() {
         "ftp" | "http" | "https" => true,
         _ => false,
@@ -1750,7 +1772,7 @@ fn url_has_network_scheme(url: &Url) -> bool {
 impl Document {
     pub fn new_inherited(window: &Window,
                          browsing_context: Option<&BrowsingContext>,
-                         url: Option<Url>,
+                         url: Option<ServoUrl>,
                          is_html_document: IsHTMLDocument,
                          content_type: Option<DOMString>,
                          last_modified: Option<String>,
@@ -1759,7 +1781,7 @@ impl Document {
                          referrer: Option<String>,
                          referrer_policy: Option<ReferrerPolicy>)
                          -> Document {
-        let url = url.unwrap_or_else(|| Url::parse("about:blank").unwrap());
+        let url = url.unwrap_or_else(|| ServoUrl::parse("about:blank").unwrap());
 
         let (ready_state, domcontentloaded_dispatched) = if source == DocumentSource::FromParser {
             (DocumentReadyState::Loading, false)
@@ -1811,6 +1833,7 @@ impl Document {
             applets: Default::default(),
             stylesheets: DOMRefCell::new(None),
             stylesheets_changed_since_reflow: Cell::new(false),
+            stylesheet_list: MutNullableHeap::new(None),
             ready_state: Cell::new(ready_state),
             domcontentloaded_dispatched: Cell::new(domcontentloaded_dispatched),
             possibly_focused: Default::default(),
@@ -1830,7 +1853,7 @@ impl Document {
             reflow_timeout: Cell::new(None),
             base_element: Default::default(),
             appropriate_template_contents_owner_document: Default::default(),
-            modified_elements: DOMRefCell::new(HashMap::new()),
+            pending_restyles: DOMRefCell::new(HashMap::new()),
             needs_paint: Cell::new(false),
             active_touch_points: DOMRefCell::new(Vec::new()),
             dom_loading: Cell::new(Default::default()),
@@ -1869,7 +1892,7 @@ impl Document {
 
     pub fn new(window: &Window,
                browsing_context: Option<&BrowsingContext>,
-               url: Option<Url>,
+               url: Option<ServoUrl>,
                doctype: IsHTMLDocument,
                content_type: Option<DOMString>,
                last_modified: Option<String>,
@@ -1910,33 +1933,35 @@ impl Document {
         self.GetDocumentElement().and_then(Root::downcast)
     }
 
+    // Ensure that the stylesheets vector is populated
+    fn ensure_stylesheets(&self) {
+        let mut stylesheets = self.stylesheets.borrow_mut();
+        if stylesheets.is_none() {
+            *stylesheets = Some(self.upcast::<Node>()
+                .traverse_preorder()
+                .filter_map(|node| {
+                    node.get_stylesheet()
+                        .map(|stylesheet| StylesheetInDocument {
+                        node: JS::from_ref(&*node),
+                        stylesheet: stylesheet,
+                    })
+                })
+                .collect());
+        };
+    }
+
     /// Returns the list of stylesheets associated with nodes in the document.
     pub fn stylesheets(&self) -> Vec<Arc<Stylesheet>> {
-        {
-            let mut stylesheets = self.stylesheets.borrow_mut();
-            if stylesheets.is_none() {
-                *stylesheets = Some(self.upcast::<Node>()
-                    .traverse_preorder()
-                    .filter_map(|node| {
-                        if let Some(node) = node.downcast::<HTMLStyleElement>() {
-                            node.get_stylesheet()
-                        } else if let Some(node) = node.downcast::<HTMLLinkElement>() {
-                            node.get_stylesheet()
-                        } else if let Some(node) = node.downcast::<HTMLMetaElement>() {
-                            node.get_stylesheet()
-                        } else {
-                            None
-                        }.map(|stylesheet| StylesheetInDocument {
-                            node: JS::from_ref(&*node),
-                            stylesheet: stylesheet
-                        })
-                    })
-                    .collect());
-            };
-        }
+        self.ensure_stylesheets();
         self.stylesheets.borrow().as_ref().unwrap().iter()
                         .map(|s| s.stylesheet.clone())
                         .collect()
+    }
+
+    pub fn with_style_sheets_in_document<F, T>(&self, mut f: F) -> T
+            where F: FnMut(&[StylesheetInDocument]) -> T {
+        self.ensure_stylesheets();
+        f(&self.stylesheets.borrow().as_ref().unwrap())
     }
 
     /// https://html.spec.whatwg.org/multipage/#appropriate-template-contents-owner-document
@@ -1966,23 +1991,28 @@ impl Document {
         self.id_map.borrow().get(&id).map(|ref elements| Root::from_ref(&*(*elements)[0]))
     }
 
+    pub fn ensure_pending_restyle(&self, el: &Element) -> RefMut<PendingRestyle> {
+        let map = self.pending_restyles.borrow_mut();
+        RefMut::map(map, |m| m.entry(JS::from_ref(el)).or_insert_with(PendingRestyle::new))
+    }
+
+    pub fn ensure_snapshot(&self, el: &Element) -> RefMut<Snapshot> {
+        let mut entry = self.ensure_pending_restyle(el);
+        if entry.snapshot.is_none() {
+            entry.snapshot = Some(Snapshot::new(el.html_element_in_html_document()));
+        }
+        RefMut::map(entry, |e| e.snapshot.as_mut().unwrap())
+    }
+
     pub fn element_state_will_change(&self, el: &Element) {
-        let mut map = self.modified_elements.borrow_mut();
-        let snapshot = map.entry(JS::from_ref(el))
-                          .or_insert_with(|| {
-                              Snapshot::new(el.html_element_in_html_document())
-                          });
+        let mut snapshot = self.ensure_snapshot(el);
         if snapshot.state.is_none() {
             snapshot.state = Some(el.state());
         }
     }
 
     pub fn element_attr_will_change(&self, el: &Element) {
-        let mut map = self.modified_elements.borrow_mut();
-        let mut snapshot = map.entry(JS::from_ref(el))
-                              .or_insert_with(|| {
-                                  Snapshot::new(el.html_element_in_html_document())
-                              });
+        let mut snapshot = self.ensure_snapshot(el);
         if snapshot.attrs.is_none() {
             let attrs = el.attrs()
                           .iter()
@@ -2038,7 +2068,7 @@ impl Element {
 impl DocumentMethods for Document {
     // https://drafts.csswg.org/cssom/#dom-document-stylesheets
     fn StyleSheets(&self) -> Root<StyleSheetList> {
-        StyleSheetList::new(&self.window, JS::from_ref(&self))
+        self.stylesheet_list.or_init(|| StyleSheetList::new(&self.window, JS::from_ref(&self)))
     }
 
     // https://dom.spec.whatwg.org/#dom-document-implementation
@@ -2802,7 +2832,7 @@ impl DocumentMethods for Document {
 
     #[allow(unsafe_code)]
     // https://html.spec.whatwg.org/multipage/#dom-tree-accessors:dom-document-nameditem-filter
-    fn NamedGetter(&self, _cx: *mut JSContext, name: DOMString) -> Option<NonZero<*mut JSObject>> {
+    unsafe fn NamedGetter(&self, _cx: *mut JSContext, name: DOMString) -> Option<NonZero<*mut JSObject>> {
         #[derive(JSTraceable, HeapSizeOf)]
         struct NamedElementFilter {
             name: Atom,
@@ -2870,9 +2900,7 @@ impl DocumentMethods for Document {
                 if elements.peek().is_none() {
                     // TODO: Step 2.
                     // Step 3.
-                    return unsafe {
-                        Some(NonZero::new(first.reflector().get_jsobject().get()))
-                    };
+                    return Some(NonZero::new(first.reflector().get_jsobject().get()));
                 }
             } else {
                 return None;
@@ -2883,9 +2911,7 @@ impl DocumentMethods for Document {
             name: name,
         };
         let collection = HTMLCollection::create(self.window(), root, box filter);
-        unsafe {
-            Some(NonZero::new(collection.reflector().get_jsobject().get()))
-        }
+        Some(NonZero::new(collection.reflector().get_jsobject().get()))
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-tree-accessors:supported-property-names

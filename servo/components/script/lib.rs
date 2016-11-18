@@ -82,6 +82,7 @@ extern crate script_traits;
 extern crate selectors;
 extern crate serde;
 #[macro_use] extern crate servo_atoms;
+extern crate servo_url;
 extern crate smallvec;
 #[macro_use]
 extern crate style;
@@ -173,11 +174,11 @@ pub fn init_service_workers(sw_senders: SWManagerSenders) {
 pub fn init() {
     unsafe {
         proxyhandler::init();
-    }
 
-    // Create the global vtables used by the (generated) DOM
-    // bindings to implement JS proxies.
-    RegisterBindings::RegisterProxyHandlers();
+        // Create the global vtables used by the (generated) DOM
+        // bindings to implement JS proxies.
+        RegisterBindings::RegisterProxyHandlers();
+    }
 
     perform_platform_specific_initialization();
 }

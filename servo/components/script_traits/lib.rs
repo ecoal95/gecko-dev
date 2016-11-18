@@ -31,9 +31,9 @@ extern crate rustc_serialize;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
+extern crate servo_url;
 extern crate style_traits;
 extern crate time;
-extern crate url;
 
 mod script_msg;
 pub mod webdriver_msg;
@@ -60,14 +60,15 @@ use net_traits::{ReferrerPolicy, ResourceThreads};
 use net_traits::image::base::Image;
 use net_traits::image_cache_thread::ImageCacheThread;
 use net_traits::response::HttpsState;
+use net_traits::storage_thread::StorageType;
 use profile_traits::mem;
 use profile_traits::time as profile_time;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use servo_url::ServoUrl;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::mpsc::{Receiver, Sender};
 use style_traits::{PagePx, UnsafeNode, ViewportPx};
-use url::Url;
 use webdriver_msg::{LoadStatus, WebDriverScriptCommand};
 
 pub use script_msg::{LayoutMsg, ScriptMsg, EventResult, LogEntry};
@@ -130,7 +131,7 @@ pub enum LayoutControlMsg {
 #[derive(Clone, Deserialize, Serialize)]
 pub struct LoadData {
     /// The URL.
-    pub url: Url,
+    pub url: ServoUrl,
     /// The method.
     #[serde(deserialize_with = "::hyper_serde::deserialize",
             serialize_with = "::hyper_serde::serialize")]
@@ -144,12 +145,12 @@ pub struct LoadData {
     /// The referrer policy.
     pub referrer_policy: Option<ReferrerPolicy>,
     /// The referrer URL.
-    pub referrer_url: Option<Url>,
+    pub referrer_url: Option<ServoUrl>,
 }
 
 impl LoadData {
     /// Create a new `LoadData` object.
-    pub fn new(url: Url, referrer_policy: Option<ReferrerPolicy>, referrer_url: Option<Url>) -> LoadData {
+    pub fn new(url: ServoUrl, referrer_policy: Option<ReferrerPolicy>, referrer_url: Option<ServoUrl>) -> LoadData {
         LoadData {
             url: url,
             method: Method::Get,
@@ -244,6 +245,9 @@ pub enum ConstellationControlMsg {
         /// The pipeline that has completed loading.
         child: PipelineId,
     },
+    /// Cause a `storage` event to be dispatched at the appropriate window.
+    /// The strings are key, old value and new value.
+    DispatchStorageEvent(PipelineId, StorageType, ServoUrl, Option<String>, Option<String>, Option<String>),
     /// Notifies a parent pipeline that one of its child frames is now active.
     /// PipelineId is for the parent, FrameId is the child frame.
     FramedContentChanged(PipelineId, FrameId),
@@ -279,6 +283,7 @@ impl fmt::Debug for ConstellationControlMsg {
             TransitionEnd(..) => "TransitionEnd",
             WebFontLoaded(..) => "WebFontLoaded",
             DispatchFrameLoadEvent { .. } => "DispatchFrameLoadEvent",
+            DispatchStorageEvent(..) => "DispatchStorageEvent",
             FramedContentChanged(..) => "FramedContentChanged",
             ReportCSSError(..) => "ReportCSSError",
             Reload(..) => "Reload"
@@ -677,7 +682,7 @@ pub enum ConstellationMsg {
     /// immediately.
     GetPipelineTitle(PipelineId),
     /// Request to load the initial page.
-    InitLoadUrl(Url),
+    InitLoadUrl(ServoUrl),
     /// Query the constellation to see if the current compositor output is stable
     IsReadyToSaveImage(HashMap<PipelineId, Epoch>),
     /// Inform the constellation of a key event.
@@ -725,7 +730,7 @@ pub struct WorkerGlobalScopeInit {
 #[derive(Deserialize, Serialize, Clone)]
 pub struct WorkerScriptLoadOrigin {
     /// referrer url
-    pub referrer_url: Option<Url>,
+    pub referrer_url: Option<ServoUrl>,
     /// the referrer policy which is used
     pub referrer_policy: Option<ReferrerPolicy>,
     /// the pipeline id of the entity requesting the load

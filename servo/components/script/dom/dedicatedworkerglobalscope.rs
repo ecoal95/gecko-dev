@@ -33,12 +33,12 @@ use rand::random;
 use script_runtime::{CommonScriptMsg, ScriptChan, ScriptPort, StackRootTLS, get_reports, new_rt_and_cx};
 use script_runtime::ScriptThreadEventCategory::WorkerEvent;
 use script_traits::{TimerEvent, TimerSource, WorkerGlobalScopeInit, WorkerScriptLoadOrigin};
+use servo_url::ServoUrl;
 use std::mem::replace;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{Receiver, RecvError, Select, Sender, channel};
 use style::thread_state;
-use url::Url;
 use util::thread::spawn_named;
 
 /// Set the `worker` field of a related DedicatedWorkerGlobalScope object to a particular
@@ -92,7 +92,7 @@ pub struct DedicatedWorkerGlobalScope {
 
 impl DedicatedWorkerGlobalScope {
     fn new_inherited(init: WorkerGlobalScopeInit,
-                     worker_url: Url,
+                     worker_url: ServoUrl,
                      from_devtools_receiver: Receiver<DevtoolScriptControlMsg>,
                      runtime: Runtime,
                      parent_sender: Box<ScriptChan + Send>,
@@ -117,8 +117,9 @@ impl DedicatedWorkerGlobalScope {
         }
     }
 
+    #[allow(unsafe_code)]
     pub fn new(init: WorkerGlobalScopeInit,
-               worker_url: Url,
+               worker_url: ServoUrl,
                from_devtools_receiver: Receiver<DevtoolScriptControlMsg>,
                runtime: Runtime,
                parent_sender: Box<ScriptChan + Send>,
@@ -139,12 +140,14 @@ impl DedicatedWorkerGlobalScope {
                                                                   timer_event_chan,
                                                                   timer_event_port,
                                                                   closing);
-        DedicatedWorkerGlobalScopeBinding::Wrap(cx, scope)
+        unsafe {
+            DedicatedWorkerGlobalScopeBinding::Wrap(cx, scope)
+        }
     }
 
     #[allow(unsafe_code)]
     pub fn run_worker_scope(init: WorkerGlobalScopeInit,
-                            worker_url: Url,
+                            worker_url: ServoUrl,
                             from_devtools_receiver: IpcReceiver<DevtoolScriptControlMsg>,
                             worker_rt_for_mainthread: Arc<Mutex<Option<SharedRt>>>,
                             worker: TrustedWorkerAddress,
@@ -366,8 +369,9 @@ unsafe extern "C" fn interrupt_callback(cx: *mut JSContext) -> bool {
 }
 
 impl DedicatedWorkerGlobalScopeMethods for DedicatedWorkerGlobalScope {
+    #[allow(unsafe_code)]
     // https://html.spec.whatwg.org/multipage/#dom-dedicatedworkerglobalscope-postmessage
-    fn PostMessage(&self, cx: *mut JSContext, message: HandleValue) -> ErrorResult {
+    unsafe fn PostMessage(&self, cx: *mut JSContext, message: HandleValue) -> ErrorResult {
         let data = try!(StructuredCloneData::write(cx, message));
         let worker = self.worker.borrow().as_ref().unwrap().clone();
         self.parent_sender

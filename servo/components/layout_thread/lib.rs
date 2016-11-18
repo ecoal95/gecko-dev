@@ -40,8 +40,9 @@ extern crate script_layout_interface;
 extern crate script_traits;
 extern crate selectors;
 extern crate serde_json;
+extern crate servo_url;
 extern crate style;
-extern crate url;
+extern crate style_traits;
 extern crate util;
 extern crate webrender_traits;
 
@@ -94,6 +95,7 @@ use script_layout_interface::wrapper_traits::LayoutNode;
 use script_traits::{ConstellationControlMsg, LayoutControlMsg, LayoutMsg as ConstellationMsg};
 use script_traits::{StackingContextScrollState, UntrustedNodeAddress};
 use selectors::Element;
+use servo_url::ServoUrl;
 use std::borrow::ToOwned;
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
@@ -104,7 +106,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use style::animation::Animation;
 use style::context::{LocalStyleContextCreationInfo, ReflowGoal, SharedStyleContext};
-use style::dom::{TDocument, TElement, TNode};
+use style::dom::{TElement, TNode};
 use style::error_reporting::{ParseErrorReporter, StdoutErrorReporter};
 use style::logical_geometry::LogicalPoint;
 use style::media_queries::{Device, MediaType};
@@ -114,7 +116,6 @@ use style::servo::restyle_damage::{REFLOW, REFLOW_OUT_OF_FLOW, REPAINT, REPOSITI
 use style::stylesheets::{Origin, Stylesheet, UserAgentStylesheets};
 use style::thread_state;
 use style::timer::Timer;
-use url::Url;
 use util::geometry::max_rect;
 use util::opts;
 use util::prefs::PREFS;
@@ -127,7 +128,7 @@ pub struct LayoutThread {
     id: PipelineId,
 
     /// The URL of the pipeline that we belong to.
-    url: Url,
+    url: ServoUrl,
 
     /// Is the current reflow of an iframe, as opposed to a root window?
     is_iframe: bool,
@@ -213,7 +214,7 @@ pub struct LayoutThread {
     /// The CSS error reporter for all CSS loaded in this layout thread
     error_reporter: CSSErrorReporter,
 
-    webrender_image_cache: Arc<RwLock<HashMap<(Url, UsePlaceholder),
+    webrender_image_cache: Arc<RwLock<HashMap<(ServoUrl, UsePlaceholder),
                                               WebRenderImageInfo,
                                               BuildHasherDefault<FnvHasher>>>>,
 
@@ -234,7 +235,7 @@ impl LayoutThreadFactory for LayoutThread {
 
     /// Spawns a new layout thread.
     fn create(id: PipelineId,
-              url: Url,
+              url: ServoUrl,
               is_iframe: bool,
               chan: (Sender<Msg>, Receiver<Msg>),
               pipeline_port: IpcReceiver<LayoutControlMsg>,
@@ -254,18 +255,18 @@ impl LayoutThreadFactory for LayoutThread {
             { // Ensures layout thread is destroyed before we send shutdown message
                 let sender = chan.0;
                 let layout = LayoutThread::new(id,
-                                             url,
-                                             is_iframe,
-                                             chan.1,
-                                             pipeline_port,
-                                             constellation_chan,
-                                             script_chan,
-                                             image_cache_thread,
-                                             font_cache_thread,
-                                             time_profiler_chan,
-                                             mem_profiler_chan.clone(),
-                                             webrender_api_sender,
-                                             layout_threads);
+                                               url,
+                                               is_iframe,
+                                               chan.1,
+                                               pipeline_port,
+                                               constellation_chan,
+                                               script_chan,
+                                               image_cache_thread,
+                                               font_cache_thread,
+                                               time_profiler_chan,
+                                               mem_profiler_chan.clone(),
+                                               webrender_api_sender,
+                                               layout_threads);
 
                 let reporter_name = format!("layout-reporter-{}", id);
                 mem_profiler_chan.run_with_memory_reporting(|| {
@@ -365,7 +366,7 @@ fn add_font_face_rules(stylesheet: &Stylesheet,
 impl LayoutThread {
     /// Creates a new `LayoutThread` structure.
     fn new(id: PipelineId,
-           url: Url,
+           url: ServoUrl,
            is_iframe: bool,
            port: Receiver<Msg>,
            pipeline_port: IpcReceiver<LayoutControlMsg>,
@@ -939,33 +940,25 @@ impl LayoutThread {
 
             debug!("Layout done!");
 
-            self.epoch.next();
-
             // TODO: Avoid the temporary conversion and build webrender sc/dl directly!
-            let Epoch(epoch_number) = self.epoch;
-            let epoch = webrender_traits::Epoch(epoch_number);
             let pipeline_id = self.id.to_webrender();
-
-            // TODO(gw) For now only create a root scrolling layer!
             let mut frame_builder = WebRenderFrameBuilder::new(pipeline_id);
-            let sc_id = rw_data.display_list.as_ref().unwrap().convert_to_webrender(
-                &mut self.webrender_api,
-                pipeline_id,
-                epoch,
+            let built_display_list = rw_data.display_list.as_ref().unwrap().convert_to_webrender(
                 &mut frame_builder);
-            let root_background_color = get_root_flow_background_color(layout_root);
 
             let viewport_size = Size2D::new(self.viewport_size.width.to_f32_px(),
                                             self.viewport_size.height.to_f32_px());
 
-            self.webrender_api.set_root_stacking_context(sc_id,
-                                                         root_background_color,
-                                                         epoch,
-                                                         pipeline_id,
-                                                         viewport_size,
-                                                         frame_builder.stacking_contexts,
-                                                         frame_builder.display_lists,
-                                                         frame_builder.auxiliary_lists_builder.finalize());
+            self.epoch.next();
+            let Epoch(epoch_number) = self.epoch;
+
+            self.webrender_api.set_root_display_list(
+                get_root_flow_background_color(layout_root),
+                webrender_traits::Epoch(epoch_number),
+                pipeline_id,
+                viewport_size,
+                built_display_list,
+                frame_builder.auxiliary_lists_builder.finalize());
         });
     }
 
@@ -1071,11 +1064,8 @@ impl LayoutThread {
                         // NB: The dirty bit is propagated down the tree.
                         unsafe { node.set_dirty(); }
 
-                        let mut current = node.parent_node().and_then(|n| n.as_element());
-                        while let Some(el) = current {
-                            if el.has_dirty_descendants() { break; }
-                            unsafe { el.set_dirty_descendants(); }
-                            current = el.parent_element();
+                        if let Some(p) = node.parent_node().and_then(|n| n.as_element()) {
+                            unsafe { p.note_dirty_descendant() };
                         }
 
                         next = iter.next_skipping_children();
@@ -1104,11 +1094,40 @@ impl LayoutThread {
             }
         }
 
-        let modified_elements = document.drain_modified_elements();
+        let restyles = document.drain_pending_restyles();
         if !needs_dirtying {
-            for (el, snapshot) in modified_elements {
-                let hint = rw_data.stylist.compute_restyle_hint(&el, &snapshot, el.get_state());
-                el.note_restyle_hint::<RecalcStyleAndConstructFlows>(hint);
+            for (el, restyle) in restyles {
+                // Propagate the descendant bit up the ancestors. Do this before
+                // the restyle calculation so that we can also do it for new
+                // unstyled nodes, which the descendants bit helps us find.
+                if let Some(parent) = el.parent_element() {
+                    unsafe { parent.note_dirty_descendant() };
+                }
+
+                if el.get_data().is_none() {
+                    // If we haven't styled this node yet, we don't need to track
+                    // a restyle.
+                    continue;
+                }
+
+                // Start with the explicit hint, if any.
+                let mut hint = restyle.hint;
+
+                // Expand any snapshots.
+                if let Some(s) = restyle.snapshot {
+                    hint |= rw_data.stylist.compute_restyle_hint(&el, &s, el.get_state());
+                }
+
+                // Apply the cumulative hint.
+                if !hint.is_empty() {
+                    el.note_restyle_hint::<RecalcStyleAndConstructFlows>(hint);
+                }
+
+                // Apply explicit damage, if any.
+                if !restyle.damage.is_empty() {
+                    let mut d = el.mutate_layout_data().unwrap();
+                    d.base.restyle_damage |= restyle.damage;
+                }
             }
         }
 
@@ -1508,7 +1527,7 @@ fn get_ua_stylesheets() -> Result<UserAgentStylesheets, &'static str> {
         let res = try!(read_resource_file(filename).map_err(|_| filename));
         Ok(Stylesheet::from_bytes(
             &res,
-            Url::parse(&format!("chrome://resources/{:?}", filename)).unwrap(),
+            ServoUrl::parse(&format!("chrome://resources/{:?}", filename)).unwrap(),
             None,
             None,
             Origin::UserAgent,

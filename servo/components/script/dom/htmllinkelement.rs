@@ -14,6 +14,7 @@ use dom::bindings::js::{JS, MutNullableHeap, Root, RootedReference};
 use dom::bindings::refcounted::Trusted;
 use dom::bindings::reflector::Reflectable;
 use dom::bindings::str::DOMString;
+use dom::cssstylesheet::CSSStyleSheet;
 use dom::document::Document;
 use dom::domtokenlist::DOMTokenList;
 use dom::element::{AttributeMutation, Element, ElementCreator};
@@ -35,6 +36,7 @@ use net_traits::request::{CredentialsMode, Destination, RequestInit, Type as Req
 use network_listener::{NetworkListener, PreInvoke};
 use script_layout_interface::message::Msg;
 use script_traits::{MozBrowserEvent, ScriptMsg as ConstellationMsg};
+use servo_url::ServoUrl;
 use std::ascii::AsciiExt;
 use std::borrow::ToOwned;
 use std::cell::Cell;
@@ -46,7 +48,6 @@ use style::media_queries::{MediaList, parse_media_query_list};
 use style::parser::ParserContextExtraData;
 use style::str::HTML_SPACE_CHARACTERS;
 use style::stylesheets::{Stylesheet, Origin};
-use url::Url;
 
 no_jsmanaged_fields!(Stylesheet);
 
@@ -56,6 +57,7 @@ pub struct HTMLLinkElement {
     rel_list: MutNullableHeap<JS<DOMTokenList>>,
     #[ignore_heap_size_of = "Arc"]
     stylesheet: DOMRefCell<Option<Arc<Stylesheet>>>,
+    cssom_stylesheet: MutNullableHeap<JS<CSSStyleSheet>>,
 
     /// https://html.spec.whatwg.org/multipage/#a-style-sheet-that-is-blocking-scripts
     parser_inserted: Cell<bool>,
@@ -69,6 +71,7 @@ impl HTMLLinkElement {
             rel_list: Default::default(),
             parser_inserted: Cell::new(creator == ElementCreator::ParserCreated),
             stylesheet: DOMRefCell::new(None),
+            cssom_stylesheet: MutNullableHeap::new(None),
         }
     }
 
@@ -84,6 +87,18 @@ impl HTMLLinkElement {
 
     pub fn get_stylesheet(&self) -> Option<Arc<Stylesheet>> {
         self.stylesheet.borrow().clone()
+    }
+
+    pub fn get_cssom_stylesheet(&self) -> Option<Root<CSSStyleSheet>> {
+        self.get_stylesheet().map(|sheet| {
+            self.cssom_stylesheet.or_init(|| {
+                CSSStyleSheet::new(&window_from_node(self),
+                                   "text/css".into(),
+                                   None, // todo handle location
+                                   None, // todo handle title
+                                   sheet)
+            })
+        })
     }
 }
 
@@ -303,7 +318,7 @@ struct StylesheetContext {
     /// The response metadata received to date.
     metadata: Option<Metadata>,
     /// The initial URL requested.
-    url: Url,
+    url: ServoUrl,
 }
 
 impl PreInvoke for StylesheetContext {}

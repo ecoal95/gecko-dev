@@ -12,17 +12,17 @@ use gfx_traits::ByteIndex;
 use html5ever_atoms::{Namespace, LocalName};
 use msg::constellation_msg::PipelineId;
 use range::Range;
+use servo_url::ServoUrl;
 use std::fmt::Debug;
 use std::sync::Arc;
 use style::atomic_refcell::AtomicRefCell;
 use style::computed_values::display;
 use style::context::SharedStyleContext;
 use style::data::ElementData;
-use style::dom::{LayoutIterator, NodeInfo, PresentationalHintsSynthetizer, TElement, TNode};
+use style::dom::{LayoutIterator, NodeInfo, PresentationalHintsSynthetizer, TNode};
 use style::dom::OpaqueNode;
 use style::properties::ServoComputedValues;
 use style::selector_impl::{PseudoElement, PseudoElementCascadeType, RestyleDamage, ServoSelectorImpl};
-use url::Url;
 
 #[derive(Copy, PartialEq, Clone, Debug)]
 pub enum PseudoElementType<T> {
@@ -85,8 +85,6 @@ pub trait LayoutNode: GetLayoutData + TNode {
 
     unsafe fn init_style_and_layout_data(&self, data: OpaqueStyleAndLayoutData);
     unsafe fn take_style_and_layout_data(&self) -> OpaqueStyleAndLayoutData;
-
-    fn has_changed(&self) -> bool;
 
     unsafe fn clear_dirty_bits(&self);
 
@@ -251,9 +249,7 @@ pub trait ThreadSafeLayoutNode: Clone + Copy + GetLayoutData + NodeInfo + Partia
     fn selection(&self) -> Option<Range<ByteIndex>>;
 
     /// If this is an image element, returns its URL. If this is not an image element, fails.
-    ///
-    /// FIXME(pcwalton): Don't copy URLs.
-    fn image_url(&self) -> Option<Url>;
+    fn image_url(&self) -> Option<ServoUrl>;
 
     fn canvas_data(&self) -> Option<HTMLCanvasData>;
 
@@ -272,9 +268,6 @@ pub trait ThreadSafeLayoutNode: Clone + Copy + GetLayoutData + NodeInfo + Partia
 pub trait DangerousThreadSafeLayoutNode: ThreadSafeLayoutNode {
     unsafe fn dangerous_first_child(&self) -> Option<Self>;
     unsafe fn dangerous_next_sibling(&self) -> Option<Self>;
-}
-
-pub trait LayoutElement: Clone + Copy + Sized + Debug + GetLayoutData + TElement {
 }
 
 pub trait ThreadSafeLayoutElement: Clone + Copy + Sized + Debug +
@@ -435,5 +428,4 @@ pub trait ThreadSafeLayoutElement: Clone + Copy + Sized + Debug +
                        .get(&other.style_pseudo_element()).unwrap().0.clone(),
         }
     }
-
 }
