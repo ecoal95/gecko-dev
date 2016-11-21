@@ -12,12 +12,6 @@
 all-tests:
     - cppunit
     - crashtest
-    - reftest-stylo
-
-all-nostylo-tests:
-    - cppunit
-    - crashtest
-    - reftest
     - external-media-tests
     - firefox-ui-functional-local
     - firefox-ui-functional-remote
@@ -35,15 +29,21 @@ all-nostylo-tests:
     - mochitest-jetpack
     - mochitest-media
     - mochitest-webgl
+    - reftest
     - reftest-no-accel
     - web-platform-tests
     - web-platform-tests-reftests
+    - web-platform-tests-wdspec
     - xpcshell
+
+stylo-tests:
+    - cppunit
+    - crashtest
+    - reftest-stylo
 
 asan-tests:
     - cppunit
     - crashtest
-    - reftest-stylo
     - firefox-ui-functional-local
     - firefox-ui-functional-remote
     - gtest

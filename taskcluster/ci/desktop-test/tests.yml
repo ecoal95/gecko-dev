@@ -597,7 +597,7 @@ reftest-stylo:
     description: "Reftest run for Stylo"
     suite: reftest/reftest-stylo
     treeherder-symbol: tc-R(Rs)
-    chunks: 8
+    chunks: 16
     mozharness:
         script: desktop_unittest.py
         no-read-buildbot-config: true

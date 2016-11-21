@@ -206,11 +206,6 @@ config = {
     },
     # local reftest suites
     "all_reftest_suites": {
-        "reftest-stylo": {
-            "options": ["--suite=reftest",
-                        "--disable-e10s"],
-            "tests": ["tests/reftest/tests/layout/reftests/reftest-stylo.list"]
-        },
         "crashtest": {
             "options": ["--suite=crashtest"],
             "tests": ["tests/reftest/tests/testing/crashtest/crashtests.list"]
@@ -227,7 +222,11 @@ config = {
         "reftest-no-accel": {
             "options": ["--suite=reftest",
                         "--setpref=layers.acceleration.force-enabled=disabled"],
-            "tests": ["tests/reftest/tests/layout/reftests/reftest.list"]
+            "tests": ["tests/reftest/tests/layout/reftests/reftest.list"]},
+        "reftest-stylo": {
+            "options": ["--suite=reftest",
+                        "--disable-e10s"],
+            "tests": ["tests/reftest/tests/layout/reftests/reftest-stylo.list"],
         },
     },
     "all_xpcshell_suites": {
