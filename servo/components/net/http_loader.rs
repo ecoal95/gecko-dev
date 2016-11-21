@@ -11,6 +11,7 @@ use cookie_storage::CookieStorage;
 use devtools_traits::{ChromeToDevtoolsControlMsg, DevtoolsControlMsg, HttpRequest as DevtoolsHttpRequest};
 use devtools_traits::{HttpResponse as DevtoolsHttpResponse, NetworkEvent};
 use flate2::read::{DeflateDecoder, GzDecoder};
+use fnv::FnvHashSet;
 use hsts::{HstsEntry, HstsList, secure_url};
 use hyper::Error as HttpError;
 use hyper::LanguageTag;
@@ -42,7 +43,6 @@ use resource_thread::{AuthCache, AuthCacheEntry, CancellationListener, send_erro
 use servo_url::ServoUrl;
 use std::borrow::{Cow, ToOwned};
 use std::boxed::FnBox;
-use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
 use std::io::{self, Cursor, Read, Write};
@@ -898,7 +898,7 @@ pub fn load<A, B>(load_data: &LoadData,
     let mut iters = 0;
     // URL of the document being loaded, as seen by all the higher-level code.
     let mut doc_url = load_data.url.clone();
-    let mut redirected_to = HashSet::new();
+    let mut redirected_to = FnvHashSet::with_hasher(Default::default());
     let mut method = load_data.method.clone();
     // URL of referrer - to be updated with redirects
     let mut referrer_url = load_data.referrer_url.clone();
@@ -931,7 +931,7 @@ pub fn load<A, B>(load_data: &LoadData,
     // the source rather than rendering the contents of the URL.
     let viewing_source = doc_url.scheme() == "view-source";
     if viewing_source {
-        doc_url = ServoUrl::parse(&load_data.url.as_url().unwrap()[Position::BeforeUsername..]).unwrap();
+        doc_url = ServoUrl::parse(&load_data.url[Position::BeforeUsername..]).unwrap();
     }
 
     // Loop to handle redirects.

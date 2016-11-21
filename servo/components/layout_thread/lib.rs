@@ -111,9 +111,9 @@ use style::error_reporting::{ParseErrorReporter, StdoutErrorReporter};
 use style::logical_geometry::LogicalPoint;
 use style::media_queries::{Device, MediaType};
 use style::parser::ParserContextExtraData;
-use style::selector_matching::Stylist;
 use style::servo::restyle_damage::{REFLOW, REFLOW_OUT_OF_FLOW, REPAINT, REPOSITION, STORE_OVERFLOW};
 use style::stylesheets::{Origin, Stylesheet, UserAgentStylesheets};
+use style::stylist::Stylist;
 use style::thread_state;
 use style::timer::Timer;
 use util::geometry::max_rect;
@@ -1180,11 +1180,8 @@ impl LayoutThread {
             shared_layout_context.style_context.stylist.rule_tree.dump_stdout();
         }
 
-        // GC The rule tree.
-        //
-        // FIXME(emilio): The whole point of the free list is not always freeing
-        // the list, find a good heuristic here for that.
-        unsafe { shared_layout_context.style_context.stylist.rule_tree.gc() }
+        // GC the rule tree if some heuristics are met.
+        unsafe { shared_layout_context.style_context.stylist.rule_tree.maybe_gc(); }
 
         // Perform post-style recalculation layout passes.
         self.perform_post_style_recalc_layout_passes(&data.reflow_info,

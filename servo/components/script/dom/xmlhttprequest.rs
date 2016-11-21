@@ -159,7 +159,7 @@ impl XMLHttpRequest {
         //TODO - update this when referrer policy implemented for workers
         let (referrer_url, referrer_policy) = if let Some(window) = global.downcast::<Window>() {
             let document = window.Document();
-            (Some(document.url().clone()), document.get_referrer_policy())
+            (Some(document.url()), document.get_referrer_policy())
         } else {
             (None, None)
         };
@@ -878,7 +878,7 @@ impl XMLHttpRequest {
             },
         };
 
-        *self.response_url.borrow_mut() = metadata.final_url.as_url().unwrap()[..Position::AfterQuery].to_owned();
+        *self.response_url.borrow_mut() = metadata.final_url[..Position::AfterQuery].to_owned();
 
         // XXXManishearth Clear cache entries in case of a network error
         self.process_partial_response(XHRProgress::HeadersReceived(

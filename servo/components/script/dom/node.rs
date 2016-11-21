@@ -83,7 +83,7 @@ use std::mem;
 use std::ops::Range;
 use std::sync::Arc;
 use style::dom::OpaqueNode;
-use style::selector_impl::ServoSelectorImpl;
+use style::selector_parser::ServoSelectorImpl;
 use style::stylesheets::Stylesheet;
 use style::thread_state;
 use uuid::Uuid;
@@ -1751,7 +1751,7 @@ impl Node {
                 let window = document.window();
                 let loader = DocumentLoader::new(&*document.loader());
                 let document = Document::new(window, None,
-                                             Some((*document.url()).clone()),
+                                             Some(document.url()),
                                              is_html_doc, None,
                                              None, DocumentSource::NotFromParser, loader,
                                              None, None);

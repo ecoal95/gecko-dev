@@ -19,9 +19,10 @@ extern crate url;
 
 use std::fmt;
 use std::net::IpAddr;
+use std::ops::{Range, RangeFrom, RangeTo, RangeFull, Index};
 use std::path::Path;
 use std::sync::Arc;
-use url::{Url, Origin};
+use url::{Url, Origin, Position};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf, Serialize, Deserialize))]
@@ -98,6 +99,10 @@ impl ServoUrl {
         Arc::make_mut(&mut self.0).set_password(pass)
     }
 
+    pub fn set_fragment(&mut self, fragment: Option<&str>) {
+        Arc::make_mut(&mut self.0).set_fragment(fragment)
+    }
+
     pub fn username(&self) -> &str {
         self.0.username()
     }
@@ -146,5 +151,33 @@ impl ServoUrl {
 impl fmt::Display for ServoUrl {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         self.0.fmt(formatter)
+    }
+}
+
+impl Index<RangeFull> for ServoUrl {
+    type Output = str;
+    fn index(&self, _: RangeFull) -> &str {
+        &self.0[..]
+    }
+}
+
+impl Index<RangeFrom<Position>> for ServoUrl {
+    type Output = str;
+    fn index(&self, range: RangeFrom<Position>) -> &str {
+        &self.0[range]
+    }
+}
+
+impl Index<RangeTo<Position>> for ServoUrl {
+    type Output = str;
+    fn index(&self, range: RangeTo<Position>) -> &str {
+        &self.0[range]
+    }
+}
+
+impl Index<Range<Position>> for ServoUrl {
+    type Output = str;
+    fn index(&self, range: Range<Position>) -> &str {
+        &self.0[range]
     }
 }
