@@ -24,9 +24,6 @@ const ALLOW_MULTIPLE_REQUESTS = ["audio-capture", "video-capture"];
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/AppsUtils.jsm");
-Cu.import("resource://gre/modules/PermissionsInstaller.jsm");
-Cu.import("resource://gre/modules/PermissionsTable.jsm");
 
 var permissionManager = Cc["@mozilla.org/permissionmanager;1"].getService(Ci.nsIPermissionManager);
 var secMan = Cc["@mozilla.org/scriptsecuritymanager;1"].getService(Ci.nsIScriptSecurityManager);
@@ -67,56 +64,6 @@ function buildDefaultChoices(aTypesInfo) {
     }
   }
   return choices;
-}
-
-/**
- * aTypesInfo is an array of {permission, access, action, deny} which keeps
- * the information of each permission. This arrary is initialized in
- * ContentPermissionPrompt.prompt and used among functions.
- *
- * aTypesInfo[].permission : permission name
- * aTypesInfo[].access     : permission name + request.access
- * aTypesInfo[].action     : the default action of this permission
- * aTypesInfo[].deny       : true if security manager denied this app's origin
- *                           principal.
- * Note:
- *   aTypesInfo[].permission will be sent to prompt only when
- *   aTypesInfo[].action is PROMPT_ACTION and aTypesInfo[].deny is false.
- */
-function rememberPermission(aTypesInfo, aPrincipal, aSession)
-{
-  function convertPermToAllow(aPerm, aPrincipal)
-  {
-    let type =
-      permissionManager.testExactPermissionFromPrincipal(aPrincipal, aPerm);
-    if (shouldPrompt(aPerm, type)) {
-      debug("add " + aPerm + " to permission manager with ALLOW_ACTION");
-      if (!aSession) {
-        permissionManager.addFromPrincipal(aPrincipal,
-                                           aPerm,
-                                           Ci.nsIPermissionManager.ALLOW_ACTION);
-      } else if (PERMISSION_NO_SESSION.indexOf(aPerm) < 0) {
-        permissionManager.addFromPrincipal(aPrincipal,
-                                           aPerm,
-                                           Ci.nsIPermissionManager.ALLOW_ACTION,
-                                           Ci.nsIPermissionManager.EXPIRE_SESSION, 0);
-      }
-    }
-  }
-
-  for (let i in aTypesInfo) {
-    // Expand the permission to see if we have multiple access properties
-    // to convert
-    let perm = aTypesInfo[i].permission;
-    let access = PermissionsTable[perm].access;
-    if (access) {
-      for (let idx in access) {
-        convertPermToAllow(perm + "-" + access[idx], aPrincipal);
-      }
-    } else {
-      convertPermToAllow(perm, aPrincipal);
-    }
-  }
 }
 
 function ContentPermissionPrompt() {}
@@ -183,43 +130,6 @@ ContentPermissionPrompt.prototype = {
     return false;
   },
 
-  handledByApp: function handledByApp(request, typesInfo) {
-    if (request.principal.appId == Ci.nsIScriptSecurityManager.NO_APP_ID ||
-        request.principal.appId == Ci.nsIScriptSecurityManager.UNKNOWN_APP_ID) {
-      // This should not really happen
-      request.cancel();
-      return true;
-    }
-
-    let appsService = Cc["@mozilla.org/AppsService;1"]
-                        .getService(Ci.nsIAppsService);
-    let app = appsService.getAppByLocalId(request.principal.appId);
-
-    // Check each permission if it's denied by permission manager with app's
-    // URL.
-    let notDenyAppPrincipal = function(type) {
-      let url = Services.io.newURI(app.origin, null, null);
-      let principal =
-        secMan.createCodebasePrincipal(url,
-                                       {appId: request.principal.appId});
-      let result = Services.perms.testExactPermissionFromPrincipal(principal,
-                                                                   type.access);
-
-      if (result == Ci.nsIPermissionManager.ALLOW_ACTION ||
-          result == Ci.nsIPermissionManager.PROMPT_ACTION) {
-        type.deny = false;
-      }
-      return !type.deny;
-    }
-    // Cancel the entire request if one of the requested permissions is denied
-    if (!typesInfo.every(notDenyAppPrincipal)) {
-      request.cancel();
-      return true;
-    }
-
-    return false;
-  },
-
   handledByPermissionType: function handledByPermissionType(request, typesInfo) {
     for (let i in typesInfo) {
       if (permissionSpecificChecker.hasOwnProperty(typesInfo[i].permission) &&
@@ -271,8 +181,7 @@ ContentPermissionPrompt.prototype = {
       return;
     }
 
-    if (this.handledByApp(request, typesInfo) ||
-        this.handledByPermissionType(request, typesInfo)) {
+    if (this.handledByPermissionType(request, typesInfo)) {
       return;
     }
 
@@ -336,7 +245,6 @@ ContentPermissionPrompt.prototype = {
     this.sendToBrowserWindow("permission-prompt", request, typesInfo,
                              function(type, remember, choices) {
       if (type == "permission-allow") {
-        rememberPermission(typesInfo, request.principal, !remember);
         if (callback) {
           callback();
         }

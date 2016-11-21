@@ -27,10 +27,8 @@ interfaces = [
     'offline',
     'geolocation',
     'notification',
-    'permission',
     'svg',
     'smil',
-    'apps',
     'push',
 ]
 
@@ -38,7 +36,6 @@ DIRS += ['interfaces/' + i for i in interfaces]
 
 DIRS += [
     'animation',
-    'apps',
     'base',
     'archivereader',
     'bindings',

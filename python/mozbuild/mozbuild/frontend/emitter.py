@@ -135,13 +135,13 @@ ALLOWED_XPCOM_GLUE = {
     ('test_unlock_notify', 'storage/test'),
     ('test_IHistory', 'toolkit/components/places/tests/cpp'),
     ('testcrasher', 'toolkit/crashreporter/test'),
-    ('jsep_session_unittest', 'media/webrtc/signaling/test'),
-    ('jsep_track_unittest', 'media/webrtc/signaling/test'),
     ('mediaconduit_unittests', 'media/webrtc/signaling/test'),
     ('mediapipeline_unittest', 'media/webrtc/signaling/test'),
     ('sdp_file_parser', 'media/webrtc/signaling/fuzztest'),
     ('signaling_unittests', 'media/webrtc/signaling/test'),
     ('TestMailCookie', 'mailnews/base/test'),
+    ('calbasecomps', 'calendar/base/backend/libical/build'),
+    ('purplexpcom', 'extensions/purple/purplexpcom/src'),
 }
 
 
@@ -184,8 +184,6 @@ class TreeMetadataEmitter(LoggingMixin):
         if os.path.exists(subconfigures):
             paths = open(subconfigures).read().splitlines()
         self._external_paths = set(mozpath.normsep(d) for d in paths)
-        # Add security/nss manually, since it doesn't have a subconfigure.
-        self._external_paths.add('security/nss')
 
         self._emitter_time = 0.0
         self._object_count = 0
@@ -415,10 +413,17 @@ class TreeMetadataEmitter(LoggingMixin):
 
         key = (obj.name, obj.relativedir)
         substs = context.config.substs
-        extra_allowed = [
-            (substs.get('MOZ_APP_NAME'), '%s/app' % substs.get('MOZ_BUILD_APP')),
-            ('%s-bin' % substs.get('MOZ_APP_NAME'), '%s/app' % substs.get('MOZ_BUILD_APP')),
-        ]
+        extra_allowed = []
+        moz_build_app = substs.get('MOZ_BUILD_APP')
+        if moz_build_app is not None: # None during some test_emitter.py tests.
+            if moz_build_app.startswith('../'):
+                # For comm-central builds, where topsrcdir is not the root
+                # source dir.
+                moz_build_app = moz_build_app[3:]
+            extra_allowed = [
+                (substs.get('MOZ_APP_NAME'), '%s/app' % moz_build_app),
+                ('%s-bin' % substs.get('MOZ_APP_NAME'), '%s/app' % moz_build_app),
+            ]
         if substs.get('MOZ_WIDGET_TOOLKIT') != 'android':
             extra_allowed.append((substs.get('MOZ_CHILD_PROCESS_NAME'), 'ipc/app'))
 
