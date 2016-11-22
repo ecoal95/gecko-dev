@@ -569,6 +569,7 @@ def stylo(value):
     if value:
         return True
 
+set_config('MOZ_STYLO', stylo)
 set_define('MOZ_STYLO', stylo)
 
 # Avoid mozbuild.configure.options.ConflictingOptionError until bug 1300290 is
