@@ -279,6 +279,7 @@ COMPILATION_TARGETS = {
             "nsCSSValue",
             "nsCSSValueSharedList",
             "nsChangeHint",
+            "nsCursorImage",
             "nsFont",
             "nsIAtom",
             "nsIDocument",
