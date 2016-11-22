@@ -557,7 +557,8 @@ tail =
                         "No line resembling a stack frame was found in\n%s" % pprint.pformat(log_lines))
 
     # This is a hack to unbust the stylo repo.
-    @unittest.skipIf(mozinfo.stylo, 'failing on stylo for some reason')
+    @unittest.skipIf(mozinfo.info.get('stylo'),
+                     'failing on stylo for some reason')
     def testChildPass(self):
         """
         Check that a simple test running in a child process passes.
@@ -577,7 +578,8 @@ tail =
         self.assertNotInLog(TEST_FAIL_STRING)
 
     # This is a hack to unbust the stylo repo.
-    @unittest.skipIf(mozinfo.stylo, 'failing on stylo for some reason')
+    @unittest.skipIf(mozinfo.info.get('stylo'),
+                     'failing on stylo for some reason')
     def testChildFail(self):
         """
         Check that a simple failing test running in a child process fails.
@@ -597,7 +599,8 @@ tail =
         self.assertNotInLog(TEST_PASS_STRING)
 
     # This is a hack to unbust the stylo repo.
-    @unittest.skipIf(mozinfo.stylo, 'failing on stylo for some reason')
+    @unittest.skipIf(mozinfo.info.get('stylo'),
+                     'failing on stylo for some reason')
     def testChildHang(self):
         """
         Check that incomplete output from a child process results in a
