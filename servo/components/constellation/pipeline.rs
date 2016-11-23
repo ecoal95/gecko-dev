@@ -82,6 +82,8 @@ pub struct InitialPipelineState {
     pub id: PipelineId,
     /// The ID of the frame that contains this Pipeline.
     pub frame_id: FrameId,
+    /// The ID of the top-level frame that contains this Pipeline.
+    pub top_level_frame_id: FrameId,
     /// The ID of the parent pipeline and frame type, if any.
     /// If `None`, this is the root.
     pub parent_info: Option<(PipelineId, FrameType)>,
@@ -113,8 +115,9 @@ pub struct InitialPipelineState {
     pub window_size: Option<TypedSize2D<f32, PagePx>>,
     /// Information about the device pixel ratio.
     pub device_pixel_ratio: ScaleFactor<f32, ViewportPx, DevicePixel>,
-    /// A channel to the script thread, if applicable. If this is `Some`,
-    /// then `parent_info` must also be `Some`.
+    /// A channel to the script thread, if applicable.
+    /// If this is `None`, create a new script thread.
+    /// If this is `Some`, then reuse an existing script thread.
     pub script_chan: Option<Rc<ScriptChan>>,
     /// Information about the page to load.
     pub load_data: LoadData,
@@ -144,16 +147,23 @@ impl Pipeline {
         let (layout_content_process_shutdown_chan, layout_content_process_shutdown_port) =
             ipc::channel().expect("Pipeline layout content shutdown chan");
 
+        let device_pixel_ratio = state.device_pixel_ratio;
+        let window_size = state.window_size.map(|size| {
+            WindowSizeData {
+                visible_viewport: size,
+                initial_viewport: size * ScaleFactor::new(1.0),
+                device_pixel_ratio: device_pixel_ratio,
+            }
+        });
+
         let (script_chan, content_ports) = match state.script_chan {
             Some(script_chan) => {
-                let (parent_pipeline_id, frame_type) =
-                    state.parent_info.expect("script_pipeline != None but parent_info == None");
                 let new_layout_info = NewLayoutInfo {
-                    parent_pipeline_id: parent_pipeline_id,
+                    parent_info: state.parent_info,
                     new_pipeline_id: state.id,
                     frame_id: state.frame_id,
-                    frame_type: frame_type,
                     load_data: state.load_data.clone(),
+                    window_size: window_size,
                     pipeline_port: pipeline_port,
                     layout_to_constellation_chan: state.layout_to_constellation_chan.clone(),
                     content_process_shutdown_chan: layout_content_process_shutdown_chan.clone(),
@@ -189,21 +199,13 @@ impl Pipeline {
                 script_to_devtools_chan
             });
 
-            let device_pixel_ratio = state.device_pixel_ratio;
-            let window_size = state.window_size.map(|size| {
-                WindowSizeData {
-                    visible_viewport: size,
-                    initial_viewport: size * ScaleFactor::new(1.0),
-                    device_pixel_ratio: device_pixel_ratio,
-                }
-            });
-
             let (script_content_process_shutdown_chan, script_content_process_shutdown_port) =
                 ipc::channel().expect("Pipeline script content process shutdown chan");
 
             let unprivileged_pipeline_content = UnprivilegedPipelineContent {
                 id: state.id,
                 frame_id: state.frame_id,
+                top_level_frame_id: state.top_level_frame_id,
                 parent_info: state.parent_info,
                 constellation_chan: state.constellation_chan,
                 scheduler_chan: state.scheduler_chan,
@@ -381,6 +383,7 @@ impl Pipeline {
 pub struct UnprivilegedPipelineContent {
     id: PipelineId,
     frame_id: FrameId,
+    top_level_frame_id: FrameId,
     parent_info: Option<(PipelineId, FrameType)>,
     constellation_chan: IpcSender<ScriptMsg>,
     layout_to_constellation_chan: IpcSender<LayoutMsg>,
@@ -416,6 +419,7 @@ impl UnprivilegedPipelineContent {
         let layout_pair = STF::create(InitialScriptState {
             id: self.id,
             frame_id: self.frame_id,
+            top_level_frame_id: self.top_level_frame_id,
             parent_info: self.parent_info,
             control_chan: self.script_chan.clone(),
             control_port: self.script_port,
@@ -433,6 +437,7 @@ impl UnprivilegedPipelineContent {
         }, self.load_data.clone());
 
         LTF::create(self.id,
+                    Some(self.top_level_frame_id),
                     self.load_data.url,
                     self.parent_info.is_some(),
                     layout_pair,

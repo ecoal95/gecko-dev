@@ -24,7 +24,6 @@ lazy_static = "0.2"
 log = "0.3.5"
 msg = {path = "../msg"}
 net_traits = {path = "../net_traits"}
-style_traits = {path = "../style_traits"}
 parking_lot = {version = "0.3.3", features = ["nightly"]}
 plugins = {path = "../plugins"}
 profile_traits = {path = "../profile_traits"}
@@ -32,7 +31,7 @@ rayon = "0.5"
 script = {path = "../script"}
 script_layout_interface = {path = "../script_layout_interface"}
 script_traits = {path = "../script_traits"}
-selectors = "0.14"
+selectors = "0.15"
 serde_derive = "0.8"
 serde_json = "0.8"
 servo_url = {path = "../url"}

@@ -19,6 +19,7 @@ use gecko_bindings::bindings::Gecko_Construct_${style_struct.gecko_ffi_name};
 use gecko_bindings::bindings::Gecko_CopyConstruct_${style_struct.gecko_ffi_name};
 use gecko_bindings::bindings::Gecko_Destroy_${style_struct.gecko_ffi_name};
 % endfor
+use gecko_bindings::bindings::Gecko_CopyCursorArrayFrom;
 use gecko_bindings::bindings::Gecko_CopyFontFamilyFrom;
 use gecko_bindings::bindings::Gecko_CopyImageValueFrom;
 use gecko_bindings::bindings::Gecko_CopyListStyleImageFrom;
@@ -28,6 +29,9 @@ use gecko_bindings::bindings::Gecko_EnsureImageLayersLength;
 use gecko_bindings::bindings::Gecko_FontFamilyList_AppendGeneric;
 use gecko_bindings::bindings::Gecko_FontFamilyList_AppendNamed;
 use gecko_bindings::bindings::Gecko_FontFamilyList_Clear;
+use gecko_bindings::bindings::Gecko_SetCursorArrayLength;
+use gecko_bindings::bindings::Gecko_SetCursorImage;
+use gecko_bindings::bindings::Gecko_NewCSSShadowArray;
 use gecko_bindings::bindings::Gecko_SetListStyleImage;
 use gecko_bindings::bindings::Gecko_SetListStyleImageNone;
 use gecko_bindings::bindings::Gecko_SetListStyleType;
@@ -810,7 +814,7 @@ fn static_assert() {
 
 <% skip_position_longhands = " ".join(x.ident for x in SIDES) %>
 <%self:impl_trait style_struct_name="Position"
-                  skip_longhands="${skip_position_longhands} z-index box-sizing">
+                  skip_longhands="${skip_position_longhands} z-index box-sizing order">
 
     % for side in SIDES:
     <% impl_split_style_coord("%s" % side.ident,
@@ -859,6 +863,16 @@ fn static_assert() {
         }
     }
     ${impl_simple_copy('box_sizing', 'mBoxSizing')}
+
+    pub fn set_order(&mut self, v: longhands::order::computed_value::T) {
+        self.gecko.mOrder = v;
+    }
+
+    pub fn clone_order(&self) -> longhands::order::computed_value::T {
+        self.gecko.mOrder
+    }
+
+    ${impl_simple_copy('order', 'mOrder')}
 
 </%self:impl_trait>
 
@@ -1689,7 +1703,9 @@ fn static_assert() {
     }
 
     pub fn set_filter(&mut self, v: longhands::filter::computed_value::T) {
+        use cssparser::Color;
         use properties::longhands::filter::computed_value::Filter::*;
+        use gecko_bindings::structs::nsCSSShadowArray;
         use gecko_bindings::structs::nsStyleFilter;
         use gecko_bindings::structs::NS_STYLE_FILTER_BLUR;
         use gecko_bindings::structs::NS_STYLE_FILTER_BRIGHTNESS;
@@ -1700,6 +1716,7 @@ fn static_assert() {
         use gecko_bindings::structs::NS_STYLE_FILTER_SATURATE;
         use gecko_bindings::structs::NS_STYLE_FILTER_SEPIA;
         use gecko_bindings::structs::NS_STYLE_FILTER_HUE_ROTATE;
+        use gecko_bindings::structs::NS_STYLE_FILTER_DROP_SHADOW;
 
         fn fill_filter(m_type: u32, value: CoordDataValue, gecko_filter: &mut nsStyleFilter){
             gecko_filter.mType = m_type;
@@ -1741,6 +1758,36 @@ fn static_assert() {
                 Sepia(factor)      => fill_filter(NS_STYLE_FILTER_SEPIA,
                                                   CoordDataValue::Factor(factor),
                                                   gecko_filter),
+                DropShadow(offset_x, offset_y, blur_radius, ref color) => {
+                    gecko_filter.mType = NS_STYLE_FILTER_DROP_SHADOW;
+
+                    fn init_shadow(filter: &mut nsStyleFilter) -> &mut nsCSSShadowArray {
+                        unsafe {
+                            let ref mut union = filter.__bindgen_anon_1;
+                            let mut shadow_array: &mut *mut nsCSSShadowArray = union.mDropShadow.as_mut();
+                            *shadow_array = Gecko_NewCSSShadowArray(1);
+
+                            &mut **shadow_array
+                        }
+                    }
+
+                    let mut gecko_shadow = init_shadow(gecko_filter);
+                    gecko_shadow.mArray[0].mXOffset = offset_x.0;
+                    gecko_shadow.mArray[0].mYOffset = offset_y.0;
+                    gecko_shadow.mArray[0].mRadius = blur_radius.0;
+                    // mSpread is not supported in the spec, so we leave it as 0
+                    gecko_shadow.mArray[0].mInset = false; // Not supported in spec level 1
+
+                    gecko_shadow.mArray[0].mColor = match *color {
+                        Color::RGBA(rgba) => {
+                            gecko_shadow.mArray[0].mHasColor = true;
+                            convert_rgba_to_nscolor(&rgba)
+                        },
+                        // TODO handle currentColor
+                        // https://bugzilla.mozilla.org/show_bug.cgi?id=760345
+                        Color::CurrentColor => 0,
+                    };
+                }
             }
         }
     }
@@ -2195,12 +2242,12 @@ clip-path
 <%self:impl_trait style_struct_name="Pointing"
                   skip_longhands="cursor">
     pub fn set_cursor(&mut self, v: longhands::cursor::computed_value::T) {
-        use properties::longhands::cursor::computed_value::T;
+        use properties::longhands::cursor::computed_value::Keyword;
         use style_traits::cursor::Cursor;
 
-        self.gecko.mCursor = match v {
-            T::AutoCursor => structs::NS_STYLE_CURSOR_AUTO,
-            T::SpecifiedCursor(cursor) => match cursor {
+        self.gecko.mCursor = match v.keyword {
+            Keyword::AutoCursor => structs::NS_STYLE_CURSOR_AUTO,
+            Keyword::SpecifiedCursor(cursor) => match cursor {
                 Cursor::None => structs::NS_STYLE_CURSOR_NONE,
                 Cursor::Default => structs::NS_STYLE_CURSOR_DEFAULT,
                 Cursor::Pointer => structs::NS_STYLE_CURSOR_POINTER,
@@ -2238,13 +2285,38 @@ clip-path
                 Cursor::ZoomOut => structs::NS_STYLE_CURSOR_ZOOM_OUT,
             }
         } as u8;
+
+        unsafe {
+            Gecko_SetCursorArrayLength(&mut self.gecko, v.images.len());
+        }
+        for i in 0..v.images.len() {
+            let image = &v.images[i];
+            let extra_data = image.url.extra_data();
+            let (ptr, len) = image.url.as_slice_components();
+            unsafe {
+                Gecko_SetCursorImage(&mut self.gecko.mCursorImages[i],
+                                     ptr, len as u32,
+                                     extra_data.base.get(),
+                                     extra_data.referrer.get(),
+                                     extra_data.principal.get());
+            }
+            // We don't need to record this struct as uncacheable, like when setting
+            // background-image to a url() value, since only properties in reset structs
+            // are re-used from the applicable declaration cache, and the Pointing struct
+            // is an inherited struct.
+        }
     }
 
-    ${impl_simple_copy('cursor', 'mCursor')}
+    pub fn copy_cursor_from(&mut self, other: &Self) {
+        self.gecko.mCursor = other.gecko.mCursor;
+        unsafe {
+            Gecko_CopyCursorArrayFrom(&mut self.gecko, &other.gecko);
+        }
+    }
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="Column"
-                  skip_longhands="column-width column-count">
+                  skip_longhands="column-width column-count column-gap -moz-column-rule-width">
 
     pub fn set_column_width(&mut self, v: longhands::column_width::computed_value::T) {
         match v.0 {
@@ -2268,6 +2340,18 @@ clip-path
     }
 
     ${impl_simple_copy('column_count', 'mColumnCount')}
+
+    pub fn set_column_gap(&mut self, v: longhands::column_gap::computed_value::T) {
+        match v.0 {
+            Some(len) => self.gecko.mColumnGap.set(len),
+            None => self.gecko.mColumnGap.set_value(CoordDataValue::Normal),
+        }
+    }
+
+    <%call expr="impl_coord_copy('column_gap', 'mColumnGap')"></%call>
+
+    <% impl_app_units("_moz_column_rule_width", "mColumnRuleWidth", need_clone=True,
+                      round_to_pixels=True) %>
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="Counters"

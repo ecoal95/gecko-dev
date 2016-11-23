@@ -162,19 +162,20 @@ impl LoadData {
     }
 }
 
-/// The initial data associated with a newly-created framed pipeline.
+/// The initial data required to create a new layout attached to an existing script thread.
 #[derive(Deserialize, Serialize)]
 pub struct NewLayoutInfo {
-    /// Id of the parent of this new pipeline.
-    pub parent_pipeline_id: PipelineId,
+    /// The ID of the parent pipeline and frame type, if any.
+    /// If `None`, this is a root pipeline.
+    pub parent_info: Option<(PipelineId, FrameType)>,
     /// Id of the newly-created pipeline.
     pub new_pipeline_id: PipelineId,
     /// Id of the frame associated with this pipeline.
     pub frame_id: FrameId,
-    /// Type of the frame associated with this pipeline.
-    pub frame_type: FrameType,
     /// Network request data which will be initiated by the script thread.
     pub load_data: LoadData,
+    /// Information about the initial window size.
+    pub window_size: Option<WindowSizeData>,
     /// A port on which layout can receive messages from the pipeline.
     pub pipeline_port: IpcReceiver<LayoutControlMsg>,
     /// A sender for the layout thread to communicate to the constellation.
@@ -442,6 +443,8 @@ pub struct InitialScriptState {
     pub parent_info: Option<(PipelineId, FrameType)>,
     /// The ID of the frame this script is part of.
     pub frame_id: FrameId,
+    /// The ID of the top-level frame this script is part of.
+    pub top_level_frame_id: FrameId,
     /// A channel with which messages can be sent to us (the script thread).
     pub control_chan: IpcSender<ConstellationControlMsg>,
     /// A port on which messages sent by the constellation to script can be received.
@@ -699,8 +702,8 @@ pub enum ConstellationMsg {
     WebDriverCommand(WebDriverCommandMsg),
     /// Reload the current page.
     Reload,
-    /// A log entry, with the pipeline id and thread name
-    LogEntry(Option<PipelineId>, Option<String>, LogEntry),
+    /// A log entry, with the top-level frame id and thread name
+    LogEntry(Option<FrameId>, Option<String>, LogEntry),
 }
 
 /// Resources required by workerglobalscopes

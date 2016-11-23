@@ -32,6 +32,7 @@ use msg::constellation_msg::{Key, KeyModifiers, KeyState};
 use msg::constellation_msg::{PipelineNamespace, PipelineNamespaceId, TraversalDirection};
 use net_traits::{self, IpcSend, ResourceThreads};
 use net_traits::image_cache_thread::ImageCacheThread;
+use net_traits::pub_domains::reg_suffix;
 use net_traits::storage_thread::{StorageThreadMsg, StorageType};
 use offscreen_gl_context::{GLContextAttributes, GLLimits};
 use pipeline::{ChildProcess, InitialPipelineState, Pipeline};
@@ -54,7 +55,7 @@ use std::iter::once;
 use std::marker::PhantomData;
 use std::mem::replace;
 use std::process;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
@@ -132,6 +133,11 @@ pub struct Constellation<Message, LTF, STF> {
 
     /// to receive sw manager message
     swmanager_receiver: Receiver<SWManagerMsg>,
+
+    /// A map from top-level frame id and registered domain name to script channels.
+    /// This double indirection ensures that separate tabs do not share script threads,
+    /// even if the same domain is loaded in each.
+    script_channels: HashMap<FrameId, HashMap<String, Weak<ScriptChan>>>,
 
     /// A list of all the pipelines. (See the `pipeline` module for more details.)
     pipelines: HashMap<PipelineId, Pipeline>,
@@ -419,9 +425,9 @@ impl Log for FromScriptLogger {
     fn log(&self, record: &LogRecord) {
         if let Some(entry) = log_entry(record) {
             debug!("Sending log entry {:?}.", entry);
-            let pipeline_id = PipelineId::installed();
+            let top_level_frame_id = FrameId::installed();
             let thread_name = thread::current().name().map(ToOwned::to_owned);
-            let msg = FromScriptMsg::LogEntry(pipeline_id, thread_name, entry);
+            let msg = FromScriptMsg::LogEntry(top_level_frame_id, thread_name, entry);
             let chan = self.constellation_chan.lock().unwrap_or_else(|err| err.into_inner());
             let _ = chan.send(msg);
         }
@@ -457,9 +463,9 @@ impl Log for FromCompositorLogger {
     fn log(&self, record: &LogRecord) {
         if let Some(entry) = log_entry(record) {
             debug!("Sending log entry {:?}.", entry);
-            let pipeline_id = PipelineId::installed();
+            let top_level_frame_id = FrameId::installed();
             let thread_name = thread::current().name().map(ToOwned::to_owned);
-            let msg = FromCompositorMsg::LogEntry(pipeline_id, thread_name, entry);
+            let msg = FromCompositorMsg::LogEntry(top_level_frame_id, thread_name, entry);
             let chan = self.constellation_chan.lock().unwrap_or_else(|err| err.into_inner());
             let _ = chan.send(msg);
         }
@@ -483,6 +489,14 @@ fn log_entry(record: &LogRecord) -> Option<LogEntry> {
 }
 
 const WARNINGS_BUFFER_SIZE: usize = 32;
+
+/// The registered domain name (aka eTLD+1) for a URL.
+/// Returns None if the URL has no host name.
+/// Returns the registered suffix for the host name if it is a domain.
+/// Leaves the host name alone if it is an IP address.
+fn reg_host<'a>(url: &'a ServoUrl) -> Option<&'a str> {
+    url.domain().map(reg_suffix).or(url.host_str())
+}
 
 impl<Message, LTF, STF> Constellation<Message, LTF, STF>
     where LTF: LayoutThreadFactory<Message=Message>,
@@ -523,6 +537,7 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
                 swmanager_chan: None,
                 swmanager_receiver: swmanager_receiver,
                 swmanager_sender: sw_mgr_clone,
+                script_channels: HashMap::new(),
                 pipelines: HashMap::new(),
                 frames: HashMap::new(),
                 pending_frames: vec!(),
@@ -584,12 +599,35 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
                     pipeline_id: PipelineId,
                     frame_id: FrameId,
                     parent_info: Option<(PipelineId, FrameType)>,
-                    old_pipeline_id: Option<PipelineId>,
                     initial_window_size: Option<TypedSize2D<f32, PagePx>>,
-                    script_channel: Option<Rc<ScriptChan>>,
                     load_data: LoadData,
+                    sandbox: IFrameSandboxState,
                     is_private: bool) {
         if self.shutting_down { return; }
+
+        // TODO: can we get a case where the child pipeline is created
+        // before the parent is part of the frame tree?
+        let top_level_frame_id = match parent_info {
+            Some((_, FrameType::MozBrowserIFrame)) => frame_id,
+            Some((parent_id, _)) => self.get_top_level_frame_for_pipeline(parent_id),
+            None => self.root_frame_id,
+        };
+
+        let (script_channel, host) = match sandbox {
+            IFrameSandboxState::IFrameSandboxed => (None, None),
+            IFrameSandboxState::IFrameUnsandboxed => match reg_host(&load_data.url) {
+                None => (None, None),
+                Some(host) => {
+                    let script_channel = self.script_channels.get(&top_level_frame_id)
+                        .and_then(|map| map.get(host))
+                        .and_then(|weak| weak.upgrade());
+                    match script_channel {
+                        None => (None, Some(String::from(host))),
+                        Some(script_channel) => (Some(script_channel.clone()), None),
+                    }
+                },
+            },
+        };
 
         let resource_threads = if is_private {
             self.private_resource_threads.clone()
@@ -597,17 +635,27 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
             self.public_resource_threads.clone()
         };
 
-        let prev_visibility = if let Some(id) = old_pipeline_id {
-            self.pipelines.get(&id).map(|pipeline| pipeline.visible)
-        } else if let Some((parent_pipeline_id, _)) = parent_info {
-            self.pipelines.get(&parent_pipeline_id).map(|pipeline| pipeline.visible)
-        } else {
-            None
+        let parent_visibility = parent_info
+            .and_then(|(parent_pipeline_id, _)| self.pipelines.get(&parent_pipeline_id))
+            .map(|pipeline| pipeline.visible);
+
+        let prev_visibility = self.frames.get(&frame_id)
+            .and_then(|frame| self.pipelines.get(&frame.current.pipeline_id))
+            .map(|pipeline| pipeline.visible)
+            .or(parent_visibility);
+
+        // TODO: think about the case where the child pipeline is created
+        // before the parent is part of the frame tree.
+        let top_level_frame_id = match parent_info {
+            Some((_, FrameType::MozBrowserIFrame)) => frame_id,
+            Some((parent_id, _)) => self.get_top_level_frame_for_pipeline(parent_id),
+            None => self.root_frame_id,
         };
 
         let result = Pipeline::spawn::<Message, LTF, STF>(InitialPipelineState {
             id: pipeline_id,
             frame_id: frame_id,
+            top_level_frame_id: top_level_frame_id,
             parent_info: parent_info,
             constellation_chan: self.script_sender.clone(),
             layout_to_constellation_chan: self.layout_sender.clone(),
@@ -638,6 +686,12 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
 
         if let Some(child_process) = child_process {
             self.child_processes.push(child_process);
+        }
+
+        if let Some(host) = host {
+            self.script_channels.entry(top_level_frame_id)
+                .or_insert_with(HashMap::new)
+                .insert(host, Rc::downgrade(&pipeline.script_chan));
         }
 
         assert!(!self.pipelines.contains_key(&pipeline_id));
@@ -847,8 +901,8 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
                 debug!("constellation got reload message");
                 self.handle_reload_msg();
             }
-            FromCompositorMsg::LogEntry(pipeline_id, thread_name, entry) => {
-                self.handle_log_entry(pipeline_id, thread_name, entry);
+            FromCompositorMsg::LogEntry(top_level_frame_id, thread_name, entry) => {
+                self.handle_log_entry(top_level_frame_id, thread_name, entry);
             }
         }
     }
@@ -999,8 +1053,8 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
             FromScriptMsg::Exit => {
                 self.compositor_proxy.send(ToCompositorMsg::Exit);
             }
-            FromScriptMsg::LogEntry(pipeline_id, thread_name, entry) => {
-                self.handle_log_entry(pipeline_id, thread_name, entry);
+            FromScriptMsg::LogEntry(top_level_frame_id, thread_name, entry) => {
+                self.handle_log_entry(top_level_frame_id, thread_name, entry);
             }
 
             FromScriptMsg::SetTitle(pipeline_id, title) => {
@@ -1172,10 +1226,12 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
     fn handle_send_error(&mut self, pipeline_id: PipelineId, err: IOError) {
         // Treat send error the same as receiving a panic message
         debug!("Pipeline {:?} send error ({}).", pipeline_id, err);
-        self.handle_panic(Some(pipeline_id), format!("Send failed ({})", err), None);
+        let top_level_frame_id = self.get_top_level_frame_for_pipeline(pipeline_id);
+        let reason = format!("Send failed ({})", err);
+        self.handle_panic(top_level_frame_id, reason, None);
     }
 
-    fn handle_panic(&mut self, pipeline_id: Option<PipelineId>, reason: String, backtrace: Option<String>) {
+    fn handle_panic(&mut self, top_level_frame_id: FrameId, reason: String, backtrace: Option<String>) {
         if opts::get().hard_fail {
             // It's quite difficult to make Servo exit cleanly if some threads have failed.
             // Hard fail exists for test runners so we crash and that's good enough.
@@ -1183,58 +1239,48 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
             process::exit(1);
         }
 
-        debug!("Panic handler for pipeline {:?}: {}.", pipeline_id, reason);
+        debug!("Panic handler for top-level frame {}: {}.", top_level_frame_id, reason);
 
         // Notify the browser chrome that the pipeline has failed
-        self.trigger_mozbrowsererror(pipeline_id, reason, backtrace);
+        self.trigger_mozbrowsererror(top_level_frame_id, reason, backtrace);
 
-        if let Some(pipeline_id) = pipeline_id {
-            let pipeline_url = self.pipelines.get(&pipeline_id).map(|pipeline| pipeline.url.clone());
-            let parent_info = self.pipelines.get(&pipeline_id).and_then(|pipeline| pipeline.parent_info);
-            let window_size = self.pipelines.get(&pipeline_id).and_then(|pipeline| pipeline.size);
-            let frame_id = self.pipelines.get(&pipeline_id).map(|pipeline| pipeline.frame_id);
+        let pipeline_id = self.frames.get(&top_level_frame_id).map(|frame| frame.current.pipeline_id);
+        let pipeline_url = pipeline_id.and_then(|id| self.pipelines.get(&id).map(|pipeline| pipeline.url.clone()));
+        let parent_info = pipeline_id.and_then(|id| self.pipelines.get(&id).and_then(|pipeline| pipeline.parent_info));
+        let window_size = pipeline_id.and_then(|id| self.pipelines.get(&id).and_then(|pipeline| pipeline.size));
 
-            self.close_pipeline(pipeline_id, ExitPipelineMode::Force);
-            self.pipelines.remove(&pipeline_id);
+        self.close_frame_children(top_level_frame_id, ExitPipelineMode::Force);
 
-            while let Some(pending_pipeline_id) = self.pending_frames.iter().find(|pending| {
-                pending.old_pipeline_id == Some(pipeline_id)
-            }).map(|frame| frame.new_pipeline_id) {
-                warn!("removing pending frame change for failed pipeline");
-                self.close_pipeline(pending_pipeline_id, ExitPipelineMode::Force);
-            }
+        let failure_url = ServoUrl::parse("about:failure").expect("infallible");
 
-            let failure_url = ServoUrl::parse("about:failure").expect("infallible");
-
-            if let Some(pipeline_url) = pipeline_url {
-                if pipeline_url == failure_url {
-                    return error!("about:failure failed");
-                }
-            }
-
-            warn!("creating replacement pipeline for about:failure");
-
-            if let Some(frame_id) = frame_id {
-                let new_pipeline_id = PipelineId::new();
-                let load_data = LoadData::new(failure_url, None, None);
-                self.new_pipeline(new_pipeline_id, frame_id, parent_info, Some(pipeline_id),
-                                  window_size, None, load_data, false);
-
-                self.pending_frames.push(FrameChange {
-                    frame_id: frame_id,
-                    old_pipeline_id: Some(pipeline_id),
-                    new_pipeline_id: new_pipeline_id,
-                    document_ready: false,
-                    replace: false,
-                });
+        if let Some(pipeline_url) = pipeline_url {
+            if pipeline_url == failure_url {
+                return error!("about:failure failed");
             }
         }
+
+        warn!("creating replacement pipeline for about:failure");
+
+        let new_pipeline_id = PipelineId::new();
+        let load_data = LoadData::new(failure_url, None, None);
+        let sandbox = IFrameSandboxState::IFrameSandboxed;
+        self.new_pipeline(new_pipeline_id, top_level_frame_id, parent_info, window_size, load_data, sandbox, false);
+        self.pending_frames.push(FrameChange {
+            frame_id: top_level_frame_id,
+            old_pipeline_id: pipeline_id,
+            new_pipeline_id: new_pipeline_id,
+            document_ready: false,
+            replace: false,
+        });
     }
 
-    fn handle_log_entry(&mut self, pipeline_id: Option<PipelineId>, thread_name: Option<String>, entry: LogEntry) {
+    fn handle_log_entry(&mut self, top_level_frame_id: Option<FrameId>, thread_name: Option<String>, entry: LogEntry) {
         debug!("Received log entry {:?}.", entry);
         match entry {
-            LogEntry::Panic(reason, backtrace) => self.handle_panic(pipeline_id, reason, Some(backtrace)),
+            LogEntry::Panic(reason, backtrace) => {
+                let top_level_frame_id = top_level_frame_id.unwrap_or(self.root_frame_id);
+                self.handle_panic(top_level_frame_id, reason, Some(backtrace));
+            },
             LogEntry::Error(reason) | LogEntry::Warn(reason) => {
                 // VecDeque::truncate is unstable
                 if WARNINGS_BUFFER_SIZE <= self.handled_warnings.len() {
@@ -1249,8 +1295,9 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
         let window_size = self.window_size.visible_viewport;
         let root_pipeline_id = PipelineId::new();
         let root_frame_id = self.root_frame_id;
-        self.new_pipeline(root_pipeline_id, root_frame_id, None, None, Some(window_size), None,
-                          LoadData::new(url.clone(), None, None), false);
+        let load_data = LoadData::new(url.clone(), None, None);
+        let sandbox = IFrameSandboxState::IFrameUnsandboxed;
+        self.new_pipeline(root_pipeline_id, root_frame_id, None, Some(window_size), load_data, sandbox, false);
         self.handle_load_start_msg(root_pipeline_id);
         self.pending_frames.push(FrameChange {
             frame_id: self.root_frame_id,
@@ -1291,25 +1338,24 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
     }
 
     fn handle_subframe_loaded(&mut self, pipeline_id: PipelineId) {
-        let (frame_id, parent_info) = match self.pipelines.get(&pipeline_id) {
-            Some(pipeline) => (pipeline.frame_id, pipeline.parent_info),
-            None => return warn!("Pipeline {:?} loaded after closure.", pipeline_id),
-        };
-        let subframe_parent_id = match parent_info {
-            Some(ref parent) => parent.0,
-            None => return warn!("Pipeline {:?} has no parent.", pipeline_id),
+        let (frame_id, parent_id) = match self.pipelines.get(&pipeline_id) {
+            Some(pipeline) => match pipeline.parent_info {
+                Some((parent_id, _)) => (pipeline.frame_id, parent_id),
+                None => return warn!("Pipeline {} has no parent.", pipeline_id),
+            },
+            None => return warn!("Pipeline {} loaded after closure.", pipeline_id),
         };
         let msg = ConstellationControlMsg::DispatchFrameLoadEvent {
             target: frame_id,
-            parent: subframe_parent_id,
+            parent: parent_id,
             child: pipeline_id,
         };
-        let result = match self.pipelines.get(&subframe_parent_id) {
-            Some(pipeline) => pipeline.script_chan.send(msg),
-            None => return warn!("Pipeline {:?} subframe loaded after closure.", subframe_parent_id),
+        let result = match self.pipelines.get(&parent_id) {
+            Some(parent) => parent.script_chan.send(msg),
+            None => return warn!("Parent {} frame loaded after closure.", parent_id),
         };
         if let Err(e) = result {
-            self.handle_send_error(subframe_parent_id, e);
+            self.handle_send_error(parent_id, e);
         }
     }
 
@@ -1318,7 +1364,7 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
     // parent_pipeline_id's frame tree's children. This message is never the result of a
     // page navigation.
     fn handle_script_loaded_url_in_iframe_msg(&mut self, load_info: IFrameLoadInfo) {
-        let (load_data, script_chan, window_size, is_private) = {
+        let (load_data, window_size, is_private) = {
             let old_pipeline = load_info.old_pipeline_id
                 .and_then(|old_pipeline_id| self.pipelines.get(&old_pipeline_id));
 
@@ -1338,29 +1384,7 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
                 LoadData::new(url, None, None)
             });
 
-            // Compare the pipeline's url to the new url. If the origin is the same,
-            // then reuse the script thread in creating the new pipeline
-            let source_url = &source_pipeline.url;
-
             let is_private = load_info.is_private || source_pipeline.is_private;
-
-            // FIXME(#10968): this should probably match the origin check in
-            //                HTMLIFrameElement::contentDocument.
-            let same_script = source_url.host() == load_data.url.host() &&
-                              source_url.port() == load_data.url.port() &&
-                              load_info.sandbox == IFrameSandboxState::IFrameUnsandboxed &&
-                              source_pipeline.is_private == is_private;
-
-            // Reuse the script thread if the URL is same-origin
-            let script_chan = if same_script {
-                debug!("Constellation: loading same-origin iframe, \
-                        parent url {:?}, iframe url {:?}", source_url, load_data.url);
-                Some(source_pipeline.script_chan.clone())
-            } else {
-                debug!("Constellation: loading cross-origin iframe, \
-                        parent url {:?}, iframe url {:?}", source_url, load_data.url);
-                None
-            };
 
             let window_size = old_pipeline.and_then(|old_pipeline| old_pipeline.size);
 
@@ -1368,18 +1392,16 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
                 old_pipeline.freeze();
             }
 
-            (load_data, script_chan, window_size, is_private)
+            (load_data, window_size, is_private)
         };
-
 
         // Create the new pipeline, attached to the parent and push to pending frames
         self.new_pipeline(load_info.new_pipeline_id,
                           load_info.frame_id,
                           Some((load_info.parent_pipeline_id, load_info.frame_type)),
-                          load_info.old_pipeline_id,
                           window_size,
-                          script_chan,
                           load_data,
+                          load_info.sandbox,
                           is_private);
 
         self.pending_frames.push(FrameChange {
@@ -1428,37 +1450,27 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
                     pipeline_id: PipelineId,
                     message: String,
                     sender: IpcSender<bool>) {
-        let display_alert_dialog = if PREFS.is_mozbrowser_enabled() {
-            let parent_pipeline_info = self.pipelines.get(&pipeline_id).and_then(|source| source.parent_info);
-            if parent_pipeline_info.is_some() {
-                let root_pipeline_id = self.frames.get(&self.root_frame_id)
-                    .map(|root_frame| root_frame.current.pipeline_id);
+        let pipeline_isnt_root = self.pipelines.get(&pipeline_id).and_then(|pipeline| pipeline.parent_info).is_some();
+        let mozbrowser_modal_prompt = pipeline_isnt_root && PREFS.is_mozbrowser_enabled();
 
-                let ancestor_info = self.get_mozbrowser_ancestor_info(pipeline_id);
-                if let Some((ancestor_id, mozbrowser_iframe_id)) = ancestor_info {
-                    if root_pipeline_id == Some(ancestor_id) {
-                        match root_pipeline_id.and_then(|pipeline_id| self.pipelines.get(&pipeline_id)) {
-                            Some(root_pipeline) => {
-                                // https://developer.mozilla.org/en-US/docs/Web/Events/mozbrowsershowmodalprompt
-                                let event = MozBrowserEvent::ShowModalPrompt("alert".to_owned(), "Alert".to_owned(),
-                                                                             String::from(message), "".to_owned());
-                                root_pipeline.trigger_mozbrowser_event(Some(mozbrowser_iframe_id), event);
-                            }
-                            None => return warn!("Alert sent to Pipeline {:?} after closure.", root_pipeline_id),
-                        }
-                    } else {
-                        warn!("A non-current frame is trying to show an alert.")
-                    }
+        if mozbrowser_modal_prompt {
+            // https://developer.mozilla.org/en-US/docs/Web/Events/mozbrowsershowmodalprompt
+            let prompt_type = String::from("alert");
+            let title = String::from("Alert");
+            let return_value = String::from("");
+            let event = MozBrowserEvent::ShowModalPrompt(prompt_type, title, message, return_value);
+            let top_level_frame_id = self.get_top_level_frame_for_pipeline(pipeline_id);
+
+            match self.frames.get(&self.root_frame_id) {
+                None => warn!("Alert sent after root frame closure."),
+                Some(root_frame) => match self.pipelines.get(&root_frame.current.pipeline_id) {
+                    None => warn!("Alert sent after root pipeline closure."),
+                    Some(root_pipeline) => root_pipeline.trigger_mozbrowser_event(Some(top_level_frame_id), event),
                 }
-                false
-            } else {
-                true
             }
-        } else {
-            true
-        };
+        }
 
-        let result = sender.send(display_alert_dialog);
+        let result = sender.send(!mozbrowser_modal_prompt);
         if let Err(e) = result {
             self.handle_send_error(pipeline_id, e);
         }
@@ -1526,7 +1538,8 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
                 let window_size = self.pipelines.get(&source_id).and_then(|source| source.size);
                 let new_pipeline_id = PipelineId::new();
                 let root_frame_id = self.root_frame_id;
-                self.new_pipeline(new_pipeline_id, root_frame_id, None, None, window_size, None, load_data, false);
+                let sandbox = IFrameSandboxState::IFrameUnsandboxed;
+                self.new_pipeline(new_pipeline_id, root_frame_id, None, window_size, load_data, sandbox, false);
                 self.pending_frames.push(FrameChange {
                     frame_id: root_frame_id,
                     old_pipeline_id: Some(source_id),
@@ -1546,7 +1559,7 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
     }
 
     fn handle_load_start_msg(&mut self, pipeline_id: PipelineId) {
-        let frame_id = self.get_top_level_frame_for_pipeline(Some(pipeline_id));
+        let frame_id = self.get_top_level_frame_for_pipeline(pipeline_id);
         let forward = !self.joint_session_future_is_empty(frame_id);
         let back = !self.joint_session_past_is_empty(frame_id);
         self.compositor_proxy.send(ToCompositorMsg::LoadStart(back, forward));
@@ -1564,7 +1577,7 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
         if webdriver_reset {
             self.webdriver.load_channel = None;
         }
-        let frame_id = self.get_top_level_frame_for_pipeline(Some(pipeline_id));
+        let frame_id = self.get_top_level_frame_for_pipeline(pipeline_id);
         let forward = !self.joint_session_future_is_empty(frame_id);
         let back = !self.joint_session_past_is_empty(frame_id);
         let root = self.root_frame_id == frame_id;
@@ -1575,13 +1588,15 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
     fn handle_traverse_history_msg(&mut self,
                                    pipeline_id: Option<PipelineId>,
                                    direction: TraversalDirection) {
-        let frame_id = self.get_top_level_frame_for_pipeline(pipeline_id);
+        let top_level_frame_id = pipeline_id
+            .map(|pipeline_id| self.get_top_level_frame_for_pipeline(pipeline_id))
+            .unwrap_or(self.root_frame_id);
 
         let mut traversal_info = HashMap::new();
 
         match direction {
             TraversalDirection::Forward(delta) => {
-                let mut future = self.joint_session_future(frame_id);
+                let mut future = self.joint_session_future(top_level_frame_id);
                 for _ in 0..delta {
                     match future.pop() {
                         Some((_, frame_id, pipeline_id)) => {
@@ -1592,7 +1607,7 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
                 }
             },
             TraversalDirection::Back(delta) => {
-                let mut past = self.joint_session_past(frame_id);
+                let mut past = self.joint_session_past(top_level_frame_id);
                 for _ in 0..delta {
                     match past.pop() {
                         Some((_, frame_id, pipeline_id)) => {
@@ -1609,7 +1624,7 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
     }
 
     fn handle_joint_session_history_length(&self, pipeline_id: PipelineId, sender: IpcSender<u32>) {
-        let frame_id = self.get_top_level_frame_for_pipeline(Some(pipeline_id));
+        let frame_id = self.get_top_level_frame_for_pipeline(pipeline_id);
 
         // Initialize length at 1 to count for the current active entry
         let mut length = 1;
@@ -1966,11 +1981,21 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
         }
     }
 
-    fn get_top_level_frame_for_pipeline(&self, pipeline_id: Option<PipelineId>) -> FrameId {
+    fn get_top_level_frame_for_pipeline(&self, mut pipeline_id: PipelineId) -> FrameId {
         if PREFS.is_mozbrowser_enabled() {
-            pipeline_id.and_then(|id| self.get_mozbrowser_ancestor_info(id))
-                       .map(|(_, mozbrowser_iframe_id)| mozbrowser_iframe_id)
-                       .unwrap_or(self.root_frame_id)
+            loop {
+                match self.pipelines.get(&pipeline_id) {
+                    Some(pipeline) => match pipeline.parent_info {
+                        Some((_, FrameType::MozBrowserIFrame)) => return pipeline.frame_id,
+                        Some((parent_id, _)) => pipeline_id = parent_id,
+                        None => return self.root_frame_id,
+                    },
+                    None => {
+                        warn!("Finding top-level ancestor for pipeline {} after closure.", pipeline_id);
+                        return self.root_frame_id;
+                    },
+                }
+            }
         } else {
             // If mozbrowser is not enabled, the root frame is the only top-level frame
             self.root_frame_id
@@ -2025,7 +2050,7 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
             // This is the result of a link being clicked and a navigation completing.
             self.trigger_mozbrowserlocationchange(frame_change.new_pipeline_id);
 
-            let top_level_frame_id = self.get_top_level_frame_for_pipeline(Some(frame_change.new_pipeline_id));
+            let top_level_frame_id = self.get_top_level_frame_for_pipeline(frame_change.new_pipeline_id);
             self.clear_joint_session_future(top_level_frame_id);
         }
 
@@ -2262,31 +2287,14 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
 
     // Close a frame (and all children)
     fn close_frame(&mut self, frame_id: FrameId, exit_mode: ExitPipelineMode) {
-        debug!("Closing frame {:?}.", frame_id);
-        // Store information about the pipelines to be closed. Then close the
-        // pipelines, before removing ourself from the frames hash map. This
-        // ordering is vital - so that if close_pipeline() ends up closing
-        // any child frames, they can be removed from the parent frame correctly.
+        debug!("Closing frame {}.", frame_id);
         let parent_info = self.frames.get(&frame_id)
             .and_then(|frame| self.pipelines.get(&frame.current.pipeline_id))
             .and_then(|pipeline| pipeline.parent_info);
 
-        let pipelines_to_close = {
-            let mut pipelines_to_close = vec!();
+        self.close_frame_children(frame_id, exit_mode);
 
-            if let Some(frame) = self.frames.get(&frame_id) {
-                pipelines_to_close.extend_from_slice(&frame.next);
-                pipelines_to_close.push(frame.current.clone());
-                pipelines_to_close.extend_from_slice(&frame.prev);
-            }
-
-            pipelines_to_close
-        };
-
-        for entry in pipelines_to_close {
-            self.close_pipeline(entry.pipeline_id, exit_mode);
-        }
-
+        self.script_channels.remove(&frame_id);
         if self.frames.remove(&frame_id).is_none() {
             warn!("Closing frame {:?} twice.", frame_id);
         }
@@ -2299,6 +2307,31 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
             parent_pipeline.remove_child(frame_id);
         }
         debug!("Closed frame {:?}.", frame_id);
+    }
+
+    // Close the children of a frame
+    fn close_frame_children(&mut self, frame_id: FrameId, exit_mode: ExitPipelineMode) {
+        debug!("Closing frame children {}.", frame_id);
+        // Store information about the pipelines to be closed. Then close the
+        // pipelines, before removing ourself from the frames hash map. This
+        // ordering is vital - so that if close_pipeline() ends up closing
+        // any child frames, they can be removed from the parent frame correctly.
+        let mut pipelines_to_close: Vec<PipelineId> = self.pending_frames.iter()
+            .filter(|frame_change| frame_change.frame_id == frame_id)
+            .map(|frame_change| frame_change.new_pipeline_id)
+            .collect();
+
+        if let Some(frame) = self.frames.get(&frame_id) {
+            pipelines_to_close.extend(frame.next.iter().map(|state| state.pipeline_id));
+            pipelines_to_close.push(frame.current.pipeline_id);
+            pipelines_to_close.extend(frame.prev.iter().map(|state| state.pipeline_id));
+        }
+
+        for pipeline_id in pipelines_to_close {
+            self.close_pipeline(pipeline_id, exit_mode);
+        }
+
+        debug!("Closed frame children {}.", frame_id);
     }
 
     // Close all pipelines at and beneath a given frame
@@ -2410,49 +2443,29 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
         }
     }
 
-    /// For a given pipeline, determine the mozbrowser iframe that transitively contains
-    /// it. There could be arbitrary levels of nested iframes in between them.
-    fn get_mozbrowser_ancestor_info(&self, original_pipeline_id: PipelineId) -> Option<(PipelineId, FrameId)> {
-        let mut pipeline_id = original_pipeline_id;
-        loop {
-            match self.pipelines.get(&pipeline_id) {
-                Some(pipeline) => match pipeline.parent_info {
-                    Some((parent_id, FrameType::MozBrowserIFrame)) => return Some((parent_id, pipeline.frame_id)),
-                    Some((parent_id, _)) => pipeline_id = parent_id,
-                    None => return None,
-                },
-                None => {
-                    warn!("Finding mozbrowser ancestor for pipeline {} after closure.", pipeline_id);
-                    return None;
-                },
-            }
-        }
-    }
-
     // https://developer.mozilla.org/en-US/docs/Web/Events/mozbrowserlocationchange
     // Note that this is a no-op if the pipeline is not a mozbrowser iframe
     fn trigger_mozbrowserlocationchange(&self, pipeline_id: PipelineId) {
-        if !PREFS.is_mozbrowser_enabled() { return; }
-
-        let url = match self.pipelines.get(&pipeline_id) {
-            Some(pipeline) => pipeline.url.to_string(),
-            None => return warn!("triggered mozbrowser location change on closed pipeline {:?}", pipeline_id),
-        };
-
-        // If this is a mozbrowser iframe, then send the event with new url
-        if let Some((ancestor_id, mozbrowser_frame_id)) = self.get_mozbrowser_ancestor_info(pipeline_id) {
-            if let Some(ancestor) = self.pipelines.get(&ancestor_id) {
-                let can_go_forward = !self.joint_session_future(mozbrowser_frame_id).is_empty();
-                let can_go_back = !self.joint_session_past(mozbrowser_frame_id).is_empty();
-                let event = MozBrowserEvent::LocationChange(url, can_go_back, can_go_forward);
-                ancestor.trigger_mozbrowser_event(Some(mozbrowser_frame_id), event);
-            }
+        match self.pipelines.get(&pipeline_id) {
+            Some(pipeline) => if let Some((parent_id, FrameType::MozBrowserIFrame)) = pipeline.parent_info {
+                match self.pipelines.get(&parent_id) {
+                    Some(parent) => {
+                        let can_go_forward = !self.joint_session_future_is_empty(pipeline.frame_id);
+                        let can_go_back = !self.joint_session_past_is_empty(pipeline.frame_id);
+                        let url = pipeline.url.to_string();
+                        let event = MozBrowserEvent::LocationChange(url, can_go_back, can_go_forward);
+                        parent.trigger_mozbrowser_event(Some(pipeline.frame_id), event);
+                    },
+                    None => warn!("triggered mozbrowser location change on closed parent {}", parent_id),
+                }
+            },
+            None => warn!("triggered mozbrowser location change on closed pipeline {}", pipeline_id),
         }
     }
 
     // https://developer.mozilla.org/en-US/docs/Web/Events/mozbrowsererror
     // Note that this does not require the pipeline to be an immediate child of the root
-    fn trigger_mozbrowsererror(&mut self, pipeline_id: Option<PipelineId>, reason: String, backtrace: Option<String>) {
+    fn trigger_mozbrowsererror(&mut self, top_level_frame_id: FrameId, reason: String, backtrace: Option<String>) {
         if !PREFS.is_mozbrowser_enabled() { return; }
 
         let mut report = String::new();
@@ -2474,21 +2487,19 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
 
         let event = MozBrowserEvent::Error(MozBrowserErrorType::Fatal, reason, report);
 
-        if let Some(pipeline_id) = pipeline_id {
-            if let Some((ancestor_id, mozbrowser_iframe_id)) = self.get_mozbrowser_ancestor_info(pipeline_id) {
-                if let Some(ancestor) = self.pipelines.get(&ancestor_id) {
-                    return ancestor.trigger_mozbrowser_event(Some(mozbrowser_iframe_id), event);
-                }
-            }
-        }
-
-        if let Some(root_frame) = self.frames.get(&self.root_frame_id) {
-            if let Some(root_pipeline) = self.pipelines.get(&root_frame.current.pipeline_id) {
-                return root_pipeline.trigger_mozbrowser_event(None, event);
-            }
-        }
-
-        warn!("Mozbrowser error after root pipeline closed.");
+        match self.frames.get(&top_level_frame_id) {
+            None => warn!("Mozbrowser error after top-level frame closed."),
+            Some(frame) => match self.pipelines.get(&frame.current.pipeline_id) {
+                None => warn!("Mozbrowser error after top-level pipeline closed."),
+                Some(pipeline) => match pipeline.parent_info {
+                    None => pipeline.trigger_mozbrowser_event(None, event),
+                    Some((parent_id, _)) => match self.pipelines.get(&parent_id) {
+                        None => warn!("Mozbrowser error after root pipeline closed."),
+                        Some(parent) => parent.trigger_mozbrowser_event(Some(top_level_frame_id), event),
+                    },
+                },
+            },
+        };
     }
 
     fn focused_pipeline_in_tree(&self, frame_id: FrameId) -> bool {

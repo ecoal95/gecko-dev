@@ -343,6 +343,13 @@ impl Parse for Length {
     }
 }
 
+impl<T> Either<Length, T> {
+    #[inline]
+    pub fn parse_non_negative_length(input: &mut Parser) -> Result<Either<Length, T>, ()> {
+        Length::parse_internal(input, AllowedNumericType::NonNegative).map(Either::First)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct CalcSumNode {
     pub products: Vec<CalcProductNode>,
@@ -946,13 +953,6 @@ impl Parse for LengthOrPercentageOrNone {
 
 pub type LengthOrNone = Either<Length, None_>;
 
-impl LengthOrNone {
-    #[inline]
-    pub fn parse_non_negative(input: &mut Parser) -> Result<LengthOrNone, ()> {
-        Length::parse_internal(input, AllowedNumericType::NonNegative).map(Either::First)
-    }
-}
-
 #[derive(Clone, PartialEq, Copy, Debug)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub enum LengthOrPercentageOrAutoOrContent {
@@ -1009,3 +1009,13 @@ impl Parse for LengthOrPercentageOrAutoOrContent {
 }
 
 pub type LengthOrNumber = Either<Length, Number>;
+
+impl LengthOrNumber {
+    pub fn parse_non_negative(input: &mut Parser) -> Result<Self, ()> {
+        if let Ok(v) = input.try(|i| Length::parse_non_negative(i)) {
+            Ok(Either::First(v))
+        } else {
+            Number::parse_non_negative(input).map(Either::Second)
+        }
+    }
+}

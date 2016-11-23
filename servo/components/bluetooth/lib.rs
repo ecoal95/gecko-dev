@@ -18,7 +18,7 @@ pub mod test;
 use bluetooth_traits::{BluetoothCharacteristicMsg, BluetoothDescriptorMsg, BluetoothServiceMsg};
 use bluetooth_traits::{BluetoothDeviceMsg, BluetoothRequest, BluetoothResponse};
 use bluetooth_traits::{BluetoothError, BluetoothResponseResult, BluetoothResult};
-use bluetooth_traits::blacklist::{uuid_is_blacklisted, Blacklist};
+use bluetooth_traits::blocklist::{uuid_is_blocklisted, Blocklist};
 use bluetooth_traits::scanfilter::{BluetoothScanfilter, BluetoothScanfilterSequence, RequestDeviceoptions};
 use device::bluetooth::{BluetoothAdapter, BluetoothDevice, BluetoothGATTCharacteristic};
 use device::bluetooth::{BluetoothGATTDescriptor, BluetoothGATTService};
@@ -130,23 +130,60 @@ fn matches_filter(device: &BluetoothDevice, filter: &BluetoothScanfilter) -> boo
         }
     }
 
-// Step 4.
-// TODO: Implement get_manufacturer_data in device crate.
-//    if let Some(manufacturer_id) = filter.get_manufacturer_id() {
-//        if !device.get_manufacturer_data().contains_key(manufacturer_id) {
-//            return false;
-//        }
-//    }
-//
-// Step 5.
-// TODO: Implement get_device_data in device crate.
-//    if !filter.get_service_data_uuid().is_empty() {
-//        if !device.get_service_data().contains_key(filter.get_service_data_uuid()) {
-//            return false;
-//        }
-//    }
+    // Step 4.
+    if let Some(ref manufacturer_data) = filter.get_manufacturer_data() {
+        let advertised_manufacturer_data = match device.get_manufacturer_data() {
+            Ok(data) => data,
+            Err(_) => return false,
+        };
+        for (ref id, &(ref prefix, ref mask)) in manufacturer_data.iter() {
+            if let Some(advertised_data) = advertised_manufacturer_data.get(id) {
+                if !data_filter_matches(advertised_data, prefix, mask) {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+    }
+
+    // Step 5.
+    if let Some(ref service_data) = filter.get_service_data() {
+        let advertised_service_data = match device.get_service_data() {
+            Ok(data) => data,
+            Err(_) => return false,
+        };
+        for (uuid, &(ref prefix, ref mask)) in service_data.iter() {
+            if let Some(advertised_data) = advertised_service_data.get(uuid.as_str()) {
+                if !data_filter_matches(advertised_data, prefix, mask) {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+    }
 
     // Step 6.
+    true
+}
+
+// https://webbluetoothcg.github.io/web-bluetooth/#bluetoothdatafilterinit-matches
+fn data_filter_matches(data: &[u8], prefix: &[u8], mask: &[u8]) -> bool {
+    // Step 1-2: No need to copy the bytes here.
+    // Step 3.
+    if data.len() < prefix.len() {
+        return false;
+    }
+
+    // Step 4.
+    for ((data, mask), prefix) in data.iter().zip(mask.iter()).zip(prefix.iter()) {
+        if data & mask != prefix & mask {
+            return false;
+        }
+    }
+
+    // Step 5.
     true
 }
 
@@ -237,6 +274,9 @@ impl BluetoothManager {
                 },
                 BluetoothRequest::WriteValue(id, value, sender) => {
                     self.write_value(id, value, sender)
+                },
+                BluetoothRequest::EnableNotification(id, enable, sender) => {
+                    self.enable_notification(id, enable, sender)
                 },
                 BluetoothRequest::Test(data_set_name, sender) => {
                     self.test(data_set_name, sender)
@@ -686,7 +726,7 @@ impl BluetoothManager {
                 }
             }
         }
-        services_vec.retain(|s| !uuid_is_blacklisted(&s.uuid, Blacklist::All) &&
+        services_vec.retain(|s| !uuid_is_blocklisted(&s.uuid, Blocklist::All) &&
                                 self.allowed_services
                                     .get(&device_id)
                                     .map_or(false, |uuids| uuids.contains(&s.uuid)));
@@ -764,7 +804,7 @@ impl BluetoothManager {
         if let Some(uuid) = uuid {
             services_vec.retain(|ref s| s.uuid == uuid);
         }
-        services_vec.retain(|s| !uuid_is_blacklisted(&s.uuid, Blacklist::All));
+        services_vec.retain(|s| !uuid_is_blocklisted(&s.uuid, Blocklist::All));
         if services_vec.is_empty() {
             return drop(sender.send(Err(BluetoothError::NotFound)));
         }
@@ -842,7 +882,7 @@ impl BluetoothManager {
                 );
             }
         }
-        characteristics_vec.retain(|c| !uuid_is_blacklisted(&c.uuid, Blacklist::All));
+        characteristics_vec.retain(|c| !uuid_is_blocklisted(&c.uuid, Blocklist::All));
         if characteristics_vec.is_empty() {
             return drop(sender.send(Err(BluetoothError::NotFound)));
         }
@@ -903,7 +943,7 @@ impl BluetoothManager {
                 );
             }
         }
-        descriptors_vec.retain(|d| !uuid_is_blacklisted(&d.uuid, Blacklist::All));
+        descriptors_vec.retain(|d| !uuid_is_blocklisted(&d.uuid, Blocklist::All));
         if descriptors_vec.is_empty() {
             return drop(sender.send(Err(BluetoothError::NotFound)));
         }
@@ -937,6 +977,27 @@ impl BluetoothManager {
                 Ok(_) => return drop(sender.send(Ok(BluetoothResponse::WriteValue(value)))),
                 Err(_) => return drop(sender.send(Err(BluetoothError::NotSupported))),
             },
+            None => return drop(sender.send(Err(BluetoothError::InvalidState))),
+        }
+    }
+
+    // https://webbluetoothcg.github.io/web-bluetooth/#dom-bluetoothremotegattcharacteristic-startnotifications
+    fn enable_notification(&mut self, id: String, enable: bool, sender: IpcSender<BluetoothResponseResult>) {
+        let mut adapter = get_adapter_or_return_error!(self, sender);
+        match self.get_gatt_characteristic(&mut adapter, &id) {
+            Some(c) => {
+                let result = match enable {
+                    true => c.start_notify(),
+                    false => c.stop_notify(),
+                };
+                match result {
+                    // Step 11.
+                    Ok(_) => return drop(sender.send(Ok(BluetoothResponse::EnableNotification(())))),
+                    // Step 4.
+                    Err(_) => return drop(sender.send(Err(BluetoothError::NotSupported))),
+                }
+            },
+            // Step 3.
             None => return drop(sender.send(Err(BluetoothError::InvalidState))),
         }
     }

@@ -10,7 +10,7 @@ extern crate regex;
 extern crate serde_derive;
 extern crate util;
 
-pub mod blacklist;
+pub mod blocklist;
 pub mod scanfilter;
 
 use ipc_channel::ipc::IpcSender;
@@ -92,6 +92,7 @@ pub enum BluetoothRequest {
     GetDescriptors(String, Option<String>, IpcSender<BluetoothResponseResult>),
     ReadValue(String, IpcSender<BluetoothResponseResult>),
     WriteValue(String, Vec<u8>, IpcSender<BluetoothResponseResult>),
+    EnableNotification(String, bool, IpcSender<BluetoothResponseResult>),
     Test(String, IpcSender<BluetoothResult<()>>),
     Exit,
 }
@@ -110,6 +111,7 @@ pub enum BluetoothResponse {
     GetDescriptors(BluetoothDescriptorsMsg),
     ReadValue(Vec<u8>),
     WriteValue(Vec<u8>),
+    EnableNotification(()),
 }
 
 pub trait BluetoothResponseListener {

@@ -42,7 +42,6 @@ extern crate selectors;
 extern crate serde_json;
 extern crate servo_url;
 extern crate style;
-extern crate style_traits;
 extern crate util;
 extern crate webrender_traits;
 
@@ -80,7 +79,7 @@ use layout::webrender_helpers::{WebRenderDisplayListConverter, WebRenderFrameBui
 use layout::wrapper::LayoutNodeLayoutData;
 use layout::wrapper::drop_style_and_layout_data;
 use layout_traits::LayoutThreadFactory;
-use msg::constellation_msg::PipelineId;
+use msg::constellation_msg::{FrameId, PipelineId};
 use net_traits::image_cache_thread::{ImageCacheChan, ImageCacheResult, ImageCacheThread};
 use net_traits::image_cache_thread::UsePlaceholder;
 use parking_lot::RwLock;
@@ -235,6 +234,7 @@ impl LayoutThreadFactory for LayoutThread {
 
     /// Spawns a new layout thread.
     fn create(id: PipelineId,
+              top_level_frame_id: Option<FrameId>,
               url: ServoUrl,
               is_iframe: bool,
               chan: (Sender<Msg>, Receiver<Msg>),
@@ -251,7 +251,11 @@ impl LayoutThreadFactory for LayoutThread {
         thread::spawn_named(format!("LayoutThread {:?}", id),
                       move || {
             thread_state::initialize(thread_state::LAYOUT);
-            PipelineId::install(id);
+
+            if let Some(top_level_frame_id) = top_level_frame_id {
+                FrameId::install(top_level_frame_id);
+            }
+
             { // Ensures layout thread is destroyed before we send shutdown message
                 let sender = chan.0;
                 let layout = LayoutThread::new(id,
@@ -718,6 +722,7 @@ impl LayoutThread {
 
     fn create_layout_thread(&self, info: NewLayoutThreadInfo) {
         LayoutThread::create(info.id,
+                             FrameId::installed(),
                              info.url.clone(),
                              info.is_parent,
                              info.layout_pair,
@@ -1055,7 +1060,7 @@ impl LayoutThread {
                        .send(ConstellationMsg::ViewportConstrained(self.id, constraints))
                        .unwrap();
             }
-            if data.document_stylesheets.iter().any(|sheet| sheet.dirty_on_viewport_size_change) {
+            if data.document_stylesheets.iter().any(|sheet| sheet.dirty_on_viewport_size_change()) {
                 let mut iter = node.traverse_preorder();
 
                 let mut next = iter.next();
@@ -1528,6 +1533,7 @@ fn get_ua_stylesheets() -> Result<UserAgentStylesheets, &'static str> {
             None,
             None,
             Origin::UserAgent,
+            Default::default(),
             Box::new(StdoutErrorReporter),
             ParserContextExtraData::default()))
     }
@@ -1540,8 +1546,8 @@ fn get_ua_stylesheets() -> Result<UserAgentStylesheets, &'static str> {
     }
     for &(ref contents, ref url) in &opts::get().user_stylesheets {
         user_or_user_agent_stylesheets.push(Stylesheet::from_bytes(
-            &contents, url.clone(), None, None, Origin::User, Box::new(StdoutErrorReporter),
-            ParserContextExtraData::default()));
+            &contents, url.clone(), None, None, Origin::User, Default::default(),
+            Box::new(StdoutErrorReporter), ParserContextExtraData::default()));
     }
 
     let quirks_mode_stylesheet = try!(parse_ua_stylesheet("quirks-mode.css"));

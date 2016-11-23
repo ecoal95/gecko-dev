@@ -7,7 +7,7 @@ use device::bluetooth::{BluetoothAdapter, BluetoothDevice};
 use device::bluetooth::{BluetoothGATTCharacteristic, BluetoothGATTDescriptor, BluetoothGATTService};
 use std::borrow::ToOwned;
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use std::error::Error;
 use std::string::String;
 use uuid::Uuid;
@@ -18,6 +18,7 @@ const ADAPTER_ERROR: &'static str = "No adapter found";
 const WRONG_DATA_SET_ERROR: &'static str = "Wrong data set name was provided";
 const READ_FLAG: &'static str = "read";
 const WRITE_FLAG: &'static str = "write";
+const NOTIFY_FLAG: &'static str = "notify";
 
 // Adapter names
 // https://cs.chromium.org/chromium/src/content/shell/browser/layout_test/layout_test_bluetooth_adapter_provider.h?l=65
@@ -43,7 +44,7 @@ const EMPTY_NAME_HEART_RATE_ADAPTER: &'static str = "EmptyNameHeartRateAdapter";
 const NO_NAME_HEART_RATE_ADAPTER: &'static str = "NoNameHeartRateAdapter";
 // https://cs.chromium.org/chromium/src/content/shell/browser/layout_test/layout_test_bluetooth_adapter_provider.h?l=284
 const TWO_HEART_RATE_SERVICES_ADAPTER: &'static str = "TwoHeartRateServicesAdapter";
-const BLACKLIST_TEST_ADAPTER: &'static str = "BlacklistTestAdapter";
+const BLOCKLIST_TEST_ADAPTER: &'static str = "BlocklistTestAdapter";
 
 // Device names
 const CONNECTABLE_DEVICE_NAME: &'static str = "Connectable Device";
@@ -63,7 +64,7 @@ const HEART_RATE_DEVICE_ADDRESS: &'static str = "00:00:00:00:00:03";
 const UNICODE_DEVICE_ADDRESS: &'static str = "00:00:00:00:00:01";
 
 // Service UUIDs
-const BLACKLIST_TEST_SERVICE_UUID: &'static str = "611c954a-263b-4f4a-aab6-01ddb953f985";
+const BLOCKLIST_TEST_SERVICE_UUID: &'static str = "611c954a-263b-4f4a-aab6-01ddb953f985";
 // https://www.bluetooth.com/specifications/gatt/viewer?attributeXmlFile=org.bluetooth.service.device_information.xml
 const DEVICE_INFORMATION_UUID: &'static str = "0000180a-0000-1000-8000-00805f9b34fb";
 // https://www.bluetooth.com/specifications/gatt/viewer?attributeXmlFile=org.bluetooth.service.generic_access.xml
@@ -79,7 +80,7 @@ const HUMAN_INTERFACE_DEVICE_SERVICE_UUID: &'static str = "00001812-0000-1000-80
 const TX_POWER_SERVICE_UUID: &'static str = "00001804-0000-1000-8000-00805f9b34fb";
 
 // Characteristic UUIDs
-const BLACKLIST_EXCLUDE_READS_CHARACTERISTIC_UUID: &'static str = "bad1c9a2-9a5b-4015-8b60-1579bbbf2135";
+const BLOCKLIST_EXCLUDE_READS_CHARACTERISTIC_UUID: &'static str = "bad1c9a2-9a5b-4015-8b60-1579bbbf2135";
 // https://www.bluetooth.com/specifications/gatt/
 // viewer?attributeXmlFile=org.bluetooth.characteristic.body_sensor_location.xml
 const BODY_SENSOR_LOCATION_CHARACTERISTIC_UUID: &'static str = "00002a38-0000-1000-8000-00805f9b34fb";
@@ -97,8 +98,8 @@ const PERIPHERAL_PRIVACY_FLAG_CHARACTERISTIC_UUID: &'static str = "00002a02-0000
 const SERIAL_NUMBER_STRING_UUID: &'static str = "00002a25-0000-1000-8000-00805f9b34fb";
 
 // Descriptor UUIDs
-const BLACKLIST_EXCLUDE_READS_DESCRIPTOR_UUID: &'static str = "aaaaaaaa-aaaa-1181-0510-810819516110";
-const BLACKLIST_DESCRIPTOR_UUID: &'static str = "07711111-6104-0970-7011-1107105110aaa";
+const BLOCKLIST_EXCLUDE_READS_DESCRIPTOR_UUID: &'static str = "aaaaaaaa-aaaa-1181-0510-810819516110";
+const BLOCKLIST_DESCRIPTOR_UUID: &'static str = "07711111-6104-0970-7011-1107105110aaa";
 // https://www.bluetooth.com/specifications/gatt/
 // viewer?attributeXmlFile=org.bluetooth.descriptor.gatt.characteristic_user_description.xml
 const CHARACTERISTIC_USER_DESCRIPTION_UUID: &'static str = "00002901-0000-1000-8000-00805f9b34fb";
@@ -217,10 +218,11 @@ fn create_heart_rate_service(device: &BluetoothDevice,
     }
 
     // Heart Rate Measurement Characteristic
-    let _heart_rate_measurement_characteristic =
+    let heart_rate_measurement_characteristic =
         try!(create_characteristic_with_value(&heart_rate_service,
                                               HEART_RATE_MEASUREMENT_CHARACTERISTIC_UUID.to_owned(),
                                               vec![0]));
+    try!(heart_rate_measurement_characteristic.set_flags(vec![NOTIFY_FLAG.to_string()]));
 
     // Body Sensor Location Characteristic 1
     let body_sensor_location_characteristic_1 =
@@ -357,10 +359,11 @@ fn create_two_heart_rate_services_device(adapter: &BluetoothAdapter) -> Result<(
 
     let heart_rate_service_empty_2 = try!(create_heart_rate_service(&heart_rate_device_empty, true));
 
-    let _heart_rate_measurement_characteristic =
+    let heart_rate_measurement_characteristic =
         try!(create_characteristic_with_value(&heart_rate_service_empty_1,
                                               HEART_RATE_MEASUREMENT_CHARACTERISTIC_UUID.to_owned(),
                                               vec![0]));
+    try!(heart_rate_measurement_characteristic.set_flags(vec![NOTIFY_FLAG.to_string()]));
 
     let _body_sensor_location_characteristic_1 =
         try!(create_characteristic_with_value(&heart_rate_service_empty_1,
@@ -374,33 +377,33 @@ fn create_two_heart_rate_services_device(adapter: &BluetoothAdapter) -> Result<(
     Ok(())
 }
 
-fn create_blacklisted_device(adapter: &BluetoothAdapter) -> Result<(), Box<Error>> {
+fn create_blocklisted_device(adapter: &BluetoothAdapter) -> Result<(), Box<Error>> {
     let connectable_device =
     try!(create_device_with_uuids(adapter,
                                  CONNECTABLE_DEVICE_NAME.to_owned(),
                                  CONNECTABLE_DEVICE_ADDRESS.to_owned(),
-                                 vec![BLACKLIST_TEST_SERVICE_UUID.to_owned(),
+                                 vec![BLOCKLIST_TEST_SERVICE_UUID.to_owned(),
                                       DEVICE_INFORMATION_UUID.to_owned(),
                                       GENERIC_ACCESS_SERVICE_UUID.to_owned(),
                                       HEART_RATE_SERVICE_UUID.to_owned(),
                                       HUMAN_INTERFACE_DEVICE_SERVICE_UUID.to_owned()]));
 
-    let blacklist_test_service = try!(create_service(&connectable_device, BLACKLIST_TEST_SERVICE_UUID.to_owned()));
+    let blocklist_test_service = try!(create_service(&connectable_device, BLOCKLIST_TEST_SERVICE_UUID.to_owned()));
 
-    let blacklist_exclude_reads_characteristic =
-        try!(create_characteristic(&blacklist_test_service,
-                                   BLACKLIST_EXCLUDE_READS_CHARACTERISTIC_UUID.to_owned()));
-    try!(blacklist_exclude_reads_characteristic
+    let blocklist_exclude_reads_characteristic =
+        try!(create_characteristic(&blocklist_test_service,
+                                   BLOCKLIST_EXCLUDE_READS_CHARACTERISTIC_UUID.to_owned()));
+    try!(blocklist_exclude_reads_characteristic
          .set_flags(vec![READ_FLAG.to_string(), WRITE_FLAG.to_string()]));
 
-    let _blacklist_exclude_reads_descriptor =
-        try!(create_descriptor_with_value(&blacklist_exclude_reads_characteristic,
-                                          BLACKLIST_EXCLUDE_READS_DESCRIPTOR_UUID.to_owned(),
+    let _blocklist_exclude_reads_descriptor =
+        try!(create_descriptor_with_value(&blocklist_exclude_reads_characteristic,
+                                          BLOCKLIST_EXCLUDE_READS_DESCRIPTOR_UUID.to_owned(),
                                           vec![54; 3]));
 
-    let _blacklist_descriptor =
-        try!(create_descriptor_with_value(&blacklist_exclude_reads_characteristic,
-                                          BLACKLIST_DESCRIPTOR_UUID.to_owned(),
+    let _blocklist_descriptor =
+        try!(create_descriptor_with_value(&blocklist_exclude_reads_characteristic,
+                                          BLOCKLIST_DESCRIPTOR_UUID.to_owned(),
                                           vec![54; 3]));
 
     let device_information_service = try!(create_service(&connectable_device, DEVICE_INFORMATION_UUID.to_owned()));
@@ -414,6 +417,29 @@ fn create_blacklisted_device(adapter: &BluetoothAdapter) -> Result<(), Box<Error
 
     let _human_interface_device_service =
         try!(create_service(&connectable_device, HUMAN_INTERFACE_DEVICE_SERVICE_UUID.to_owned()));
+    Ok(())
+}
+
+fn create_glucose_heart_rate_devices(adapter: &BluetoothAdapter) -> Result<(), Box<Error>> {
+    let glucose_devie = try!(create_device_with_uuids(adapter,
+                                                      GLUCOSE_DEVICE_NAME.to_owned(),
+                                                      GLUCOSE_DEVICE_ADDRESS.to_owned(),
+                                                      vec![GLUCOSE_SERVICE_UUID.to_owned(),
+                                                           TX_POWER_SERVICE_UUID.to_owned()]));
+
+    let heart_rate_device_empty = try!(create_heart_rate_device(adapter, true));
+
+    let mut manufacturer_dta = HashMap::new();
+    manufacturer_dta.insert(17, vec![1, 2, 3]);
+    try!(glucose_devie.set_manufacturer_data(manufacturer_dta));
+
+    let mut service_data = HashMap::new();
+    service_data.insert(GLUCOSE_SERVICE_UUID.to_owned(), vec![1, 2, 3]);
+    try!(glucose_devie.set_service_data(service_data));
+
+    service_data = HashMap::new();
+    service_data.insert(HEART_RATE_SERVICE_UUID.to_owned(), vec![1, 2, 3]);
+    try!(heart_rate_device_empty.set_service_data(service_data));
     Ok(())
 }
 
@@ -437,14 +463,7 @@ pub fn test(manager: &mut BluetoothManager, data_set_name: String) -> Result<(),
         },
         GLUCOSE_HEART_RATE_ADAPTER => {
             try!(set_adapter(adapter, GLUCOSE_HEART_RATE_ADAPTER.to_owned()));
-
-            let _glucose_devie = try!(create_device_with_uuids(adapter,
-                                                               GLUCOSE_DEVICE_NAME.to_owned(),
-                                                               GLUCOSE_DEVICE_ADDRESS.to_owned(),
-                                                               vec![GLUCOSE_SERVICE_UUID.to_owned(),
-                                                                    TX_POWER_SERVICE_UUID.to_owned()]));
-
-            let _heart_rate_device_empty = try!(create_heart_rate_device(adapter, true));
+            let _ = try!(create_glucose_heart_rate_devices(adapter));
         },
         UNICODE_DEVICE_ADAPTER => {
             try!(set_adapter(adapter, UNICODE_DEVICE_ADAPTER.to_owned()));
@@ -490,10 +509,10 @@ pub fn test(manager: &mut BluetoothManager, data_set_name: String) -> Result<(),
 
             let _ = try!(create_two_heart_rate_services_device(adapter));
         },
-        BLACKLIST_TEST_ADAPTER => {
-            try!(set_adapter(adapter, BLACKLIST_TEST_ADAPTER.to_owned()));
+        BLOCKLIST_TEST_ADAPTER => {
+            try!(set_adapter(adapter, BLOCKLIST_TEST_ADAPTER.to_owned()));
 
-            let _ = try!(create_blacklisted_device(adapter));
+            let _ = try!(create_blocklisted_device(adapter));
         },
         _ => return Err(Box::from(WRONG_DATA_SET_ERROR.to_string())),
     }
