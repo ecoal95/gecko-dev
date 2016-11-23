@@ -63,18 +63,18 @@ public:
   using Promise = MozPromise<RefPtr<Token>, bool, true>;
 
   // Acquire a token for decoder creation. Thread-safe.
-  auto Alloc(TrackType aTrack) -> RefPtr<Promise>;
+  auto Alloc() -> RefPtr<Promise>;
 
   // Called by ClearOnShutdown() to delete the singleton.
   void operator=(decltype(nullptr));
 
-  // Get the singleton. Thread-safe.
-  static DecoderAllocPolicy& Instance();
+  // Get the singleton for the given track type. Thread-safe.
+  static DecoderAllocPolicy& Instance(TrackType aTrack);
 
 private:
   class AutoDeallocToken;
   using PromisePrivate = Promise::Private;
-  DecoderAllocPolicy();
+  explicit DecoderAllocPolicy(TrackType aTrack);
   ~DecoderAllocPolicy();
   // Called by the destructor of TokenImpl to restore the decoder limit.
   void Dealloc();
@@ -87,6 +87,8 @@ private:
   ReentrantMonitor mMonitor;
   // The number of decoders available for creation.
   int mDecoderLimit;
+  // Track type.
+  const TrackType mTrack;
   // Requests to acquire tokens.
   std::queue<RefPtr<PromisePrivate>> mPromises;
 };
@@ -95,13 +97,24 @@ StaticMutex DecoderAllocPolicy::sMutex;
 
 class DecoderAllocPolicy::AutoDeallocToken : public Token
 {
+public:
+  explicit AutoDeallocToken(TrackType aTrack)
+    : mTrack(aTrack)
+  {}
+
 private:
-  ~AutoDeallocToken() { DecoderAllocPolicy::Instance().Dealloc(); }
+  ~AutoDeallocToken()
+  {
+    DecoderAllocPolicy::Instance(mTrack).Dealloc();
+  }
+
+  const TrackType mTrack;
 };
 
-DecoderAllocPolicy::DecoderAllocPolicy()
+DecoderAllocPolicy::DecoderAllocPolicy(TrackType aTrack)
   : mMonitor("DecoderAllocPolicy::mMonitor")
   , mDecoderLimit(MediaPrefs::MediaDecoderLimit())
+  , mTrack(aTrack)
 {
   AbstractThread::MainThread()->Dispatch(NS_NewRunnableFunction([this] () {
     ClearOnShutdown(this, ShutdownPhase::ShutdownThreads);
@@ -118,18 +131,23 @@ DecoderAllocPolicy::~DecoderAllocPolicy()
 }
 
 DecoderAllocPolicy&
-DecoderAllocPolicy::Instance()
+DecoderAllocPolicy::Instance(TrackType aTrack)
 {
   StaticMutexAutoLock lock(sMutex);
-  static auto sPolicy = new DecoderAllocPolicy();
-  return *sPolicy;
+  if (aTrack == TrackType::kAudioTrack) {
+    static auto sAudioPolicy = new DecoderAllocPolicy(TrackType::kAudioTrack);
+    return *sAudioPolicy;
+  } else {
+    static auto sVideoPolicy = new DecoderAllocPolicy(TrackType::kVideoTrack);
+    return *sVideoPolicy;
+  }
 }
 
 auto
-DecoderAllocPolicy::Alloc(TrackType aTrack) -> RefPtr<Promise>
+DecoderAllocPolicy::Alloc() -> RefPtr<Promise>
 {
-  // No limit for audio decoders or a negative number.
-  if (aTrack == TrackInfo::kAudioTrack || mDecoderLimit < 0) {
+  // No decoder limit set.
+  if (mDecoderLimit < 0) {
     return Promise::CreateAndResolve(new Token(), __func__);
   }
 
@@ -157,7 +175,7 @@ DecoderAllocPolicy::ResolvePromise(ReentrantMonitorAutoEnter& aProofOfLock)
     --mDecoderLimit;
     RefPtr<PromisePrivate> p = mPromises.front().forget();
     mPromises.pop();
-    p->Resolve(new AutoDeallocToken(), __func__);
+    p->Resolve(new AutoDeallocToken(mTrack), __func__);
   }
 }
 
@@ -266,7 +284,7 @@ MediaFormatReader::DecoderFactory::RunStage(TrackType aTrack)
   switch (data.mStage) {
     case Stage::None: {
       MOZ_ASSERT(!data.mToken);
-      data.mTokenPromise.Begin(DecoderAllocPolicy::Instance().Alloc(aTrack)->Then(
+      data.mTokenPromise.Begin(DecoderAllocPolicy::Instance(aTrack).Alloc()->Then(
         mOwner->OwnerThread(), __func__,
         [this, &data, aTrack] (Token* aToken) {
           data.mTokenPromise.Complete();
@@ -437,7 +455,6 @@ MediaFormatReader::MediaFormatReader(AbstractMediaDecoder* aDecoder,
   , mPreviousDecodedKeyframeTime_us(sNoPreviousDecodedKeyframe)
   , mInitDone(false)
   , mTrackDemuxersMayBlock(false)
-  , mDemuxOnly(false)
   , mSeekScheduled(false)
   , mVideoFrameContainer(aVideoFrameContainer)
   , mDecoderFactory(new DecoderFactory(this))
@@ -1328,18 +1345,9 @@ MediaFormatReader::HandleDemuxedSamples(TrackType aTrack,
       aA.mStats.mParsedFrames++;
     }
 
-    if (mDemuxOnly) {
-      ReturnOutput(sample, aTrack);
-    } else {
-      DecodeDemuxedSamples(aTrack, sample);
-    }
+    DecodeDemuxedSamples(aTrack, sample);
 
     decoder.mQueuedSamples.RemoveElementAt(0);
-    if (mDemuxOnly) {
-      // If demuxed-only case, ReturnOutput will resolve with one demuxed data.
-      // Then we should stop doing the iteration.
-      return;
-    }
     samplesPending = true;
   }
 }
@@ -1640,29 +1648,25 @@ MediaFormatReader::ReturnOutput(MediaData* aData, TrackType aTrack)
       aData->mTime, aData->GetEndTime());
 
   if (aTrack == TrackInfo::kAudioTrack) {
-    if (aData->mType != MediaData::RAW_DATA) {
-      AudioData* audioData = static_cast<AudioData*>(aData);
+    AudioData* audioData = static_cast<AudioData*>(aData);
 
-      if (audioData->mChannels != mInfo.mAudio.mChannels ||
-          audioData->mRate != mInfo.mAudio.mRate) {
-        LOG("change of audio format (rate:%d->%d). "
-            "This is an unsupported configuration",
-            mInfo.mAudio.mRate, audioData->mRate);
-        mInfo.mAudio.mRate = audioData->mRate;
-        mInfo.mAudio.mChannels = audioData->mChannels;
-      }
+    if (audioData->mChannels != mInfo.mAudio.mChannels ||
+        audioData->mRate != mInfo.mAudio.mRate) {
+      LOG("change of audio format (rate:%d->%d). "
+          "This is an unsupported configuration",
+          mInfo.mAudio.mRate, audioData->mRate);
+      mInfo.mAudio.mRate = audioData->mRate;
+      mInfo.mAudio.mChannels = audioData->mChannels;
     }
     mAudio.ResolvePromise(aData, __func__);
   } else if (aTrack == TrackInfo::kVideoTrack) {
-    if (aData->mType != MediaData::RAW_DATA) {
-      VideoData* videoData = static_cast<VideoData*>(aData);
+    VideoData* videoData = static_cast<VideoData*>(aData);
 
-      if (videoData->mDisplay != mInfo.mVideo.mDisplay) {
-        LOG("change of video display size (%dx%d->%dx%d)",
-            mInfo.mVideo.mDisplay.width, mInfo.mVideo.mDisplay.height,
-            videoData->mDisplay.width, videoData->mDisplay.height);
-        mInfo.mVideo.mDisplay = videoData->mDisplay;
-      }
+    if (videoData->mDisplay != mInfo.mVideo.mDisplay) {
+      LOG("change of video display size (%dx%d->%dx%d)",
+          mInfo.mVideo.mDisplay.width, mInfo.mVideo.mDisplay.height,
+          videoData->mDisplay.width, videoData->mDisplay.height);
+      mInfo.mVideo.mDisplay = videoData->mDisplay;
     }
     mVideo.ResolvePromise(aData, __func__);
   }

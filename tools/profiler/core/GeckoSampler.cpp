@@ -444,6 +444,15 @@ void GeckoSampler::ToJSObjectAsync(double aSinceTime,
   mGatherer->Start(aSinceTime, aPromise);
 }
 
+void GeckoSampler::ToFileAsync(const nsACString& aFileName, double aSinceTime)
+{
+  if (NS_WARN_IF(!mGatherer)) {
+    return;
+  }
+
+  mGatherer->Start(aSinceTime, aFileName);
+}
+
 struct SubprocessClosure {
   explicit SubprocessClosure(SpliceableJSONWriter* aWriter)
     : mWriter(aWriter)
@@ -792,7 +801,7 @@ void mergeStacksIntoProfile(ThreadProfile& aProfile, TickSample* aSample, Native
           mozilla::Maybe<JS::ProfilingFrameIterator::Frame> frame =
             jsIter.getPhysicalFrameWithoutLabel();
           if (frame.isSome())
-            jsFrames[jsCount++] = mozilla::Move(frame.ref());
+            jsFrames[jsCount++] = frame.value();
         }
       }
     }
@@ -902,7 +911,7 @@ void mergeStacksIntoProfile(ThreadProfile& aProfile, TickSample* aSample, Native
       // with stale JIT code return addresses.
       if (aSample->isSamplingCurrentThread ||
           jsFrame.kind == JS::ProfilingFrameIterator::Frame_Wasm) {
-        addDynamicTag(aProfile, 'c', jsFrame.label.get());
+        addDynamicTag(aProfile, 'c', jsFrame.label);
       } else {
         MOZ_ASSERT(jsFrame.kind == JS::ProfilingFrameIterator::Frame_Ion ||
                    jsFrame.kind == JS::ProfilingFrameIterator::Frame_Baseline);

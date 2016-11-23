@@ -427,6 +427,7 @@ RTCPeerConnection.prototype = {
     this.makeGetterSetterEH("onremovestream");
     this.makeGetterSetterEH("ondatachannel");
     this.makeGetterSetterEH("oniceconnectionstatechange");
+    this.makeGetterSetterEH("onicegatheringstatechange");
     this.makeGetterSetterEH("onidentityresult");
     this.makeGetterSetterEH("onpeeridentity");
     this.makeGetterSetterEH("onidpassertionerror");
@@ -724,49 +725,6 @@ RTCPeerConnection.prototype = {
       options = optionsOrOnSuccess;
     }
     return this._legacyCatchAndCloseGuard(onSuccess, onError, () => {
-      // TODO: Remove error on constraint-like RTCOptions next cycle (1197021).
-      // Note that webidl bindings make o.mandatory implicit but not o.optional.
-      function convertLegacyOptions(o) {
-        // Detect (mandatory OR optional) AND no other top-level members.
-        let lcy = ((o.mandatory && Object.keys(o.mandatory).length) || o.optional) &&
-            Object.keys(o).length == (o.mandatory? 1 : 0) + (o.optional? 1 : 0);
-        if (!lcy) {
-          return false;
-        }
-        let old = o.mandatory || {};
-        if (o.mandatory) {
-          delete o.mandatory;
-        }
-        if (o.optional) {
-          o.optional.forEach(one => {
-            // The old spec had optional as an array of objects w/1 attribute each.
-            // Assumes our JS-webidl bindings only populate passed-in properties.
-            let key = Object.keys(one)[0];
-            if (key && old[key] === undefined) {
-              old[key] = one[key];
-            }
-          });
-          delete o.optional;
-        }
-        o.offerToReceiveAudio = old.OfferToReceiveAudio;
-        o.offerToReceiveVideo = old.OfferToReceiveVideo;
-        o.mozDontOfferDataChannel = old.MozDontOfferDataChannel;
-        o.mozBundleOnly = old.MozBundleOnly;
-        Object.keys(o).forEach(k => {
-          if (o[k] === undefined) {
-            delete o[k];
-          }
-        });
-        return true;
-      }
-
-      if (options && convertLegacyOptions(options)) {
-        this.logError(
-          "Mandatory/optional in createOffer options no longer works! Use " +
-            JSON.stringify(options) + " instead (note the case difference)!");
-        options = {};
-      }
-
       let origin = Cu.getWebIDLCallerPrincipal().origin;
       return this._chain(() => {
         let p = Promise.all([this.getPermission(), this._certificateReady])
@@ -1213,6 +1171,7 @@ RTCPeerConnection.prototype = {
   changeIceGatheringState: function(state) {
     this._iceGatheringState = state;
     _globalPCList.notifyLifecycleObservers(this, "icegatheringstatechange");
+    this.dispatchEvent(new this._win.Event("icegatheringstatechange"));
   },
 
   changeIceConnectionState: function(state) {
@@ -1423,6 +1382,9 @@ PeerConnectionObserver.prototype = {
 
   handleIceConnectionStateChange: function(iceConnectionState) {
     let pc = this._dompc;
+    if (pc.iceConnectionState === iceConnectionState) {
+      return;
+    }
     if (pc.iceConnectionState === 'new') {
       var checking_histogram = Services.telemetry.getHistogramById("WEBRTC_ICE_CHECKING_RATE");
       if (iceConnectionState === 'checking') {
@@ -1455,15 +1417,19 @@ PeerConnectionObserver.prototype = {
   //   new        The object was just created, and no networking has occurred
   //              yet.
   //
-  //   gathering  The ICE engine is in the process of gathering candidates for
+  //   gathering  The ICE agent is in the process of gathering candidates for
   //              this RTCPeerConnection.
   //
-  //   complete   The ICE engine has completed gathering. Events such as adding
+  //   complete   The ICE agent has completed gathering. Events such as adding
   //              a new interface or a new TURN server will cause the state to
   //              go back to gathering.
   //
   handleIceGatheringStateChange: function(gatheringState) {
-    this._dompc.changeIceGatheringState(gatheringState);
+    let pc = this._dompc;
+    if (pc.iceGatheringState === gatheringState) {
+      return;
+    }
+    pc.changeIceGatheringState(gatheringState);
   },
 
   onStateChange: function(state) {
