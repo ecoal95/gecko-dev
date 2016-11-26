@@ -1093,7 +1093,7 @@ extern "C" {
 extern "C" {
     pub fn Servo_DeclarationBlock_SerializeOneValue(declarations:
                                                         RawServoDeclarationBlockBorrowed,
-                                                    property: *mut nsIAtom,
+                                                    property: *const nsIAtom,
                                                     is_custom: bool,
                                                     buffer: *mut nsString);
 }

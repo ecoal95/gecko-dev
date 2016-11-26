@@ -32,6 +32,8 @@ cfg_if! {
             pub static nsGkAtoms__moz_abspos: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms14_moz_activatedE"]
             pub static nsGkAtoms__moz_activated: *mut nsIAtom;
+            #[link_name = "_ZN9nsGkAtoms14_moz_anonclassE"]
+            pub static nsGkAtoms__moz_anonclass: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms13_moz_resizingE"]
             pub static nsGkAtoms__moz_resizing: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms18mozallowfullscreenE"]
@@ -4294,6 +4296,8 @@ cfg_if! {
             pub static nsGkAtoms_Remote: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms8RemoteIdE"]
             pub static nsGkAtoms_RemoteId: *mut nsIAtom;
+            #[link_name = "_ZN9nsGkAtoms10RemoteTypeE"]
+            pub static nsGkAtoms_RemoteType: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms11DisplayPortE"]
             pub static nsGkAtoms_DisplayPort: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms18DisplayPortMarginsE"]
@@ -5665,6 +5669,8 @@ cfg_if! {
             pub static nsGkAtoms__moz_abspos: *mut nsIAtom;
             #[link_name = "?_moz_activated@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms__moz_activated: *mut nsIAtom;
+            #[link_name = "?_moz_anonclass@nsGkAtoms@@2PEAVnsIAtom@@EA"]
+            pub static nsGkAtoms__moz_anonclass: *mut nsIAtom;
             #[link_name = "?_moz_resizing@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms__moz_resizing: *mut nsIAtom;
             #[link_name = "?mozallowfullscreen@nsGkAtoms@@2PEAVnsIAtom@@EA"]
@@ -9927,6 +9933,8 @@ cfg_if! {
             pub static nsGkAtoms_Remote: *mut nsIAtom;
             #[link_name = "?RemoteId@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_RemoteId: *mut nsIAtom;
+            #[link_name = "?RemoteType@nsGkAtoms@@2PEAVnsIAtom@@EA"]
+            pub static nsGkAtoms_RemoteType: *mut nsIAtom;
             #[link_name = "?DisplayPort@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_DisplayPort: *mut nsIAtom;
             #[link_name = "?DisplayPortMargins@nsGkAtoms@@2PEAVnsIAtom@@EA"]
@@ -11298,6 +11306,8 @@ cfg_if! {
             pub static nsGkAtoms__moz_abspos: *mut nsIAtom;
             #[link_name = "\x01?_moz_activated@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms__moz_activated: *mut nsIAtom;
+            #[link_name = "\x01?_moz_anonclass@nsGkAtoms@@2PAVnsIAtom@@A"]
+            pub static nsGkAtoms__moz_anonclass: *mut nsIAtom;
             #[link_name = "\x01?_moz_resizing@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms__moz_resizing: *mut nsIAtom;
             #[link_name = "\x01?mozallowfullscreen@nsGkAtoms@@2PAVnsIAtom@@A"]
@@ -15560,6 +15570,8 @@ cfg_if! {
             pub static nsGkAtoms_Remote: *mut nsIAtom;
             #[link_name = "\x01?RemoteId@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_RemoteId: *mut nsIAtom;
+            #[link_name = "\x01?RemoteType@nsGkAtoms@@2PAVnsIAtom@@A"]
+            pub static nsGkAtoms_RemoteType: *mut nsIAtom;
             #[link_name = "\x01?DisplayPort@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_DisplayPort: *mut nsIAtom;
             #[link_name = "\x01?DisplayPortMargins@nsGkAtoms@@2PAVnsIAtom@@A"]
@@ -16934,6 +16946,8 @@ macro_rules! atom {
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms__moz_abspos as *mut _) } };
 ("_moz_activated") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms__moz_activated as *mut _) } };
+("_moz_anonclass") =>
+  { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms__moz_anonclass as *mut _) } };
 ("_moz_resizing") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms__moz_resizing as *mut _) } };
 ("mozallowfullscreen") =>
@@ -21196,6 +21210,8 @@ macro_rules! atom {
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_Remote as *mut _) } };
 ("_remote_id") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_RemoteId as *mut _) } };
+("remoteType") =>
+  { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_RemoteType as *mut _) } };
 ("_displayport") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_DisplayPort as *mut _) } };
 ("_displayportmargins") =>
