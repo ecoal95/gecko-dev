@@ -5,6 +5,7 @@
 //! Selector matching.
 
 use {Atom, LocalName};
+use data::ComputedStyle;
 use dom::PresentationalHintsSynthetizer;
 use element_state::*;
 use error_reporting::StdoutErrorReporter;
@@ -169,7 +170,7 @@ impl Stylist {
     }
 
     fn add_stylesheet(&mut self, stylesheet: &Stylesheet) {
-        if !stylesheet.is_effective_for_device(&self.device) {
+        if stylesheet.disabled() || !stylesheet.is_effective_for_device(&self.device) {
             return;
         }
 
@@ -270,7 +271,7 @@ impl Stylist {
                                          pseudo: &PseudoElement,
                                          parent: Option<&Arc<ComputedValues>>,
                                          inherit_all: bool)
-                                         -> Option<(Arc<ComputedValues>, StrongRuleNode)> {
+                                         -> Option<ComputedStyle> {
         debug_assert!(SelectorImpl::pseudo_element_cascade_type(pseudo).is_precomputed());
         if let Some(declarations) = self.precomputed_pseudo_element_decls.get(pseudo) {
             // FIXME(emilio): When we've taken rid of the cascade we can just
@@ -291,9 +292,9 @@ impl Stylist {
                                     None,
                                     Box::new(StdoutErrorReporter),
                                     flags);
-            Some((Arc::new(computed), rule_node))
+            Some(ComputedStyle::new(rule_node, Arc::new(computed)))
         } else {
-            parent.map(|p| (p.clone(), self.rule_tree.root()))
+            parent.map(|p| ComputedStyle::new(self.rule_tree.root(), p.clone()))
         }
     }
 
@@ -322,17 +323,17 @@ impl Stylist {
         };
         self.precomputed_values_for_pseudo(&pseudo, Some(parent_style), inherit_all)
             .expect("style_for_anonymous_box(): No precomputed values for that pseudo!")
-            .0
+            .values
     }
 
     pub fn lazily_compute_pseudo_element_style<E>(&self,
                                                   element: &E,
                                                   pseudo: &PseudoElement,
                                                   parent: &Arc<ComputedValues>)
-                                                  -> Option<(Arc<ComputedValues>, StrongRuleNode)>
-        where E: Element<Impl=SelectorImpl> +
-              fmt::Debug +
-              PresentationalHintsSynthetizer
+                                                  -> Option<ComputedStyle>
+        where E: ElementExt +
+                 fmt::Debug +
+                 PresentationalHintsSynthetizer
     {
         debug_assert!(SelectorImpl::pseudo_element_cascade_type(pseudo).is_lazy());
         if self.pseudos_map.get(pseudo).is_none() {
@@ -359,7 +360,7 @@ impl Stylist {
                                 Box::new(StdoutErrorReporter),
                                 CascadeFlags::empty());
 
-        Some((Arc::new(computed), rule_node))
+        Some(ComputedStyle::new(rule_node, Arc::new(computed)))
     }
 
     pub fn set_device(&mut self, mut device: Device, stylesheets: &[Arc<Stylesheet>]) {
@@ -418,7 +419,7 @@ impl Stylist {
                                         pseudo_element: Option<&PseudoElement>,
                                         applicable_declarations: &mut V,
                                         reason: MatchingReason) -> StyleRelations
-        where E: Element<Impl=SelectorImpl> +
+        where E: ElementExt +
                  fmt::Debug +
                  PresentationalHintsSynthetizer,
               V: Push<ApplicableDeclarationBlock> + VecLike<ApplicableDeclarationBlock>
@@ -456,66 +457,71 @@ impl Stylist {
         }
         debug!("preshints: {:?}", relations);
 
-        // Step 3: User and author normal rules.
-        map.user.get_all_matching_rules(element,
-                                        parent_bf,
-                                        applicable_declarations,
-                                        &mut relations,
-                                        reason,
-                                        Importance::Normal);
-        debug!("user normal: {:?}", relations);
-        map.author.get_all_matching_rules(element,
-                                          parent_bf,
-                                          applicable_declarations,
-                                          &mut relations,
-                                          reason,
-                                          Importance::Normal);
-        debug!("author normal: {:?}", relations);
+        if element.matches_user_and_author_rules() {
+            // Step 3: User and author normal rules.
+            map.user.get_all_matching_rules(element,
+                                            parent_bf,
+                                            applicable_declarations,
+                                            &mut relations,
+                                            reason,
+                                            Importance::Normal);
+            debug!("user normal: {:?}", relations);
+            map.author.get_all_matching_rules(element,
+                                              parent_bf,
+                                              applicable_declarations,
+                                              &mut relations,
+                                              reason,
+                                              Importance::Normal);
+            debug!("author normal: {:?}", relations);
 
-        // Step 4: Normal style attributes.
-        if let Some(sa) = style_attribute {
-            if sa.read().any_normal() {
-                relations |= AFFECTED_BY_STYLE_ATTRIBUTE;
-                Push::push(
-                    applicable_declarations,
-                    ApplicableDeclarationBlock::from_declarations(sa.clone(), Importance::Normal));
+            // Step 4: Normal style attributes.
+            if let Some(sa) = style_attribute {
+                if sa.read().any_normal() {
+                    relations |= AFFECTED_BY_STYLE_ATTRIBUTE;
+                    Push::push(
+                        applicable_declarations,
+                        ApplicableDeclarationBlock::from_declarations(sa.clone(), Importance::Normal));
+                }
             }
+
+            debug!("style attr: {:?}", relations);
+
+            // Step 5: Author-supplied `!important` rules.
+            map.author.get_all_matching_rules(element,
+                                              parent_bf,
+                                              applicable_declarations,
+                                              &mut relations,
+                                              reason,
+                                              Importance::Important);
+
+            debug!("author important: {:?}", relations);
+
+            // Step 6: `!important` style attributes.
+            if let Some(sa) = style_attribute {
+                if sa.read().any_important() {
+                    relations |= AFFECTED_BY_STYLE_ATTRIBUTE;
+                    Push::push(
+                        applicable_declarations,
+                        ApplicableDeclarationBlock::from_declarations(sa.clone(), Importance::Important));
+                }
+            }
+
+            debug!("style attr important: {:?}", relations);
+
+            // Step 7: User `!important` rules.
+            map.user.get_all_matching_rules(element,
+                                            parent_bf,
+                                            applicable_declarations,
+                                            &mut relations,
+                                            reason,
+                                            Importance::Important);
+
+            debug!("user important: {:?}", relations);
+        } else {
+            debug!("skipping non-agent rules");
         }
 
-        debug!("style attr: {:?}", relations);
-
-        // Step 5: Author-supplied `!important` rules.
-        map.author.get_all_matching_rules(element,
-                                          parent_bf,
-                                          applicable_declarations,
-                                          &mut relations,
-                                          reason,
-                                          Importance::Important);
-
-        debug!("author important: {:?}", relations);
-
-        // Step 6: `!important` style attributes.
-        if let Some(sa) = style_attribute {
-            if sa.read().any_important() {
-                relations |= AFFECTED_BY_STYLE_ATTRIBUTE;
-                Push::push(
-                    applicable_declarations,
-                    ApplicableDeclarationBlock::from_declarations(sa.clone(), Importance::Important));
-            }
-        }
-
-        debug!("style attr important: {:?}", relations);
-
-        // Step 7: User and UA `!important` rules.
-        map.user.get_all_matching_rules(element,
-                                        parent_bf,
-                                        applicable_declarations,
-                                        &mut relations,
-                                        reason,
-                                        Importance::Important);
-
-        debug!("user important: {:?}", relations);
-
+        // Step 8: UA `!important` rules.
         map.user_agent.get_all_matching_rules(element,
                                               parent_bf,
                                               applicable_declarations,
