@@ -101,7 +101,11 @@ class ObjOperandId : public OperandId
     _(LoadUnboxedArrayLengthResult)       \
     _(LoadArgumentsObjectLengthResult)    \
     _(CallScriptedGetterResult)           \
-    _(LoadUndefinedResult)
+    _(CallNativeGetterResult)             \
+    _(LoadUndefinedResult)                \
+                                          \
+    _(TypeMonitorResult)                  \
+    _(ReturnFromIC)
 
 enum class CacheOp {
 #define DEFINE_OP(op) op,
@@ -128,12 +132,13 @@ struct StubField {
 
 // We use this enum as GuardClass operand, instead of storing Class* pointers
 // in the IR, to keep the IR compact and the same size on all platforms.
-enum class GuardClassKind
+enum class GuardClassKind : uint8_t
 {
     Array,
     UnboxedArray,
     MappedArguments,
     UnmappedArguments,
+    WindowProxy,
 };
 
 // Class to record CacheIR + some additional metadata for code generation.
@@ -268,7 +273,8 @@ class MOZ_RAII CacheIRWriter
         addStubWord(uintptr_t(proto), StubField::GCType::JSObject);
     }
     void guardClass(ObjOperandId obj, GuardClassKind kind) {
-        MOZ_ASSERT(uint32_t(kind) <= UINT8_MAX);
+        static_assert(sizeof(GuardClassKind) == sizeof(uint8_t),
+                      "GuardClassKind must fit in a byte");
         writeOpWithOperandId(CacheOp::GuardClass, obj);
         buffer_.writeByte(uint32_t(kind));
     }
@@ -339,6 +345,17 @@ class MOZ_RAII CacheIRWriter
     void callScriptedGetterResult(ObjOperandId obj, JSFunction* getter) {
         writeOpWithOperandId(CacheOp::CallScriptedGetterResult, obj);
         addStubWord(uintptr_t(getter), StubField::GCType::JSObject);
+    }
+    void callNativeGetterResult(ObjOperandId obj, JSFunction* getter) {
+        writeOpWithOperandId(CacheOp::CallNativeGetterResult, obj);
+        addStubWord(uintptr_t(getter), StubField::GCType::JSObject);
+    }
+
+    void typeMonitorResult() {
+        writeOp(CacheOp::TypeMonitorResult);
+    }
+    void returnFromIC() {
+        writeOp(CacheOp::ReturnFromIC);
     }
 };
 
@@ -429,6 +446,8 @@ class MOZ_RAII GetPropIRGenerator
                                             ObjOperandId objId);
     MOZ_MUST_USE bool tryAttachModuleNamespace(CacheIRWriter& writer, HandleObject obj,
                                                ObjOperandId objId);
+    MOZ_MUST_USE bool tryAttachWindowProxy(CacheIRWriter& writer, HandleObject obj,
+                                           ObjOperandId objId);
 
     MOZ_MUST_USE bool tryAttachPrimitive(CacheIRWriter& writer, ValOperandId valId);
 

@@ -2,12 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from argparse import ArgumentParser
-
-from copy import deepcopy
 import json
-import mozinfo
-import moznetwork
 import os
 import random
 import re
@@ -17,16 +12,20 @@ import time
 import traceback
 import unittest
 import warnings
-import mozprofile
 
+from argparse import ArgumentParser
+from copy import deepcopy
+
+import mozinfo
+import moznetwork
+import mozprofile
+import mozversion
 
 from manifestparser import TestManifest
 from manifestparser.filters import tags
-from marionette_driver.geckoinstance import app_ids
 from marionette_driver.marionette import Marionette
 from moztest.adapters.unit import StructuredTestRunner, StructuredTestResult
 from moztest.results import TestResultCollection, TestResult, relevant_line
-import mozversion
 
 import httpd
 
@@ -308,12 +307,6 @@ class BaseMarionetteArguments(ArgumentParser):
         self.add_argument('--symbols-path',
                           help='absolute path to directory containing breakpad symbols, or the '
                                'url of a zip file containing symbols')
-        self.add_argument('--timeout',
-                          type=int,
-                          help='if a --timeout value is given, it will set the default page load '
-                               'timeout, search timeout and script timeout to the given value. '
-                               'If not passed in, it will use the default values of 30000ms for '
-                               'page load, 0ms for search timeout and 10000ms for script timeout')
         self.add_argument('--startup-timeout',
                           type=int,
                           default=60,
@@ -433,9 +426,6 @@ class BaseMarionetteArguments(ArgumentParser):
         if not args.address and not args.binary and not args.emulator:
             self.error('You must specify --binary, or --address, or --emulator')
 
-        if not os.path.isfile(args.binary):
-            self.error('You must specify an existing binary.')
-
         if args.total_chunks is not None and args.this_chunk is None:
             self.error('You must specify which chunk to run.')
 
@@ -508,7 +498,7 @@ class BaseMarionetteTestRunner(object):
                  app=None, app_args=None, binary=None, profile=None,
                  logger=None, logdir=None,
                  repeat=0, testvars=None,
-                 symbols_path=None, timeout=None,
+                 symbols_path=None,
                  shuffle=False, shuffle_seed=random.randint(0, sys.maxint), this_chunk=1,
                  total_chunks=1,
                  server_root=None, gecko_log=None, result_callbacks=None,
@@ -538,7 +528,6 @@ class BaseMarionetteTestRunner(object):
         self.logdir = logdir
         self.repeat = repeat
         self.symbols_path = symbols_path
-        self.timeout = timeout
         self.socket_timeout = socket_timeout
         self.shuffle = shuffle
         self.shuffle_seed = shuffle_seed
@@ -558,14 +547,6 @@ class BaseMarionetteTestRunner(object):
         self.workspace_path = workspace or os.getcwd()
         self.verbose = verbose
         self.e10s = e10s
-
-        # If no application type has been specified try to auto-detect it
-        if not self.app:
-            try:
-                app_id = self.version_info['application_id']
-                self.app = app_ids[app_id]
-            except KeyError:
-                self.logger.warning('Failed to detect the type of application.')
 
         def gather_debug(test, status):
             rv = {}
@@ -685,17 +666,6 @@ class BaseMarionetteTestRunner(object):
         return self._appName
 
     @property
-    def version_info(self):
-        if not self._version_info:
-            try:
-                # TODO: Get version_info in Fennec case
-                self._version_info = mozversion.get_version(binary=self.bin)
-            except Exception:
-                self.logger.warning("Failed to retrieve version information for {}".format(
-                    self.bin))
-        return self._version_info
-
-    @property
     def bin(self):
         return self._bin
 
@@ -708,6 +678,17 @@ class BaseMarionetteTestRunner(object):
         self._bin = path
         self.tests = []
         self.cleanup()
+
+    @property
+    def version_info(self):
+        if not self._version_info:
+            try:
+                # TODO: Get version_info in Fennec case
+                self._version_info = mozversion.get_version(binary=self.bin)
+            except Exception:
+                self.logger.warning("Failed to retrieve version information for {}".format(
+                    self.bin))
+        return self._version_info
 
     def reset_test_stats(self):
         self.passed = 0
@@ -723,7 +704,6 @@ class BaseMarionetteTestRunner(object):
             os.mkdir(self.logdir)
 
         kwargs = {
-            'timeout': self.timeout,
             'socket_timeout': self.socket_timeout,
             'prefs': self.prefs,
             'startup_timeout': self.startup_timeout,
