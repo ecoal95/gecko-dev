@@ -3,14 +3,21 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 <%namespace name="helpers" file="/helpers.mako.rs" />
-<% from data import ALL_SIZES %>
+<% from data import ALL_SIZES, PHYSICAL_SIDES, LOGICAL_SIDES %>
 
 <% data.new_style_struct("Position", inherited=False) %>
 
-% for side in ["top", "right", "bottom", "left"]:
+// "top" / "left" / "bottom" / "right"
+% for side in PHYSICAL_SIDES:
     ${helpers.predefined_type(side, "LengthOrPercentageOrAuto",
                               "computed::LengthOrPercentageOrAuto::Auto",
                               animatable=True)}
+% endfor
+// offset-* logical properties, map to "top" / "left" / "bottom" / "right"
+% for side in LOGICAL_SIDES:
+    ${helpers.predefined_type("offset-" + side, "LengthOrPercentageOrAuto",
+                              "computed::LengthOrPercentageOrAuto::Auto",
+                              animatable=True, logical=True)}
 % endfor
 
 <%helpers:longhand name="z-index" animatable="True">
@@ -79,13 +86,13 @@ ${helpers.single_keyword("justify-content", "flex-start flex-end center space-be
                          products="servo",
                          animatable=False)}
 
-// FIXME(heycam): Disable align-items in geckolib since we don't support the Gecko initial value
-// 'normal' yet.
-${helpers.single_keyword("align-items", "stretch flex-start flex-end center baseline",
+// https://drafts.csswg.org/css-flexbox/#propdef-align-items
+// FIXME: This is a workaround for 'normal' value. We don't support the Gecko initial value 'normal' yet.
+${helpers.single_keyword("align-items", "stretch flex-start flex-end center baseline" if product == "servo"
+                         else "normal stretch flex-start flex-end center baseline",
                          need_clone=True,
                          gecko_constant_prefix="NS_STYLE_ALIGN",
-                         animatable=False,
-                         products="servo")}
+                         animatable=False)}
 
 ${helpers.single_keyword("align-content", "stretch flex-start flex-end center space-between space-around",
                          gecko_constant_prefix="NS_STYLE_ALIGN",
@@ -95,14 +102,19 @@ ${helpers.single_keyword("align-content", "stretch flex-start flex-end center sp
 // Flex item properties
 ${helpers.predefined_type("flex-grow", "Number",
                           "0.0", "parse_non_negative",
+                          needs_context=False,
                           animatable=True)}
 
 ${helpers.predefined_type("flex-shrink", "Number",
                           "1.0", "parse_non_negative",
+                          needs_context=False,
                           animatable=True)}
 
+// https://drafts.csswg.org/css-align/#align-self-property
+// FIXME: We don't support the Gecko value 'normal' yet.
 ${helpers.single_keyword("align-self", "auto stretch flex-start flex-end center baseline",
                          need_clone=True,
+                         extra_gecko_values="normal",
                          gecko_constant_prefix="NS_STYLE_ALIGN",
                          animatable=False)}
 
@@ -140,6 +152,7 @@ ${helpers.predefined_type("flex-basis",
                               "LengthOrPercentageOrAuto",
                               "computed::LengthOrPercentageOrAuto::Auto",
                               "parse_non_negative",
+                              needs_context=False,
                               animatable=True, logical = logical)}
 
     // min-width, min-height, min-block-size, min-inline-size
@@ -147,6 +160,7 @@ ${helpers.predefined_type("flex-basis",
                               "LengthOrPercentage",
                               "computed::LengthOrPercentage::Length(Au(0))",
                               "parse_non_negative",
+                              needs_context=False,
                               animatable=True, logical = logical)}
 
     // max-width, max-height, max-block-size, max-inline-size
@@ -154,6 +168,7 @@ ${helpers.predefined_type("flex-basis",
                               "LengthOrPercentageOrNone",
                               "computed::LengthOrPercentageOrNone::None",
                               "parse_non_negative",
+                              needs_context=False,
                               animatable=True, logical = logical)}
 % endfor
 

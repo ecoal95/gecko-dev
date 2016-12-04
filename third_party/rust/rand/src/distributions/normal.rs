@@ -101,6 +101,7 @@ impl Normal {
     /// # Panics
     ///
     /// Panics if `std_dev < 0`.
+    #[inline]
     pub fn new(mean: f64, std_dev: f64) -> Normal {
         assert!(std_dev >= 0.0, "Normal::new called with `std_dev` < 0");
         Normal {
@@ -147,6 +148,7 @@ impl LogNormal {
     /// # Panics
     ///
     /// Panics if `std_dev < 0`.
+    #[inline]
     pub fn new(mean: f64, std_dev: f64) -> LogNormal {
         assert!(std_dev >= 0.0, "LogNormal::new called with `std_dev` < 0");
         LogNormal { norm: Normal::new(mean, std_dev) }
@@ -177,7 +179,6 @@ mod tests {
     }
     #[test]
     #[should_panic]
-    #[cfg_attr(target_env = "msvc", ignore)]
     fn test_normal_invalid_sd() {
         Normal::new(10.0, -1.0);
     }
@@ -194,7 +195,6 @@ mod tests {
     }
     #[test]
     #[should_panic]
-    #[cfg_attr(target_env = "msvc", ignore)]
     fn test_log_normal_invalid_sd() {
         LogNormal::new(10.0, -1.0);
     }

@@ -44,26 +44,39 @@ pub enum Origin {
     User,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct Namespaces {
     pub default: Option<Namespace>,
     pub prefixes: FnvHashMap<Prefix , Namespace>,
 }
 
-#[derive(Debug, Clone)]
-pub struct CssRules(pub Arc<RwLock<Vec<CssRule>>>);
+#[derive(Debug)]
+pub struct CssRules(pub Vec<CssRule>);
 
-impl From<Vec<CssRule>> for CssRules {
-    fn from(other: Vec<CssRule>) -> Self {
-        CssRules(Arc::new(RwLock::new(other)))
+pub enum RulesMutateError {
+    Syntax,
+    IndexSize,
+    HierarchyRequest,
+    InvalidState,
+}
+
+impl From<SingleRuleParseError> for RulesMutateError {
+    fn from(other: SingleRuleParseError) -> Self {
+        match other {
+            SingleRuleParseError::Syntax => RulesMutateError::Syntax,
+            SingleRuleParseError::Hierarchy => RulesMutateError::HierarchyRequest,
+        }
     }
 }
 
 impl CssRules {
-    // used in CSSOM
-    pub fn only_ns_or_import(rules: &[CssRule]) -> bool {
-        rules.iter().all(|r| {
+    pub fn new(rules: Vec<CssRule>) -> Arc<RwLock<CssRules>> {
+        Arc::new(RwLock::new(CssRules(rules)))
+    }
+
+    fn only_ns_or_import(&self) -> bool {
+        self.0.iter().all(|r| {
             match *r {
                 CssRule::Namespace(..) /* | CssRule::Import(..) */ => true,
                 _ => false
@@ -71,36 +84,70 @@ impl CssRules {
         })
     }
 
-    // Provides the parser state at a given insertion index
-    pub fn state_at_index(rules: &[CssRule], at: usize) -> State {
-        let mut state = State::Start;
-        if at > 0 {
-            if let Some(rule) = rules.get(at - 1) {
-                state = match *rule {
-                    // CssRule::Charset(..) => State::Start,
-                    // CssRule::Import(..) => State::Imports,
-                    CssRule::Namespace(..) => State::Namespaces,
-                    _ => State::Body,
-                };
+    // https://drafts.csswg.org/cssom/#insert-a-css-rule
+    pub fn insert_rule(&mut self, rule: &str, parent_stylesheet: &Stylesheet, index: usize, nested: bool)
+                       -> Result<CssRule, RulesMutateError> {
+        // Step 1, 2
+        if index > self.0.len() {
+            return Err(RulesMutateError::IndexSize);
+        }
+
+        // Computes the parser state at the given index
+        let state = if nested {
+            None
+        } else if index == 0 {
+            Some(State::Start)
+        } else {
+            self.0.get(index - 1).map(CssRule::rule_state)
+        };
+
+        // Step 3, 4
+        // XXXManishearth should we also store the namespace map?
+        let (new_rule, new_state) = try!(CssRule::parse(&rule, parent_stylesheet,
+                                                        ParserContextExtraData::default(), state));
+
+        // Step 5
+        // Computes the maximum allowed parser state at a given index.
+        let rev_state = self.0.get(index).map_or(State::Body, CssRule::rule_state);
+        if new_state > rev_state {
+            // We inserted a rule too early, e.g. inserting
+            // a regular style rule before @namespace rules
+            return Err(RulesMutateError::HierarchyRequest);
+        }
+
+        // Step 6
+        if let CssRule::Namespace(..) = new_rule {
+            if !self.only_ns_or_import() {
+                return Err(RulesMutateError::InvalidState);
             }
         }
-        state
+
+        self.0.insert(index, new_rule.clone());
+        Ok(new_rule)
     }
 
-    // Provides the maximum allowed parser state at a given index,
-    // searching in reverse. If inserting at this index, the parser
-    // must not be in a state greater than this post-insertion.
-    pub fn state_at_index_rev(rules: &[CssRule], at: usize) -> State {
-        if let Some(rule) = rules.get(at) {
-            match *rule {
-                // CssRule::Charset(..) => State::Start,
-                // CssRule::Import(..) => State::Imports,
-                CssRule::Namespace(..) => State::Namespaces,
-                _ => State::Body,
-            }
-        } else {
-            State::Body
+    // https://drafts.csswg.org/cssom/#remove-a-css-rule
+    pub fn remove_rule(&mut self, index: usize) -> Result<(), RulesMutateError> {
+        // Step 1, 2
+        if index >= self.0.len() {
+            return Err(RulesMutateError::IndexSize);
         }
+
+        {
+            // Step 3
+            let ref rule = self.0[index];
+
+            // Step 4
+            if let CssRule::Namespace(..) = *rule {
+                if !self.only_ns_or_import() {
+                    return Err(RulesMutateError::InvalidState);
+                }
+            }
+        }
+
+        // Step 5, 6
+        self.0.remove(index);
+        Ok(())
     }
 }
 
@@ -108,10 +155,12 @@ impl CssRules {
 pub struct Stylesheet {
     /// List of rules in the order they were found (important for
     /// cascading order)
-    pub rules: CssRules,
+    pub rules: Arc<RwLock<CssRules>>,
     /// List of media associated with the Stylesheet.
     pub media: Arc<RwLock<MediaList>>,
     pub origin: Origin,
+    pub base_url: ServoUrl,
+    pub namespaces: RwLock<Namespaces>,
     pub dirty_on_viewport_size_change: AtomicBool,
     pub disabled: AtomicBool,
 }
@@ -193,6 +242,15 @@ impl CssRule {
         }
     }
 
+    fn rule_state(&self) -> State {
+        match *self {
+            // CssRule::Charset(..) => State::Start,
+            // CssRule::Import(..) => State::Imports,
+            CssRule::Namespace(..) => State::Namespaces,
+            _ => State::Body,
+        }
+    }
+
     /// Call `f` with the slice of rules directly contained inside this rule.
     ///
     /// Note that only some types of rules can contain rules. An empty slice is used for others.
@@ -209,21 +267,23 @@ impl CssRule {
             CssRule::Media(ref lock) => {
                 let media_rule = lock.read();
                 let mq = media_rule.media_queries.read();
-                let rules = media_rule.rules.0.read();
-                f(&rules, Some(&mq))
+                let rules = &media_rule.rules.read().0;
+                f(rules, Some(&mq))
             }
         }
     }
 
     // input state is None for a nested rule
     // Returns a parsed CSS rule and the final state of the parser
-    pub fn parse(css: &str, origin: Origin,
-                    base_url: ServoUrl,
-                    extra_data: ParserContextExtraData,
-                    state: Option<State>) -> Result<(Self, State), SingleRuleParseError> {
+    pub fn parse(css: &str,
+                 parent_stylesheet: &Stylesheet,
+                 extra_data: ParserContextExtraData,
+                 state: Option<State>)
+                 -> Result<(Self, State), SingleRuleParseError> {
         let error_reporter = Box::new(MemoryHoleReporter);
-        let mut namespaces = Namespaces::default();
-        let context = ParserContext::new_with_extra_data(origin, &base_url,
+        let mut namespaces = parent_stylesheet.namespaces.write();
+        let context = ParserContext::new_with_extra_data(parent_stylesheet.origin,
+                                                         &parent_stylesheet.base_url,
                                                          error_reporter.clone(),
                                                          extra_data);
         let mut input = Parser::new(css);
@@ -231,7 +291,7 @@ impl CssRule {
         // nested rules are in the body state
         let state = state.unwrap_or(State::Body);
         let mut rule_parser = TopLevelRuleParser {
-            stylesheet_origin: origin,
+            stylesheet_origin: parent_stylesheet.origin,
             context: context,
             state: Cell::new(state),
             namespaces: &mut namespaces,
@@ -309,7 +369,7 @@ impl ToCss for KeyframesRule {
 #[derive(Debug)]
 pub struct MediaRule {
     pub media_queries: Arc<RwLock<MediaList>>,
-    pub rules: CssRules,
+    pub rules: Arc<RwLock<CssRules>>,
 }
 
 impl ToCss for MediaRule {
@@ -319,7 +379,7 @@ impl ToCss for MediaRule {
         try!(dest.write_str("@media ("));
         try!(self.media_queries.read().to_css(dest));
         try!(dest.write_str(") {"));
-        for rule in self.rules.0.read().iter() {
+        for rule in self.rules.read().0.iter() {
             try!(dest.write_str(" "));
             try!(rule.to_css(dest));
         }
@@ -372,37 +432,40 @@ impl Stylesheet {
                     error_reporter: Box<ParseErrorReporter + Send>,
                     extra_data: ParserContextExtraData) -> Stylesheet {
         let mut namespaces = Namespaces::default();
-        let rule_parser = TopLevelRuleParser {
-            stylesheet_origin: origin,
-            namespaces: &mut namespaces,
-            context: ParserContext::new_with_extra_data(origin, &base_url, error_reporter.clone(),
-                                                        extra_data),
-            state: Cell::new(State::Start),
-        };
-        let mut input = Parser::new(css);
-        input.look_for_viewport_percentages();
-
         let mut rules = vec![];
+        let dirty_on_viewport_size_change;
         {
-            let mut iter = RuleListParser::new_for_stylesheet(&mut input, rule_parser);
-            while let Some(result) = iter.next() {
-                match result {
-                    Ok(rule) => rules.push(rule),
-                    Err(range) => {
-                        let pos = range.start;
-                        let message = format!("Invalid rule: '{}'", iter.input.slice(range));
-                        let context = ParserContext::new(origin, &base_url, error_reporter.clone());
-                        log_css_error(iter.input, pos, &*message, &context);
+            let rule_parser = TopLevelRuleParser {
+                stylesheet_origin: origin,
+                namespaces: &mut namespaces,
+                context: ParserContext::new_with_extra_data(origin, &base_url, error_reporter, extra_data),
+                state: Cell::new(State::Start),
+            };
+            let mut input = Parser::new(css);
+            input.look_for_viewport_percentages();
+            {
+                let mut iter = RuleListParser::new_for_stylesheet(&mut input, rule_parser);
+                while let Some(result) = iter.next() {
+                    match result {
+                        Ok(rule) => rules.push(rule),
+                        Err(range) => {
+                            let pos = range.start;
+                            let message = format!("Invalid rule: '{}'", iter.input.slice(range));
+                            log_css_error(iter.input, pos, &*message, &iter.parser.context);
+                        }
                     }
                 }
             }
+            dirty_on_viewport_size_change = input.seen_viewport_percentages();
         }
 
         Stylesheet {
             origin: origin,
-            rules: rules.into(),
+            base_url: base_url,
+            namespaces: RwLock::new(namespaces),
+            rules: CssRules::new(rules),
             media: Arc::new(RwLock::new(media)),
-            dirty_on_viewport_size_change: AtomicBool::new(input.seen_viewport_percentages()),
+            dirty_on_viewport_size_change: AtomicBool::new(dirty_on_viewport_size_change),
             disabled: AtomicBool::new(false),
         }
     }
@@ -442,7 +505,7 @@ impl Stylesheet {
     /// examined.
     #[inline]
     pub fn effective_rules<F>(&self, device: &Device, mut f: F) where F: FnMut(&CssRule) {
-        effective_rules(&self.rules.0.read(), device, &mut f);
+        effective_rules(&self.rules.read().0, device, &mut f);
     }
 
     /// Returns whether the stylesheet has been explicitly disabled through the CSSOM.
@@ -628,7 +691,7 @@ struct NestedRuleParser<'a, 'b: 'a> {
 }
 
 impl<'a, 'b> NestedRuleParser<'a, 'b> {
-    fn parse_nested_rules(&self, input: &mut Parser) -> CssRules {
+    fn parse_nested_rules(&self, input: &mut Parser) -> Arc<RwLock<CssRules>> {
         let mut iter = RuleListParser::new_for_nested_rule(input, self.clone());
         let mut rules = Vec::new();
         while let Some(result) = iter.next() {
@@ -641,7 +704,7 @@ impl<'a, 'b> NestedRuleParser<'a, 'b> {
                 }
             }
         }
-        rules.into()
+        CssRules::new(rules)
     }
 }
 

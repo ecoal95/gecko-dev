@@ -26,8 +26,7 @@ ${helpers.single_keyword("list-style-type", """
     gecko_constant_prefix="NS_STYLE_LIST_STYLE",
     animatable=False)}
 
-${helpers.predefined_type("list-style-image", "UrlOrNone", "computed_value::T::None",
-                          needs_context=True,
+${helpers.predefined_type("list-style-image", "UrlOrNone", "Either::Second(None_)",
                           animatable="False")}
 
 <%helpers:longhand name="quotes" animatable="False">

@@ -13,9 +13,11 @@ do
 case "${1}" in
   --servo)
     engine="--engine=servo"
+    timeout=60
     ;;
   --gecko)
     engine="--engine=gecko"
+    timeout=15
     ;;
   --submit)
     submit=1
@@ -43,7 +45,8 @@ MANIFEST="page_load_test/tp5n/20160509.manifest" # A manifest that excludes
 PERF_FILE="output/perf-$(date +%s).json"
 
 echo "Running tests"
-python3 runner.py ${engine} --runs 3 "${MANIFEST}" "${PERF_FILE}"
+python3 runner.py ${engine} --runs 3 --timeout "${timeout}" \
+  "${MANIFEST}" "${PERF_FILE}"
 
 if [[ "${submit:-}" ]];
 then
@@ -54,7 +57,7 @@ then
     # results appear on the same date. Use the correct result when Perfherder
     # allows us to change the date.
     python3 submit_to_perfherder.py \
-            "${output:-}" "${engine}" "${PERF_FILE}" servo/revision.json
+            "${engine}" "${PERF_FILE}" servo/revision.json
 fi
 
 echo "Stopping the local server"

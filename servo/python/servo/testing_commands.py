@@ -17,6 +17,9 @@ import os.path as path
 import copy
 from collections import OrderedDict
 from time import time
+import json
+import urllib2
+import base64
 
 from mach.registrar import Registrar
 from mach.decorators import (
@@ -25,7 +28,11 @@ from mach.decorators import (
     Command,
 )
 
-from servo.command_base import BuildNotFound, CommandBase, call, cd, check_call, find_dep_path_newest, host_triple
+from servo.command_base import (
+    BuildNotFound, CommandBase,
+    call, cd, check_call, host_triple, set_osmesa_env,
+)
+
 from wptrunner import wptcommandline
 from update import updatecommandline
 from servo_tidy import tidy
@@ -65,6 +72,8 @@ def create_parser_wpt():
                         help="Run under chaos mode in rr until a failure is captured")
     parser.add_argument('--pref', default=[], action="append", dest="prefs",
                         help="Pass preferences to servo")
+    parser.add_argument('--always-succeed', default=False, action="store_true",
+                        help="Always yield exit code of zero")
     return parser
 
 
@@ -161,12 +170,23 @@ class MachCommands(CommandBase):
     @Command('test-perf',
              description='Run the page load performance test',
              category='testing')
-    def test_perf(self):
+    @CommandArgument('--submit', default=False, action="store_true",
+                     help="submit the data to perfherder")
+    def test_perf(self, submit=False):
         self.set_software_rendering_env(True)
 
         self.ensure_bootstrapped()
         env = self.build_env()
-        return call(["bash", "test_perf.sh"],
+        cmd = ["bash", "test_perf.sh"]
+        if submit:
+            if not ("TREEHERDER_CLIENT_ID" in os.environ and
+                    "TREEHERDER_CLIENT_SECRET" in os.environ):
+                print("Please set the environment variable \"TREEHERDER_CLIENT_ID\""
+                      " and \"TREEHERDER_CLIENT_SECRET\" to submit the performance"
+                      " test result to perfherder")
+                return 1
+            cmd += ["--submit"]
+        return call(cmd,
                     env=env,
                     cwd=path.join("etc", "ci", "performance"))
 
@@ -396,7 +416,11 @@ class MachCommands(CommandBase):
              parser=create_parser_wpt)
     def test_wpt(self, **kwargs):
         self.ensure_bootstrapped()
-        return self.run_test_list_or_dispatch(kwargs["test_list"], "wpt", self._test_wpt, **kwargs)
+        ret = self.run_test_list_or_dispatch(kwargs["test_list"], "wpt", self._test_wpt, **kwargs)
+        if kwargs["always_succeed"]:
+            return 0
+        else:
+            return ret
 
     def _test_wpt(self, **kwargs):
         hosts_file_path = path.join(self.context.topdir, 'tests', 'wpt', 'hosts')
@@ -470,6 +494,74 @@ class MachCommands(CommandBase):
         execfile(run_file, run_globals)
         return run_globals["update_tests"](**kwargs)
 
+    @Command('filter-intermittents',
+             description='Given a WPT error summary file, filter out intermittents and other cruft.',
+             category='testing')
+    @CommandArgument('summary',
+                     help="Error summary log to take un")
+    @CommandArgument('--log-filteredsummary', default=None,
+                     help='Print filtered log to file')
+    @CommandArgument('--log-intermittents', default=None,
+                     help='Print intermittents to file')
+    @CommandArgument('--auth', default=None,
+                     help='File containing basic authorization credentials for Github API (format `username:password`)')
+    @CommandArgument('--use-tracker', default=False, action='store_true',
+                     help='Use https://www.joshmatthews.net/intermittent-tracker')
+    def filter_intermittents(self, summary, log_filteredsummary, log_intermittents, auth, use_tracker):
+        encoded_auth = None
+        if auth:
+            with open(auth, "r") as file:
+                encoded_auth = base64.encodestring(file.read().strip()).replace('\n', '')
+        failures = []
+        with open(summary, "r") as file:
+            for line in file:
+                line_json = json.loads(line)
+                if 'status' in line_json:
+                    failures += [line_json]
+        actual_failures = []
+        intermittents = []
+        for failure in failures:
+            if use_tracker:
+                query = urllib2.quote(failure['test'], safe='')
+                request = urllib2.Request("http://build.servo.org/intermittent-tracker/query.py?name=%s" % query)
+                search = urllib2.urlopen(request)
+                data = json.load(search)
+                if len(data) == 0:
+                    actual_failures += [failure]
+                else:
+                    intermittents += [failure]
+            else:
+                qstr = "repo:servo/servo+label:I-intermittent+type:issue+state:open+%s" % failure['test']
+                # we want `/` to get quoted, but not `+` (github's API doesn't like that), so we set `safe` to `+`
+                query = urllib2.quote(qstr, safe='+')
+                request = urllib2.Request("https://api.github.com/search/issues?q=%s" % query)
+                if encoded_auth:
+                    request.add_header("Authorization", "Basic %s" % encoded_auth)
+                search = urllib2.urlopen(request)
+                data = json.load(search)
+                if data['total_count'] == 0:
+                    actual_failures += [failure]
+                else:
+                    intermittents += [failure]
+
+        if log_intermittents:
+            with open(log_intermittents, "w") as intermittents_file:
+                for intermittent in intermittents:
+                    json.dump(intermittent, intermittents_file)
+                    print("\n", end='', file=intermittents_file)
+
+        if len(actual_failures) == 0:
+            return 0
+
+        output = open(log_filteredsummary, "w") if log_filteredsummary else sys.stdout
+        for failure in actual_failures:
+            json.dump(failure, output)
+            print("\n", end='', file=output)
+
+        if output is not sys.stdout:
+            output.close()
+        return 1
+
     @Command('test-jquery',
              description='Run the jQuery test suite',
              category='testing')
@@ -508,7 +600,11 @@ class MachCommands(CommandBase):
              parser=create_parser_wpt)
     def test_css(self, **kwargs):
         self.ensure_bootstrapped()
-        return self.run_test_list_or_dispatch(kwargs["test_list"], "css", self._test_css, **kwargs)
+        ret = self.run_test_list_or_dispatch(kwargs["test_list"], "css", self._test_css, **kwargs)
+        if kwargs["always_succeed"]:
+            return 0
+        else:
+            return ret
 
     def _test_css(self, **kwargs):
         run_file = path.abspath(path.join("tests", "wpt", "run_css.py"))
@@ -637,29 +733,13 @@ class MachCommands(CommandBase):
     def set_software_rendering_env(self, use_release):
         # On Linux and mac, find the OSMesa software rendering library and
         # add it to the dynamic linker search path.
-        if sys.platform.startswith('linux'):
-            try:
-                args = [self.get_binary_path(use_release, not use_release)]
-                osmesa_path = path.join(find_dep_path_newest('osmesa-src', args[0]), "out", "lib", "gallium")
-                os.environ["LD_LIBRARY_PATH"] = osmesa_path
-                os.environ["GALLIUM_DRIVER"] = "softpipe"
-            except BuildNotFound:
-                # This can occur when cross compiling (e.g. arm64), in which case
-                # we won't run the tests anyway so can safely ignore this step.
-                pass
-        elif sys.platform.startswith('darwin'):
-            try:
-                args = [self.get_binary_path(use_release, not use_release)]
-                osmesa_path = path.join(find_dep_path_newest('osmesa-src', args[0]),
-                                        "out", "src", "gallium", "targets", "osmesa", ".libs")
-                glapi_path = path.join(find_dep_path_newest('osmesa-src', args[0]),
-                                       "out", "src", "mapi", "shared-glapi", ".libs")
-                os.environ["DYLD_LIBRARY_PATH"] = osmesa_path + ":" + glapi_path
-                os.environ["GALLIUM_DRIVER"] = "softpipe"
-            except BuildNotFound:
-                # This can occur when cross compiling (e.g. arm64), in which case
-                # we won't run the tests anyway so can safely ignore this step.
-                pass
+        try:
+            args = [self.get_binary_path(use_release, not use_release)]
+            set_osmesa_env(args[0], os.environ)
+        except BuildNotFound:
+            # This can occur when cross compiling (e.g. arm64), in which case
+            # we won't run the tests anyway so can safely ignore this step.
+            pass
 
 
 def create_parser_create():

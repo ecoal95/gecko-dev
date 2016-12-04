@@ -80,6 +80,7 @@ pub struct Exp {
 impl Exp {
     /// Construct a new `Exp` with the given shape parameter
     /// `lambda`. Panics if `lambda <= 0`.
+    #[inline]
     pub fn new(lambda: f64) -> Exp {
         assert!(lambda > 0.0, "Exp::new called with `lambda` <= 0");
         Exp { lambda_inverse: 1.0 / lambda }
@@ -112,13 +113,11 @@ mod test {
     }
     #[test]
     #[should_panic]
-    #[cfg_attr(target_env = "msvc", ignore)]
     fn test_exp_invalid_lambda_zero() {
         Exp::new(0.0);
     }
     #[test]
     #[should_panic]
-    #[cfg_attr(target_env = "msvc", ignore)]
     fn test_exp_invalid_lambda_neg() {
         Exp::new(-10.0);
     }

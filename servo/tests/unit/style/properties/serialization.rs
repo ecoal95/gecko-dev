@@ -418,9 +418,9 @@ mod shorthand_serialization {
     }
 
     mod list_style {
-        use style::properties::longhands::list_style_image::SpecifiedValue as ListStyleImage;
         use style::properties::longhands::list_style_position::computed_value::T as ListStylePosition;
         use style::properties::longhands::list_style_type::computed_value::T as ListStyleType;
+        use style::values::Either;
         use super::*;
 
         #[test]
@@ -428,7 +428,7 @@ mod shorthand_serialization {
             let mut properties = Vec::new();
 
             let position = DeclaredValue::Value(ListStylePosition::inside);
-            let image = DeclaredValue::Value(ListStyleImage::Url(
+            let image = DeclaredValue::Value(Either::First(
                 SpecifiedUrl::new_for_testing("http://servo/test.png")));
             let style_type = DeclaredValue::Value(ListStyleType::disc);
 
@@ -536,11 +536,11 @@ mod shorthand_serialization {
     #[test]
     fn columns_should_serialize_correctly() {
         use style::properties::longhands::column_count::SpecifiedValue as ColumnCount;
-        use style::properties::longhands::column_width::SpecifiedValue as ColumnWidth;
+        use style::values::{Auto, Either};
 
         let mut properties = Vec::new();
 
-        let width = DeclaredValue::Value(ColumnWidth::Auto);
+        let width = DeclaredValue::Value(Either::Second(Auto));
         let count = DeclaredValue::Value(ColumnCount::Auto);
 
         properties.push(PropertyDeclaration::ColumnWidth(width));

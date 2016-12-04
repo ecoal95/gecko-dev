@@ -71,7 +71,6 @@ use gecko_bindings::structs::SheetParsingMode;
 use gecko_bindings::structs::StyleBasicShape;
 use gecko_bindings::structs::StyleBasicShapeType;
 use gecko_bindings::structs::StyleClipPath;
-use gecko_bindings::structs::nscoord;
 use gecko_bindings::structs::nsCSSKeyword;
 use gecko_bindings::structs::nsCSSShadowArray;
 use gecko_bindings::structs::nsCSSValue;
@@ -86,7 +85,6 @@ use gecko_bindings::structs::nsIPrincipal;
 use gecko_bindings::structs::nsIURI;
 use gecko_bindings::structs::nsMainThreadPtrHolder;
 use gecko_bindings::structs::nsRestyleHint;
-use gecko_bindings::structs::nsString;
 use gecko_bindings::structs::nsStyleBackground;
 unsafe impl Send for nsStyleBackground {}
 unsafe impl Sync for nsStyleBackground {}
@@ -201,6 +199,8 @@ unsafe impl Sync for nsStyleVisibility {}
 use gecko_bindings::structs::nsStyleXUL;
 unsafe impl Send for nsStyleXUL {}
 unsafe impl Sync for nsStyleXUL {}
+use gecko_bindings::structs::nscoord;
+use gecko_bindings::structs::nsresult;
 
 #[repr(i32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -487,10 +487,6 @@ extern "C" {
                                           aString:
                                               *const ::std::os::raw::c_char,
                                           aLength: u32) -> bool;
-}
-extern "C" {
-    pub fn Gecko_Utf8SliceToString(aString: *mut nsString, aBuffer: *const u8,
-                                   aBufferLen: usize);
 }
 extern "C" {
     pub fn Gecko_FontFamilyList_Clear(aList: *mut FontFamilyList);
@@ -1031,6 +1027,17 @@ extern "C" {
      -> RawServoStyleRuleStrong;
 }
 extern "C" {
+    pub fn Servo_CssRules_InsertRule(rules: ServoCssRulesBorrowed,
+                                     sheet: RawServoStyleSheetBorrowed,
+                                     rule: *const nsACString_internal,
+                                     index: u32, nested: bool,
+                                     rule_type: *mut u16) -> nsresult;
+}
+extern "C" {
+    pub fn Servo_CssRules_DeleteRule(rules: ServoCssRulesBorrowed, index: u32)
+     -> nsresult;
+}
+extern "C" {
     pub fn Servo_StyleRule_Debug(rule: RawServoStyleRuleBorrowed,
                                  result: *mut nsACString_internal);
 }
@@ -1093,9 +1100,9 @@ extern "C" {
 extern "C" {
     pub fn Servo_DeclarationBlock_SerializeOneValue(declarations:
                                                         RawServoDeclarationBlockBorrowed,
-                                                    property: *const nsIAtom,
+                                                    property: *mut nsIAtom,
                                                     is_custom: bool,
-                                                    buffer: *mut nsString);
+                                                    buffer: *mut nsAString_internal);
 }
 extern "C" {
     pub fn Servo_DeclarationBlock_Count(declarations:

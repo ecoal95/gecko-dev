@@ -37,14 +37,13 @@ use style::gecko_bindings::bindings::{RawServoStyleSheetStrong, ServoComputedVal
 use style::gecko_bindings::bindings::{ServoCssRulesBorrowed, ServoCssRulesStrong};
 use style::gecko_bindings::bindings::{ThreadSafePrincipalHolder, ThreadSafeURIHolder};
 use style::gecko_bindings::bindings::{nsACString, nsAString};
-use style::gecko_bindings::bindings::Gecko_Utf8SliceToString;
 use style::gecko_bindings::bindings::RawGeckoElementBorrowed;
 use style::gecko_bindings::bindings::ServoComputedValuesBorrowedOrNull;
 use style::gecko_bindings::bindings::nsTArrayBorrowed_uintptr_t;
 use style::gecko_bindings::structs;
 use style::gecko_bindings::structs::{SheetParsingMode, nsIAtom};
 use style::gecko_bindings::structs::{nsRestyleHint, nsChangeHint};
-use style::gecko_bindings::structs::nsString;
+use style::gecko_bindings::structs::nsresult;
 use style::gecko_bindings::sugar::ownership::{FFIArcHelpers, HasArcFFI, HasBoxFFI};
 use style::gecko_bindings::sugar::ownership::{HasSimpleFFI, Strong};
 use style::gecko_bindings::sugar::refptr::{GeckoArcPrincipal, GeckoArcURI};
@@ -57,10 +56,10 @@ use style::restyle_hints::RestyleHint;
 use style::selector_parser::PseudoElementCascadeType;
 use style::sequential;
 use style::string_cache::Atom;
-use style::stylesheets::{CssRule, Origin, Stylesheet, StyleRule};
+use style::stylesheets::{CssRule, CssRules, Origin, Stylesheet, StyleRule};
 use style::thread_state;
 use style::timer::Timer;
-use style::traversal::recalc_style_at;
+use style::traversal::{recalc_style_at, PerLevelTraversalData};
 use style_traits::ToCss;
 
 /*
@@ -148,10 +147,12 @@ fn traverse_subtree(element: GeckoElement, raw_data: RawServoStyleSetBorrowed,
     let mut per_doc_data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
     let mut shared_style_context = create_shared_context(&mut per_doc_data);
     shared_style_context.skip_root = skip_root;
+    let known_depth = None;
+
     if per_doc_data.num_threads == 1 || per_doc_data.work_queue.is_none() {
         sequential::traverse_dom::<_, RecalcStyleOnly>(element.as_node(), &shared_style_context);
     } else {
-        parallel::traverse_dom::<_, RecalcStyleOnly>(element.as_node(), &shared_style_context,
+        parallel::traverse_dom::<_, RecalcStyleOnly>(element.as_node(), known_depth, &shared_style_context,
                                                      per_doc_data.work_queue.as_mut().unwrap());
     }
 }
@@ -199,6 +200,23 @@ pub extern "C" fn Servo_StyleWorkerThreadCount() -> u32 {
 #[no_mangle]
 pub extern "C" fn Servo_Element_ClearData(element: RawGeckoElementBorrowed) -> () {
     GeckoElement(element).clear_data();
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_Element_ShouldTraverse(element: RawGeckoElementBorrowed) -> bool {
+    let element = GeckoElement(element);
+    if let Some(data) = element.get_data() {
+        debug_assert!(!element.has_dirty_descendants(),
+                      "only call Servo_Element_ShouldTraverse if you know the element \
+                       does not have dirty descendants");
+        match *data.borrow() {
+            ElementData::Initial(None) |
+            ElementData::Restyle(..) => true,
+            _ => false,
+        }
+    } else {
+        false
+    }
 }
 
 #[no_mangle]
@@ -291,12 +309,12 @@ pub extern "C" fn Servo_StyleSet_RemoveStyleSheet(raw_data: RawServoStyleSetBorr
 
 #[no_mangle]
 pub extern "C" fn Servo_StyleSheet_HasRules(raw_sheet: RawServoStyleSheetBorrowed) -> bool {
-    !Stylesheet::as_arc(&raw_sheet).rules.0.read().is_empty()
+    !Stylesheet::as_arc(&raw_sheet).rules.read().0.is_empty()
 }
 
 #[no_mangle]
 pub extern "C" fn Servo_StyleSheet_GetRules(sheet: RawServoStyleSheetBorrowed) -> ServoCssRulesStrong {
-    Stylesheet::as_arc(&sheet).rules.0.clone().into_strong()
+    Stylesheet::as_arc(&sheet).rules.clone().into_strong()
 }
 
 #[no_mangle]
@@ -312,8 +330,8 @@ pub extern "C" fn Servo_StyleSheet_Release(sheet: RawServoStyleSheetBorrowed) ->
 #[no_mangle]
 pub extern "C" fn Servo_CssRules_ListTypes(rules: ServoCssRulesBorrowed,
                                            result: nsTArrayBorrowed_uintptr_t) -> () {
-    let rules = RwLock::<Vec<CssRule>>::as_arc(&rules).read();
-    let iter = rules.iter().map(|rule| rule.rule_type() as usize);
+    let rules = RwLock::<CssRules>::as_arc(&rules).read();
+    let iter = rules.0.iter().map(|rule| rule.rule_type() as usize);
     let (size, upper) = iter.size_hint();
     debug_assert_eq!(size, upper.unwrap());
     unsafe { result.set_len(size as u32) };
@@ -323,8 +341,8 @@ pub extern "C" fn Servo_CssRules_ListTypes(rules: ServoCssRulesBorrowed,
 #[no_mangle]
 pub extern "C" fn Servo_CssRules_GetStyleRuleAt(rules: ServoCssRulesBorrowed, index: u32)
                                                 -> RawServoStyleRuleStrong {
-    let rules = RwLock::<Vec<CssRule>>::as_arc(&rules).read();
-    match rules[index as usize] {
+    let rules = RwLock::<CssRules>::as_arc(&rules).read();
+    match rules.0[index as usize] {
         CssRule::Style(ref rule) => rule.clone().into_strong(),
         _ => {
             unreachable!("GetStyleRuleAt should only be called on a style rule");
@@ -333,13 +351,38 @@ pub extern "C" fn Servo_CssRules_GetStyleRuleAt(rules: ServoCssRulesBorrowed, in
 }
 
 #[no_mangle]
+pub extern "C" fn Servo_CssRules_InsertRule(rules: ServoCssRulesBorrowed, sheet: RawServoStyleSheetBorrowed,
+                                            rule: *const nsACString, index: u32, nested: bool,
+                                            rule_type: *mut u16) -> nsresult {
+    let rules = RwLock::<CssRules>::as_arc(&rules);
+    let sheet = Stylesheet::as_arc(&sheet);
+    let rule = unsafe { rule.as_ref().unwrap().as_str_unchecked() };
+    match rules.write().insert_rule(rule, sheet, index as usize, nested) {
+        Ok(new_rule) => {
+            *unsafe { rule_type.as_mut().unwrap() } = new_rule.rule_type() as u16;
+            nsresult::NS_OK
+        }
+        Err(err) => err.into()
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_CssRules_DeleteRule(rules: ServoCssRulesBorrowed, index: u32) -> nsresult {
+    let rules = RwLock::<CssRules>::as_arc(&rules);
+    match rules.write().remove_rule(index as usize) {
+        Ok(_) => nsresult::NS_OK,
+        Err(err) => err.into()
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn Servo_CssRules_AddRef(rules: ServoCssRulesBorrowed) -> () {
-    unsafe { RwLock::<Vec<CssRule>>::addref(rules) };
+    unsafe { RwLock::<CssRules>::addref(rules) };
 }
 
 #[no_mangle]
 pub extern "C" fn Servo_CssRules_Release(rules: ServoCssRulesBorrowed) -> () {
-    unsafe { RwLock::<Vec<CssRule>>::release(rules) };
+    unsafe { RwLock::<CssRules>::release(rules) };
 }
 
 #[no_mangle]
@@ -565,7 +608,7 @@ pub extern "C" fn Servo_DeclarationBlock_GetCssText(declarations: RawServoDeclar
 pub extern "C" fn Servo_DeclarationBlock_SerializeOneValue(
     declarations: RawServoDeclarationBlockBorrowed,
     property: *mut nsIAtom, is_custom: bool,
-    buffer: *mut nsString)
+    buffer: *mut nsAString)
 {
     let declarations = RwLock::<PropertyDeclarationBlock>::as_arc(&declarations);
     let property = get_property_name_from_atom(property, is_custom);
@@ -573,11 +616,7 @@ pub extern "C" fn Servo_DeclarationBlock_SerializeOneValue(
     let rv = declarations.read().single_value_to_css(&property, &mut string);
     debug_assert!(rv.is_ok());
 
-    // FIXME: Once we have nsString bindings for Servo (bug 1294742), we should be able to drop
-    // this and fill in |buffer| directly.
-    unsafe {
-        Gecko_Utf8SliceToString(buffer, string.as_ptr(), string.len());
-    }
+    write!(unsafe { &mut *buffer }, "{}", string).expect("Failed to copy string");
 }
 
 #[no_mangle]
@@ -793,7 +832,11 @@ pub extern "C" fn Servo_ResolveStyle(element: RawGeckoElementBorrowed,
             let mut per_doc_data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
             let shared_style_context = create_shared_context(&mut per_doc_data);
             let context = StandaloneStyleContext::new(&shared_style_context);
-            recalc_style_at::<_, _, RecalcStyleOnly>(&context, element.as_node().opaque(), element);
+
+            let mut data = PerLevelTraversalData {
+                current_dom_depth: None,
+            };
+            recalc_style_at::<_, _, RecalcStyleOnly>(&context, &mut data, element);
 
             // The element was either unstyled or needed restyle. If it was unstyled, it may have
             // additional unstyled children that subsequent traversals won't find now that the style

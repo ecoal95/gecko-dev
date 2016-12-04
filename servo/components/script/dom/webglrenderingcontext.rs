@@ -34,6 +34,7 @@ use dom::webglrenderbuffer::WebGLRenderbuffer;
 use dom::webglshader::WebGLShader;
 use dom::webgltexture::{TexParameterValue, WebGLTexture};
 use dom::webgluniformlocation::WebGLUniformLocation;
+use dom::window::Window;
 use euclid::size::Size2D;
 use ipc_channel::ipc::{self, IpcSender};
 use js::conversions::ConversionBehavior;
@@ -132,16 +133,20 @@ pub struct WebGLRenderingContext {
     current_program: MutNullableHeap<JS<WebGLProgram>>,
     #[ignore_heap_size_of = "Because it's small"]
     current_vertex_attrib_0: Cell<(f32, f32, f32, f32)>,
+    #[ignore_heap_size_of = "Because it's small"]
+    current_scissor: Cell<(i32, i32, i32, i32)>,
+    #[ignore_heap_size_of = "Because it's small"]
+    current_clear_color: Cell<(f32, f32, f32, f32)>,
 }
 
 impl WebGLRenderingContext {
-    fn new_inherited(global: &GlobalScope,
+    fn new_inherited(window: &Window,
                      canvas: &HTMLCanvasElement,
                      size: Size2D<i32>,
                      attrs: GLContextAttributes)
                      -> Result<WebGLRenderingContext, String> {
         let (sender, receiver) = ipc::channel().unwrap();
-        let constellation_chan = global.constellation_chan();
+        let constellation_chan = window.upcast::<GlobalScope>().constellation_chan();
         constellation_chan.send(ConstellationMsg::CreateWebGLPaintThread(size, attrs, sender))
                           .unwrap();
         let result = receiver.recv().unwrap();
@@ -162,18 +167,20 @@ impl WebGLRenderingContext {
                 bound_renderbuffer: MutNullableHeap::new(None),
                 current_program: MutNullableHeap::new(None),
                 current_vertex_attrib_0: Cell::new((0f32, 0f32, 0f32, 1f32)),
+                current_scissor: Cell::new((0, 0, size.width, size.height)),
+                current_clear_color: Cell::new((0.0, 0.0, 0.0, 0.0))
             }
         })
     }
 
     #[allow(unrooted_must_root)]
-    pub fn new(global: &GlobalScope, canvas: &HTMLCanvasElement, size: Size2D<i32>, attrs: GLContextAttributes)
+    pub fn new(window: &Window, canvas: &HTMLCanvasElement, size: Size2D<i32>, attrs: GLContextAttributes)
                -> Option<Root<WebGLRenderingContext>> {
-        match WebGLRenderingContext::new_inherited(global, canvas, size, attrs) {
-            Ok(ctx) => Some(reflect_dom_object(box ctx, global, WebGLRenderingContextBinding::Wrap)),
+        match WebGLRenderingContext::new_inherited(window, canvas, size, attrs) {
+            Ok(ctx) => Some(reflect_dom_object(box ctx, window, WebGLRenderingContextBinding::Wrap)),
             Err(msg) => {
                 error!("Couldn't create WebGLRenderingContext: {}", msg);
-                let event = WebGLContextEvent::new(global,
+                let event = WebGLContextEvent::new(window,
                                                    atom!("webglcontextcreationerror"),
                                                    EventBubbles::DoesNotBubble,
                                                    EventCancelable::Cancelable,
@@ -202,6 +209,22 @@ impl WebGLRenderingContext {
 
     pub fn recreate(&self, size: Size2D<i32>) {
         self.ipc_renderer.send(CanvasMsg::Common(CanvasCommonMsg::Recreate(size))).unwrap();
+
+        // ClearColor needs to be restored because after a resize the GLContext is recreated
+        // and the framebuffer is cleared using the default black transparent color.
+        let color = self.current_clear_color.get();
+        self.ipc_renderer
+            .send(CanvasMsg::WebGL(WebGLCommand::ClearColor(color.0, color.1, color.2, color.3)))
+            .unwrap();
+
+        // WebGL Spec: Scissor rect must not change if the canvas is resized.
+        // See: webgl/conformance-1.0.3/conformance/rendering/gl-scissor-canvas-dimensions.html
+        // NativeContext handling library changes the scissor after a resize, so we need to reset the
+        // default scissor when the canvas was created or the last scissor that the user set.
+        let rect = self.current_scissor.get();
+        self.ipc_renderer
+            .send(CanvasMsg::WebGL(WebGLCommand::Scissor(rect.0, rect.1, rect.2, rect.3)))
+            .unwrap()
     }
 
     pub fn ipc_renderer(&self) -> IpcSender<CanvasMsg> {
@@ -1135,6 +1158,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.3
     fn ClearColor(&self, red: f32, green: f32, blue: f32, alpha: f32) {
+        self.current_clear_color.set((red, green, blue, alpha));
         self.ipc_renderer
             .send(CanvasMsg::WebGL(WebGLCommand::ClearColor(red, green, blue, alpha)))
             .unwrap()
@@ -1248,27 +1272,27 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // generated objects, either here or in the webgl thread
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.5
     fn CreateBuffer(&self) -> Option<Root<WebGLBuffer>> {
-        WebGLBuffer::maybe_new(&self.global(), self.ipc_renderer.clone())
+        WebGLBuffer::maybe_new(self.global().as_window(), self.ipc_renderer.clone())
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.6
     fn CreateFramebuffer(&self) -> Option<Root<WebGLFramebuffer>> {
-        WebGLFramebuffer::maybe_new(&self.global(), self.ipc_renderer.clone())
+        WebGLFramebuffer::maybe_new(self.global().as_window(), self.ipc_renderer.clone())
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.7
     fn CreateRenderbuffer(&self) -> Option<Root<WebGLRenderbuffer>> {
-        WebGLRenderbuffer::maybe_new(&self.global(), self.ipc_renderer.clone())
+        WebGLRenderbuffer::maybe_new(self.global().as_window(), self.ipc_renderer.clone())
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.8
     fn CreateTexture(&self) -> Option<Root<WebGLTexture>> {
-        WebGLTexture::maybe_new(&self.global(), self.ipc_renderer.clone())
+        WebGLTexture::maybe_new(self.global().as_window(), self.ipc_renderer.clone())
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
     fn CreateProgram(&self) -> Option<Root<WebGLProgram>> {
-        WebGLProgram::maybe_new(&self.global(), self.ipc_renderer.clone())
+        WebGLProgram::maybe_new(self.global().as_window(), self.ipc_renderer.clone())
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
@@ -1280,7 +1304,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
                 return None;
             }
         }
-        WebGLShader::maybe_new(&self.global(), self.ipc_renderer.clone(), shader_type)
+        WebGLShader::maybe_new(self.global().as_window(), self.ipc_renderer.clone(), shader_type)
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.5
@@ -1612,7 +1636,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
                           name: DOMString) -> Option<Root<WebGLUniformLocation>> {
         program.and_then(|p| {
             handle_potential_webgl_error!(self, p.get_uniform_location(name), None)
-                .map(|location| WebGLUniformLocation::new(&self.global(), location, p.id()))
+                .map(|location| WebGLUniformLocation::new(self.global().as_window(), location, p.id()))
         })
     }
 
@@ -1902,6 +1926,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
             return self.webgl_error(InvalidValue)
         }
 
+        self.current_scissor.set((x, y, width, height));
         self.ipc_renderer
             .send(CanvasMsg::WebGL(WebGLCommand::Scissor(x, y, width, height)))
             .unwrap()

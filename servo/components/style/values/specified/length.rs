@@ -6,7 +6,7 @@ use app_units::Au;
 use cssparser::{Parser, Token};
 use euclid::size::Size2D;
 use font_metrics::FontMetrics;
-use parser::Parse;
+use parser::{Parse, ParserContext};
 use std::ascii::AsciiExt;
 use std::cmp;
 use std::fmt;
@@ -14,7 +14,7 @@ use std::ops::Mul;
 use style_traits::ToCss;
 use style_traits::values::specified::AllowedNumericType;
 use super::{Angle, Number, SimplifiedValueNode, SimplifiedSumNode, Time};
-use values::{CSSFloat, Either, FONT_MEDIUM_PX, HasViewportPercentage, None_};
+use values::{Auto, CSSFloat, Either, FONT_MEDIUM_PX, HasViewportPercentage, None_};
 use values::computed::Context;
 
 pub use super::image::{AngleOrCorner, ColorStop, EndingShape as GradientEndingShape, Gradient};
@@ -338,14 +338,14 @@ impl Length {
 }
 
 impl Parse for Length {
-    fn parse(input: &mut Parser) -> Result<Self, ()> {
+    fn parse(_context: &ParserContext, input: &mut Parser) -> Result<Self, ()> {
         Length::parse_internal(input, AllowedNumericType::All)
     }
 }
 
 impl<T> Either<Length, T> {
     #[inline]
-    pub fn parse_non_negative_length(input: &mut Parser) -> Result<Either<Length, T>, ()> {
+    pub fn parse_non_negative_length(_context: &ParserContext, input: &mut Parser) -> Result<Self, ()> {
         Length::parse_internal(input, AllowedNumericType::NonNegative).map(Either::First)
     }
 }
@@ -554,8 +554,8 @@ impl CalcLengthOrPercentage {
         CalcLengthOrPercentage::parse(input, CalcUnit::LengthOrPercentage)
     }
 
-    fn parse(input: &mut Parser,
-             expected_unit: CalcUnit) -> Result<CalcLengthOrPercentage, ()> {
+    pub fn parse(input: &mut Parser,
+                 expected_unit: CalcUnit) -> Result<CalcLengthOrPercentage, ()> {
         let ast = try!(CalcLengthOrPercentage::parse_sum(input, expected_unit));
 
         let mut simplified = Vec::new();
@@ -576,7 +576,6 @@ impl CalcLengthOrPercentage {
         let mut ch = None;
         let mut rem = None;
         let mut percentage = None;
-        let mut number = None;
 
         for value in simplified {
             match value {
@@ -606,7 +605,7 @@ impl CalcLengthOrPercentage {
                         FontRelativeLength::Rem(val) =>
                             rem = Some(rem.unwrap_or(0.) + val),
                     },
-                SimplifiedValueNode::Number(val) => number = Some(number.unwrap_or(0.) + val),
+                // TODO Add support for top level number in calc(). See servo/servo#14421.
                 _ => return Err(()),
             }
         }
@@ -753,7 +752,7 @@ impl ToCss for Percentage {
 
 impl Parse for Percentage {
     #[inline]
-    fn parse(input: &mut Parser) -> Result<Self, ()> {
+    fn parse(_context: &ParserContext, input: &mut Parser) -> Result<Self, ()> {
         let context = AllowedNumericType::All;
         match try!(input.next()) {
             Token::Percentage(ref value) if context.is_ok(value.unit_value) =>
@@ -821,7 +820,7 @@ impl LengthOrPercentage {
 
 impl Parse for LengthOrPercentage {
     #[inline]
-    fn parse(input: &mut Parser) -> Result<Self, ()> {
+    fn parse(_context: &ParserContext, input: &mut Parser) -> Result<Self, ()> {
         LengthOrPercentage::parse_internal(input, AllowedNumericType::All)
     }
 }
@@ -884,7 +883,7 @@ impl LengthOrPercentageOrAuto {
 
 impl Parse for LengthOrPercentageOrAuto {
     #[inline]
-    fn parse(input: &mut Parser) -> Result<Self, ()> {
+    fn parse(_context: &ParserContext, input: &mut Parser) -> Result<Self, ()> {
         LengthOrPercentageOrAuto::parse_internal(input, AllowedNumericType::All)
     }
 }
@@ -946,12 +945,14 @@ impl LengthOrPercentageOrNone {
 
 impl Parse for LengthOrPercentageOrNone {
     #[inline]
-    fn parse(input: &mut Parser) -> Result<Self, ()> {
+    fn parse(_context: &ParserContext, input: &mut Parser) -> Result<Self, ()> {
         LengthOrPercentageOrNone::parse_internal(input, AllowedNumericType::All)
     }
 }
 
 pub type LengthOrNone = Either<Length, None_>;
+
+pub type LengthOrAuto = Either<Length, Auto>;
 
 #[derive(Clone, PartialEq, Copy, Debug)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
@@ -986,7 +987,7 @@ impl ToCss for LengthOrPercentageOrAutoOrContent {
 }
 
 impl Parse for LengthOrPercentageOrAutoOrContent {
-    fn parse(input: &mut Parser) -> Result<Self, ()> {
+    fn parse(_context: &ParserContext, input: &mut Parser) -> Result<Self, ()> {
         let context = AllowedNumericType::NonNegative;
         match try!(input.next()) {
             Token::Dimension(ref value, ref unit) if context.is_ok(value.value) =>
@@ -1012,7 +1013,7 @@ pub type LengthOrNumber = Either<Length, Number>;
 
 impl LengthOrNumber {
     pub fn parse_non_negative(input: &mut Parser) -> Result<Self, ()> {
-        if let Ok(v) = input.try(|i| Length::parse_non_negative(i)) {
+        if let Ok(v) = input.try(Length::parse_non_negative) {
             Ok(Either::First(v))
         } else {
             Number::parse_non_negative(input).map(Either::Second)

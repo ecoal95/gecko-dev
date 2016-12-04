@@ -493,6 +493,7 @@ impl Debug for ${style_struct.gecko_struct_name} {
 
     # Types used with predefined_type()-defined properties that we can auto-generate.
     predefined_types = {
+        "length::LengthOrAuto": impl_style_coord,
         "Length": impl_style_coord,
         "LengthOrPercentage": impl_style_coord,
         "LengthOrPercentageOrAuto": impl_style_coord,
@@ -1089,10 +1090,10 @@ fn static_assert() {
 
     #[allow(non_snake_case)]
     pub fn set__moz_binding(&mut self, v: longhands::_moz_binding::computed_value::T) {
-        use properties::longhands::_moz_binding::computed_value::T as BindingValue;
+        use values::Either;
         match v {
-            BindingValue::None => debug_assert!(self.gecko.mBinding.mRawPtr.is_null()),
-            BindingValue::Url(ref url) => {
+            Either::Second(_none) => debug_assert!(self.gecko.mBinding.mRawPtr.is_null()),
+            Either::First(ref url) => {
                 let extra_data = url.extra_data();
                 let (ptr, len) = url.as_slice_components();
                 unsafe {
@@ -1571,7 +1572,8 @@ fn static_assert() {
 <% skip_background_longhands = """background-repeat
                                   background-image background-clip
                                   background-origin background-attachment
-                                  background-size background-position""" %>
+                                  background-size background-position
+                                  background-blend-mode""" %>
 <%self:impl_trait style_struct_name="Background"
                   skip_longhands="${skip_background_longhands}"
                   skip_additionals="*">
@@ -1586,6 +1588,29 @@ fn static_assert() {
             T::local => structs::NS_STYLE_IMAGELAYER_ATTACHMENT_LOCAL as u8,
         }
     </%self:simple_image_array_property>
+
+    <%self:simple_image_array_property name="blend_mode" shorthand="background" field_name="mBlendMode">
+        use properties::longhands::background_blend_mode::single_value::computed_value::T;
+
+        match servo {
+            T::normal => structs::NS_STYLE_BLEND_NORMAL as u8,
+            T::multiply => structs::NS_STYLE_BLEND_MULTIPLY as u8,
+            T::screen => structs::NS_STYLE_BLEND_SCREEN as u8,
+            T::overlay => structs::NS_STYLE_BLEND_OVERLAY as u8,
+            T::darken => structs::NS_STYLE_BLEND_DARKEN as u8,
+            T::lighten => structs::NS_STYLE_BLEND_LIGHTEN as u8,
+            T::color_dodge => structs::NS_STYLE_BLEND_COLOR_DODGE as u8,
+            T::color_burn => structs::NS_STYLE_BLEND_COLOR_BURN as u8,
+            T::hard_light => structs::NS_STYLE_BLEND_HARD_LIGHT as u8,
+            T::soft_light => structs::NS_STYLE_BLEND_SOFT_LIGHT as u8,
+            T::difference => structs::NS_STYLE_BLEND_DIFFERENCE as u8,
+            T::exclusion => structs::NS_STYLE_BLEND_EXCLUSION as u8,
+            T::hue => structs::NS_STYLE_BLEND_HUE as u8,
+            T::saturation => structs::NS_STYLE_BLEND_SATURATION as u8,
+            T::color => structs::NS_STYLE_BLEND_COLOR as u8,
+            T::luminosity => structs::NS_STYLE_BLEND_LUMINOSITY as u8,
+        }
+    </%self:simple_image_array_property>
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="List"
@@ -1593,14 +1618,14 @@ fn static_assert() {
                   skip_additionals="*">
 
     pub fn set_list_style_image(&mut self, image: longhands::list_style_image::computed_value::T) {
-        use values::computed::UrlOrNone;
+        use values::Either;
         match image {
-            UrlOrNone::None => {
+            Either::Second(_none) => {
                 unsafe {
                     Gecko_SetListStyleImageNone(&mut self.gecko);
                 }
             }
-            UrlOrNone::Url(ref url) => {
+            Either::First(ref url) => {
                 let (ptr, len) = url.as_slice_components();
                 let extra_data = url.extra_data();
                 unsafe {
@@ -1819,7 +1844,8 @@ fn static_assert() {
 
 
 <%self:impl_trait style_struct_name="InheritedText"
-                  skip_longhands="text-align text-emphasis-style text-shadow line-height letter-spacing word-spacing">
+                  skip_longhands="text-align text-emphasis-style text-shadow line-height letter-spacing word-spacing
+                                  -webkit-text-stroke-width">
 
     <% text_align_keyword = Keyword("text-align", "start end left right center justify -moz-center -moz-left " +
                                                   "-moz-right match-parent") %>
@@ -1965,6 +1991,13 @@ fn static_assert() {
         }
         self.gecko.mTextEmphasisStyle = other.gecko.mTextEmphasisStyle;
     }
+
+    #[allow(non_snake_case)]
+    pub fn set__webkit_text_stroke_width(&mut self, v: longhands::_webkit_text_stroke_width::computed_value::T) {
+        self.gecko.mWebkitTextStrokeWidth.set_value(CoordDataValue::Coord(v.0));
+    }
+
+    <%call expr="impl_coord_copy('_webkit_text_stroke_width', 'mWebkitTextStrokeWidth')"></%call>
 
 </%self:impl_trait>
 
@@ -2318,16 +2351,7 @@ clip-path
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="Column"
-                  skip_longhands="column-width column-count column-gap -moz-column-rule-width">
-
-    pub fn set_column_width(&mut self, v: longhands::column_width::computed_value::T) {
-        match v.0 {
-            Some(au) => self.gecko.mColumnWidth.set(au),
-            None => self.gecko.mColumnWidth.set_value(CoordDataValue::Auto),
-        }
-    }
-
-    ${impl_coord_copy('column_width', 'mColumnWidth')}
+                  skip_longhands="column-count column-gap -moz-column-rule-width">
 
     #[allow(unused_unsafe)]
     pub fn set_column_count(&mut self, v: longhands::column_count::computed_value::T) {

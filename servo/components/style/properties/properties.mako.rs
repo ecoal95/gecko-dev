@@ -84,7 +84,8 @@ pub mod shorthands {
     use values::specified;
 
     pub fn parse_four_sides<F, T>(input: &mut Parser, parse_one: F) -> Result<(T, T, T, T), ()>
-    where F: Fn(&mut Parser) -> Result<T, ()>, F: Copy, T: Clone {
+        where F: Fn(&mut Parser) -> Result<T, ()>, T: Clone
+    {
         // zero or more than four values is invalid.
         // one value sets them all
         // two values set (top, bottom) and (left, right)
@@ -94,7 +95,7 @@ pub mod shorthands {
         let right;
         let bottom;
         let left;
-        match input.try(parse_one) {
+        match input.try(|i| parse_one(i)) {
             Err(()) => {
                 right = top.clone();
                 bottom = top.clone();
@@ -102,14 +103,14 @@ pub mod shorthands {
             }
             Ok(value) => {
                 right = value;
-                match input.try(parse_one) {
+                match input.try(|i| parse_one(i)) {
                     Err(()) => {
                         bottom = top.clone();
                         left = right.clone();
                     }
                     Ok(value) => {
                         bottom = value;
-                        match input.try(parse_one) {
+                        match input.try(|i| parse_one(i)) {
                             Err(()) => {
                                 left = right.clone();
                             }
@@ -365,7 +366,7 @@ pub enum CSSWideKeyword {
 }
 
 impl Parse for CSSWideKeyword {
-    fn parse(input: &mut Parser) -> Result<Self, ()> {
+    fn parse(_context: &ParserContext, input: &mut Parser) -> Result<Self, ()> {
         match_ignore_ascii_case! { try!(input.expect_ident()),
             "initial" => Ok(CSSWideKeyword::InitialKeyword),
             "inherit" => Ok(CSSWideKeyword::InheritKeyword),
@@ -435,7 +436,8 @@ impl Shorthand {
     pub fn serialize_shorthand_to_buffer<'a, W, I>(self,
                                                    dest: &mut W,
                                                    declarations: I,
-                                                   is_first_serialization: &mut bool)
+                                                   is_first_serialization: &mut bool,
+                                                   importance: Importance)
                                                    -> Result<bool, fmt::Error>
     where W: Write, I: IntoIterator<Item=&'a PropertyDeclaration>, I::IntoIter: Clone {
         match self.get_shorthand_appendable_value(declarations) {
@@ -447,7 +449,7 @@ impl Shorthand {
                     dest,
                     property_name,
                     appendable_value,
-                    Importance::Normal,
+                    importance,
                     is_first_serialization
                 ).and_then(|_| Ok(true))
             }
@@ -752,11 +754,11 @@ impl PropertyDeclaration {
                  in_keyframe_block: bool)
                  -> PropertyDeclarationParseResult {
         if let Ok(name) = ::custom_properties::parse_name(name) {
-            let value = match input.try(CSSWideKeyword::parse) {
+            let value = match input.try(|i| CSSWideKeyword::parse(context, i)) {
                 Ok(CSSWideKeyword::UnsetKeyword) |  // Custom properties are alawys inherited
                 Ok(CSSWideKeyword::InheritKeyword) => DeclaredValue::Inherit,
                 Ok(CSSWideKeyword::InitialKeyword) => DeclaredValue::Initial,
-                Err(()) => match ::custom_properties::SpecifiedValue::parse(input) {
+                Err(()) => match ::custom_properties::SpecifiedValue::parse(context, input) {
                     Ok(value) => DeclaredValue::Value(value),
                     Err(()) => return PropertyDeclarationParseResult::InvalidValue,
                 }
@@ -814,7 +816,7 @@ impl PropertyDeclaration {
                             return PropertyDeclarationParseResult::ExperimentalProperty
                         }
                     % endif
-                    match input.try(CSSWideKeyword::parse) {
+                    match input.try(|i| CSSWideKeyword::parse(context, i)) {
                         Ok(CSSWideKeyword::InheritKeyword) => {
                             % for sub_property in shorthand.sub_properties:
                                 result_list.push(
@@ -1143,7 +1145,10 @@ impl ComputedValues {
     #[inline]
     pub fn is_multicol(&self) -> bool {
         let style = self.get_column();
-        style.column_count.0.is_some() || style.column_width.0.is_some()
+        match style.column_width {
+            Either::First(_width) => true,
+            Either::Second(_auto) => style.column_count.0.is_some(),
+        }
     }
 
     /// Resolves the currentColor keyword.
@@ -1685,6 +1690,9 @@ pub fn apply_declarations<'a, F, I>(viewport_size: Size2D<Au>,
                     align_items::flex_start => align_self::flex_start,
                     align_items::flex_end => align_self::flex_end,
                     align_items::center => align_self::center,
+                    % if product == "gecko":
+                        align_items::normal => align_self::normal,
+                    % endif
                 };
             style.mutate_position().set_align_self(self_align);
         }

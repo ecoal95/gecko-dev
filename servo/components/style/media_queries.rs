@@ -42,7 +42,7 @@ impl Default for MediaList {
 pub enum Range<T> {
     Min(T),
     Max(T),
-    //Eq(T),    // FIXME: Implement parsing support for equality then re-enable this.
+    Eq(T),
 }
 
 impl Range<specified::Length> {
@@ -54,7 +54,7 @@ impl Range<specified::Length> {
         match *self {
             Range::Min(ref width) => Range::Min(width.to_computed_value(&context)),
             Range::Max(ref width) => Range::Max(width.to_computed_value(&context)),
-            //Range::Eq(ref width) => Range::Eq(compute_width(width))
+            Range::Eq(ref width) => Range::Eq(width.to_computed_value(&context))
         }
     }
 }
@@ -64,7 +64,7 @@ impl<T: Ord> Range<T> {
         match *self {
             Range::Min(ref width) => { value >= *width },
             Range::Max(ref width) => { value <= *width },
-            //Range::Eq(ref width) => { value == *width },
+            Range::Eq(ref width) => { value == *width },
         }
     }
 }
@@ -85,7 +85,7 @@ pub enum Qualifier {
     Not,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct MediaQuery {
     pub qualifier: Option<Qualifier>,
@@ -127,10 +127,11 @@ impl ToCss for MediaQuery {
         for (i, &e) in self.expressions.iter().enumerate() {
             try!(write!(dest, "("));
             let (mm, l) = match e {
-                Expression::Width(Range::Min(ref l)) => ("min", l),
-                Expression::Width(Range::Max(ref l)) => ("max", l),
+                Expression::Width(Range::Min(ref l)) => ("min-", l),
+                Expression::Width(Range::Max(ref l)) => ("max-", l),
+                Expression::Width(Range::Eq(ref l)) => ("", l),
             };
-            try!(write!(dest, "{}-width: ", mm));
+            try!(write!(dest, "{}width: ", mm));
             try!(l.to_css(dest));
             if i == self.expressions.len() - 1 {
                 try!(write!(dest, ")"));
@@ -195,6 +196,9 @@ impl Expression {
                 "max-width" => {
                     Ok(Expression::Width(Range::Max(try!(specified::Length::parse_non_negative(input)))))
                 },
+                "width" => {
+                    Ok(Expression::Width(Range::Eq(try!(specified::Length::parse_non_negative(input)))))
+                },
                 _ => Err(())
             }
         })
@@ -202,7 +206,7 @@ impl Expression {
 }
 
 impl MediaQuery {
-    fn parse(input: &mut Parser) -> Result<MediaQuery, ()> {
+    pub fn parse(input: &mut Parser) -> Result<MediaQuery, ()> {
         let mut expressions = vec![];
 
         let qualifier = if input.try(|input| input.expect_ident_matching("only")).is_ok() {

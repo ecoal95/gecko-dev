@@ -517,6 +517,18 @@ pub trait Rng {
         }
     }
 
+    /// Return a mutable pointer to a random element from `values`.
+    ///
+    /// Return `None` if `values` is empty.
+    fn choose_mut<'a, T>(&mut self, values: &'a mut [T]) -> Option<&'a mut T> where Self: Sized {
+        if values.is_empty() {
+            None
+        } else {
+            let len = values.len();
+            Some(&mut values[self.gen_range(0, len)])
+        }
+    }
+
     /// Shuffle a mutable slice in place.
     ///
     /// # Example
@@ -588,7 +600,10 @@ impl<R: ?Sized> Rng for Box<R> where R: Rng {
 
 /// Iterator which will generate a stream of random items.
 ///
-/// This iterator is created via the `gen_iter` method on `Rng`.
+/// This iterator is created via the [`gen_iter`] method on [`Rng`].
+///
+/// [`gen_iter`]: trait.Rng.html#method.gen_iter
+/// [`Rng`]: trait.Rng.html
 pub struct Generator<'a, T, R:'a> {
     rng: &'a mut R,
     _marker: marker::PhantomData<fn() -> T>,
@@ -604,7 +619,10 @@ impl<'a, T: Rand, R: Rng> Iterator for Generator<'a, T, R> {
 
 /// Iterator which will continuously generate random ascii characters.
 ///
-/// This iterator is created via the `gen_ascii_chars` method on `Rng`.
+/// This iterator is created via the [`gen_ascii_chars`] method on [`Rng`].
+///
+/// [`gen_ascii_chars`]: trait.Rng.html#method.gen_ascii_chars
+/// [`Rng`]: trait.Rng.html
 pub struct AsciiGenerator<'a, R:'a> {
     rng: &'a mut R,
 }
@@ -1061,7 +1079,6 @@ mod test {
 
     #[test]
     #[should_panic]
-    #[cfg_attr(target_env = "msvc", ignore)]
     fn test_gen_range_panic_int() {
         let mut r = thread_rng();
         r.gen_range(5, -2);
@@ -1069,7 +1086,6 @@ mod test {
 
     #[test]
     #[should_panic]
-    #[cfg_attr(target_env = "msvc", ignore)]
     fn test_gen_range_panic_usize() {
         let mut r = thread_rng();
         r.gen_range(5, 2);
