@@ -23,6 +23,7 @@ Cu.import("chrome://marionette/content/addon.js");
 Cu.import("chrome://marionette/content/assert.js");
 Cu.import("chrome://marionette/content/atom.js");
 Cu.import("chrome://marionette/content/browser.js");
+Cu.import("chrome://marionette/content/cert.js");
 Cu.import("chrome://marionette/content/element.js");
 Cu.import("chrome://marionette/content/error.js");
 Cu.import("chrome://marionette/content/evaluate.js");
@@ -108,29 +109,41 @@ this.GeckoDriver = function(appName, server) {
   this.browsers = {};
   // points to current browser
   this.curBrowser = null;
-  this.context = Context.CONTENT;
-
-  this.scriptTimeout = 30000;  // 30 seconds
-  this.searchTimeout = 0;
-  this.pageTimeout = 300000;  // five minutes
-
-  this.timer = null;
-  this.inactivityTimer = null;
-  this.marionetteLog = new logging.ContentLogger();
   // topmost chrome frame
   this.mainFrame = null;
   // chrome iframe that currently has focus
   this.curFrame = null;
   this.mainContentFrameId = null;
-  this.importedScripts = new evaluate.ScriptStorageService([Context.CHROME, Context.CONTENT]);
-  this.currentFrameElement = null;
-  this.testName = null;
   this.mozBrowserClose = null;
-  this.sandboxes = new Sandboxes(() => this.getCurrentWindow());
+  this.currentFrameElement = null;
   // frame ID of the current remote frame, used for mozbrowserclose events
   this.oopFrameId = null;
   this.observing = null;
   this._browserIds = new WeakMap();
+
+  // user-defined timeouts
+  this.scriptTimeout = 30000;  // 30 seconds
+  this.searchTimeout = null;
+  this.pageTimeout = 300000;  // five minutes
+
+  // Unsigned or invalid TLS certificates will be ignored if secureTLS
+  // is set to false.
+  this.secureTLS = true;
+
+  // The curent context decides if commands should affect chrome- or
+  // content space.
+  this.context = Context.CONTENT;
+
+  this.importedScripts = new evaluate.ScriptStorageService(
+      [Context.CHROME, Context.CONTENT]);
+  this.sandboxes = new Sandboxes(() => this.getCurrentWindow());
+  this.actions = new action.Chain();
+
+  this.timer = null;
+  this.inactivityTimer = null;
+
+  this.marionetteLog = new logging.ContentLogger();
+  this.testName = null;
 
   this.sessionCapabilities = {
     // mandated capabilities
@@ -138,16 +151,17 @@ this.GeckoDriver = function(appName, server) {
     "browserVersion": Services.appinfo.version,
     "platformName": Services.sysinfo.getProperty("name").toLowerCase(),
     "platformVersion": Services.sysinfo.getProperty("version"),
-    "specificationLevel": 0,
+    "acceptInsecureCerts": !this.secureTLS,
 
     // supported features
     "raisesAccessibilityExceptions": false,
     "rotatable": this.appName == "B2G",
-    "acceptSslCerts": false,
     "proxy": {},
 
     // proprietary extensions
-    "processId" : Services.appinfo.processID,
+    "specificationLevel": 0,
+    "moz:processID": Services.appinfo.processID,
+    "moz:profile": Services.dirsvc.get("ProfD", Ci.nsIFile).path,
   };
 
   this.mm = globalMessageManager;
@@ -484,6 +498,16 @@ GeckoDriver.prototype.newSession = function*(cmd, resp) {
 
   this.newSessionCommandId = cmd.id;
   this.setSessionCapabilities(cmd.parameters.capabilities);
+
+  this.scriptTimeout = 10000;
+
+  this.secureTLS = !this.sessionCapabilities.acceptInsecureCerts;
+  if (!this.secureTLS) {
+    logger.warn("TLS certificate errors will be ignored for this session");
+    let acceptAllCerts = new cert.InsecureSweepingOverride();
+    cert.installOverride(acceptAllCerts);
+  }
+
   // If we are testing accessibility with marionette, start a11y service in
   // chrome first. This will ensure that we do not have any content-only
   // services hanging around.
@@ -491,8 +515,6 @@ GeckoDriver.prototype.newSession = function*(cmd, resp) {
       accessibility.service) {
     logger.info("Preemptively starting accessibility service in Chrome");
   }
-
-  this.scriptTimeout = 10000;
 
   let registerBrowsers = this.registerPromise();
   let browserListening = this.listeningPromise();
@@ -641,6 +663,7 @@ GeckoDriver.prototype.setSessionCapabilities = function(newCaps) {
   let caps = copy(this.sessionCapabilities);
   caps = copy(newCaps, caps);
   logger.config("Changing capabilities: " + JSON.stringify(caps));
+
   this.sessionCapabilities = caps;
 };
 
@@ -1393,17 +1416,22 @@ GeckoDriver.prototype.switchToParentFrame = function*(cmd, resp) {
 GeckoDriver.prototype.switchToFrame = function*(cmd, resp) {
   let {id, element, focus} = cmd.parameters;
 
-  let checkTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+  const otherErrorsExpr = /about:.+(error)|(blocked)\?/;
+  const checkTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+
   let curWindow = this.getCurrentWindow();
 
   let checkLoad = function() {
-    let errorRegex = /about:.+(error)|(blocked)\?/;
-    let curWindow = this.getCurrentWindow();
-    if (curWindow.document.readyState == "complete") {
+    let win = this.getCurrentWindow();
+    if (win.document.readyState == "complete") {
       return;
-    } else if (curWindow.document.readyState == "interactive" &&
-        errorRegex.exec(curWindow.document.baseURI)) {
-      throw new UnknownError("Error loading page");
+    } else if (win.document.readyState == "interactive") {
+      let baseURI = win.document.baseURI;
+      if (baseURI.startsWith("about:certerror")) {
+        throw new InsecureCertificateError();
+      } else if (otherErrorsExpr.exec(win.document.baseURI)) {
+        throw new UnknownError("Error loading page");
+      }
     }
 
     checkTimer.initWithCallback(checkLoad.bind(this), 100, Ci.nsITimer.TYPE_ONE_SHOT);
@@ -2287,7 +2315,9 @@ GeckoDriver.prototype.sessionTearDown = function(cmd, resp) {
     }
     this.observing = null;
   }
+
   this.sandboxes.clear();
+  cert.uninstallOverride();
 };
 
 /**
@@ -2842,21 +2872,15 @@ GeckoDriver.prototype.commands = {
   "getWindowType": GeckoDriver.prototype.getWindowType,
   "getPageSource": GeckoDriver.prototype.getPageSource,
   "get": GeckoDriver.prototype.get,
-  "goUrl": GeckoDriver.prototype.get,  // deprecated
   "getCurrentUrl": GeckoDriver.prototype.getCurrentUrl,
-  "getUrl": GeckoDriver.prototype.getCurrentUrl,  // deprecated
   "goBack": GeckoDriver.prototype.goBack,
   "goForward": GeckoDriver.prototype.goForward,
   "refresh":  GeckoDriver.prototype.refresh,
   "getWindowHandle": GeckoDriver.prototype.getWindowHandle,
-  "getCurrentWindowHandle":  GeckoDriver.prototype.getWindowHandle,  // Selenium 2 compat
   "getChromeWindowHandle": GeckoDriver.prototype.getChromeWindowHandle,
   "getCurrentChromeWindowHandle": GeckoDriver.prototype.getChromeWindowHandle,
-  "getWindow":  GeckoDriver.prototype.getWindowHandle,  // deprecated
   "getWindowHandles": GeckoDriver.prototype.getWindowHandles,
   "getChromeWindowHandles": GeckoDriver.prototype.getChromeWindowHandles,
-  "getCurrentWindowHandles": GeckoDriver.prototype.getWindowHandles,  // Selenium 2 compat
-  "getWindows":  GeckoDriver.prototype.getWindowHandles,  // deprecated
   "getWindowPosition": GeckoDriver.prototype.getWindowPosition,
   "setWindowPosition": GeckoDriver.prototype.setWindowPosition,
   "getActiveFrame": GeckoDriver.prototype.getActiveFrame,
@@ -2869,15 +2893,11 @@ GeckoDriver.prototype.commands = {
   "clearImportedScripts": GeckoDriver.prototype.clearImportedScripts,
   "getAppCacheStatus": GeckoDriver.prototype.getAppCacheStatus,
   "close": GeckoDriver.prototype.close,
-  "closeWindow": GeckoDriver.prototype.close,  // deprecated
   "closeChromeWindow": GeckoDriver.prototype.closeChromeWindow,
   "setTestName": GeckoDriver.prototype.setTestName,
   "takeScreenshot": GeckoDriver.prototype.takeScreenshot,
-  "screenShot": GeckoDriver.prototype.takeScreenshot,  // deprecated
-  "screenshot": GeckoDriver.prototype.takeScreenshot,  // Selenium 2 compat
   "addCookie": GeckoDriver.prototype.addCookie,
   "getCookies": GeckoDriver.prototype.getCookies,
-  "getAllCookies": GeckoDriver.prototype.getCookies,  // deprecated
   "deleteAllCookies": GeckoDriver.prototype.deleteAllCookies,
   "deleteCookie": GeckoDriver.prototype.deleteCookie,
   "getActiveElement": GeckoDriver.prototype.getActiveElement,

@@ -39516,6 +39516,13 @@
             "url": "/fetch/api/redirect/redirect-count-worker.html"
           }
         ],
+        "fetch/api/redirect/redirect-count.html": [
+          {
+            "path": "fetch/api/redirect/redirect-count.html",
+            "timeout": "long",
+            "url": "/fetch/api/redirect/redirect-count.html"
+          }
+        ],
         "fetch/api/redirect/redirect-referrer-worker.html": [
           {
             "path": "fetch/api/redirect/redirect-referrer-worker.html",
@@ -39538,6 +39545,12 @@
           {
             "path": "html/semantics/embedded-content/the-img-element/update-src-complete.html",
             "url": "/html/semantics/embedded-content/the-img-element/update-src-complete.html"
+          }
+        ],
+        "html/semantics/forms/the-select-element/select-validity.html": [
+          {
+            "path": "html/semantics/forms/the-select-element/select-validity.html",
+            "url": "/html/semantics/forms/the-select-element/select-validity.html"
           }
         ],
         "uievents/order-of-events/focus-events/focus-automated-blink-webkit.html": [

@@ -39,6 +39,7 @@
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Move.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/ProcessHangMonitor.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Services.h"
@@ -101,7 +102,6 @@
 #include "nsColorPickerProxy.h"
 #include "nsDatePickerProxy.h"
 #include "nsContentPermissionHelper.h"
-#include "nsPresShell.h"
 #include "nsNetUtil.h"
 #include "nsIPermissionManager.h"
 #include "nsIURILoader.h"
@@ -1966,7 +1966,7 @@ TabChild::RecvPDocumentRendererConstructor(PDocumentRendererChild* actor,
 PColorPickerChild*
 TabChild::AllocPColorPickerChild(const nsString&, const nsString&)
 {
-  NS_RUNTIMEABORT("unused");
+  MOZ_CRASH("unused");
   return nullptr;
 }
 
@@ -1981,7 +1981,7 @@ TabChild::DeallocPColorPickerChild(PColorPickerChild* aColorPicker)
 PDatePickerChild*
 TabChild::AllocPDatePickerChild(const nsString&, const nsString&)
 {
-  NS_RUNTIMEABORT("unused");
+  MOZ_CRASH("unused");
   return nullptr;
 }
 
@@ -1996,7 +1996,7 @@ TabChild::DeallocPDatePickerChild(PDatePickerChild* aDatePicker)
 PFilePickerChild*
 TabChild::AllocPFilePickerChild(const nsString&, const int16_t&)
 {
-  NS_RUNTIMEABORT("unused");
+  MOZ_CRASH("unused");
   return nullptr;
 }
 
