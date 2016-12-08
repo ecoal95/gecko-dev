@@ -3206,10 +3206,6 @@ protected:
 
   Tri mAllowXULXBL;
 
-  // Whether this document has (or will have, once we have a pres shell) a
-  // Gecko- or Servo-backed style system.
-  mozilla::StyleBackendType mStyleBackendType;
-
 #ifdef DEBUG
   /**
    * This is true while FlushPendingLinkUpdates executes.  Calls to
