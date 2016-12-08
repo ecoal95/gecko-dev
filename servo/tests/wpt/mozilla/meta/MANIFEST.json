@@ -6414,6 +6414,30 @@
             "url": "/_mozilla/mozilla/iframe/resize_after_load.html"
           }
         ],
+        "mozilla/scrolling_div_background_borders.html": [
+          {
+            "path": "mozilla/scrolling_div_background_borders.html",
+            "references": [
+              [
+                "/_mozilla/mozilla/scrolling_div_background_borders_ref.html",
+                "=="
+              ]
+            ],
+            "url": "/_mozilla/mozilla/scrolling_div_background_borders.html"
+          }
+        ],
+        "mozilla/simple_scroll_to_fragment.html": [
+          {
+            "path": "mozilla/simple_scroll_to_fragment.html",
+            "references": [
+              [
+                "/_mozilla/mozilla/simple_scroll_to_fragment_ref.html",
+                "=="
+              ]
+            ],
+            "url": "/_mozilla/mozilla/simple_scroll_to_fragment.html"
+          }
+        ],
         "mozilla/sslfail.html": [
           {
             "path": "mozilla/sslfail.html",
@@ -21430,6 +21454,30 @@
             ]
           ],
           "url": "/_mozilla/mozilla/iframe/resize_after_load.html"
+        }
+      ],
+      "mozilla/scrolling_div_background_borders.html": [
+        {
+          "path": "mozilla/scrolling_div_background_borders.html",
+          "references": [
+            [
+              "/_mozilla/mozilla/scrolling_div_background_borders_ref.html",
+              "=="
+            ]
+          ],
+          "url": "/_mozilla/mozilla/scrolling_div_background_borders.html"
+        }
+      ],
+      "mozilla/simple_scroll_to_fragment.html": [
+        {
+          "path": "mozilla/simple_scroll_to_fragment.html",
+          "references": [
+            [
+              "/_mozilla/mozilla/simple_scroll_to_fragment_ref.html",
+              "=="
+            ]
+          ],
+          "url": "/_mozilla/mozilla/simple_scroll_to_fragment.html"
         }
       ],
       "mozilla/sslfail.html": [

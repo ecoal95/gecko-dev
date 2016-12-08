@@ -72,7 +72,7 @@ use layout::parallel;
 use layout::query::{LayoutRPCImpl, LayoutThreadData, process_content_box_request, process_content_boxes_request};
 use layout::query::{process_margin_style_query, process_node_overflow_request, process_resolved_style_request};
 use layout::query::{process_node_geometry_request, process_node_scroll_area_request};
-use layout::query::process_offset_parent_query;
+use layout::query::{process_node_scroll_root_id_request, process_offset_parent_query};
 use layout::sequential;
 use layout::traversal::{ComputeAbsolutePositions, RecalcStyleAndConstructFlows};
 use layout::webrender_helpers::WebRenderDisplayListConverter;
@@ -174,6 +174,9 @@ pub struct LayoutThread {
 
     /// The workers that we use for parallel operation.
     parallel_traversal: Option<rayon::ThreadPool>,
+
+    /// Flag to indicate whether to use parallel operations
+    parallel_flag: bool,
 
     /// Starts at zero, and increased by one every time a layout completes.
     /// This can be used to easily check for invalid stale data.
@@ -389,13 +392,11 @@ impl LayoutThread {
         let device = Device::new(
             MediaType::Screen,
             opts::get().initial_window_size.to_f32() * ScaleFactor::new(1.0));
-        let parallel_traversal = if layout_threads != 1 {
-            let configuration =
-                rayon::Configuration::new().set_num_threads(layout_threads);
-            rayon::ThreadPool::new(configuration).ok()
-        } else {
-            None
-        };
+
+        let configuration =
+            rayon::Configuration::new().set_num_threads(layout_threads);
+        let parallel_traversal = rayon::ThreadPool::new(configuration).ok();
+        debug!("Possible layout Threads: {}", layout_threads);
 
         // Create the channel on which new animations can be sent.
         let (new_animations_sender, new_animations_receiver) = channel();
@@ -441,6 +442,7 @@ impl LayoutThread {
             font_cache_receiver: font_cache_receiver,
             font_cache_sender: ipc_font_cache_sender,
             parallel_traversal: parallel_traversal,
+            parallel_flag: true,
             generation: 0,
             new_animations_sender: new_animations_sender,
             new_animations_receiver: new_animations_receiver,
@@ -460,6 +462,7 @@ impl LayoutThread {
                     content_boxes_response: Vec::new(),
                     client_rect_response: Rect::zero(),
                     hit_test_response: (None, false),
+                    scroll_root_id_response: None,
                     scroll_area_response: Rect::zero(),
                     overflow_response: NodeOverflowResponse(None),
                     resolved_style_response: None,
@@ -978,6 +981,13 @@ impl LayoutThread {
                       (data.reflow_info.goal == ReflowGoal::ForScriptQuery &&
                        data.query_type != ReflowQueryType::NoQuery));
 
+        // Parallelize if there's more than 750 objects based on rzambre's suggestion
+        // https://github.com/servo/servo/issues/10110
+        self.parallel_flag = self.layout_threads > 1 && data.dom_count > 750;
+        debug!("layout: received layout request for: {}", self.url);
+        debug!("Number of objects in DOM: {}", data.dom_count);
+        debug!("layout: parallel? {}", self.parallel_flag);
+
         let mut rw_data = possibly_locked_rw_data.lock();
 
         let element: ServoLayoutElement = match document.root_node() {
@@ -1002,6 +1012,9 @@ impl LayoutThread {
                     },
                     ReflowQueryType::NodeOverflowQuery(_) => {
                         rw_data.overflow_response = NodeOverflowResponse(None);
+                    },
+                    ReflowQueryType::NodeScrollRootIdQuery(_) => {
+                        rw_data.scroll_root_id_response = None;
                     },
                     ReflowQueryType::ResolvedStyleQuery(_, _, _) => {
                         rw_data.resolved_style_response = None;
@@ -1136,18 +1149,16 @@ impl LayoutThread {
                     self.time_profiler_chan.clone(),
                     || {
                 // Perform CSS selector matching and flow construction.
-                match self.parallel_traversal {
-                    None => {
-                        sequential::traverse_dom::<ServoLayoutNode, RecalcStyleAndConstructFlows>(
-                            element.as_node(), &shared_layout_context);
-                    }
-                    Some(ref mut traversal) => {
-                        parallel::traverse_dom::<ServoLayoutNode, RecalcStyleAndConstructFlows>(
-                            element.as_node(), dom_depth, &shared_layout_context, traversal);
-                    }
+                if let (true, Some(traversal)) = (self.parallel_flag, self.parallel_traversal.as_mut()) {
+                    // Parallel mode
+                    parallel::traverse_dom::<ServoLayoutNode, RecalcStyleAndConstructFlows>(
+                        element.as_node(), dom_depth, &shared_layout_context, traversal);
+                } else {
+                    // Sequential mode
+                    sequential::traverse_dom::<ServoLayoutNode, RecalcStyleAndConstructFlows>(
+                        element.as_node(), &shared_layout_context);
                 }
             });
-
             // TODO(pcwalton): Measure energy usage of text shaping, perhaps?
             let text_shaping_time =
                 (font::get_and_reset_text_shaping_performance_counter() as u64) /
@@ -1231,6 +1242,10 @@ impl LayoutThread {
             ReflowQueryType::NodeOverflowQuery(node) => {
                 let node = unsafe { ServoLayoutNode::new(&node) };
                 rw_data.overflow_response = process_node_overflow_request(node);
+            },
+            ReflowQueryType::NodeScrollRootIdQuery(node) => {
+                let node = unsafe { ServoLayoutNode::new(&node) };
+                rw_data.scroll_root_id_response = Some(process_node_scroll_root_id_request(node));
             },
             ReflowQueryType::ResolvedStyleQuery(node, ref pseudo, ref property) => {
                 let node = unsafe { ServoLayoutNode::new(&node) };
@@ -1394,19 +1409,17 @@ impl LayoutThread {
                         self.time_profiler_chan.clone(),
                         || {
                     let profiler_metadata = self.profiler_metadata();
-                    match self.parallel_traversal {
-                        None => {
-                            // Sequential mode.
-                            LayoutThread::solve_constraints(FlowRef::deref_mut(&mut root_flow), &layout_context)
-                        }
-                        Some(ref mut parallel) => {
-                            // Parallel mode.
-                            LayoutThread::solve_constraints_parallel(parallel,
-                                                                     FlowRef::deref_mut(&mut root_flow),
-                                                                     profiler_metadata,
-                                                                     self.time_profiler_chan.clone(),
-                                                                     &*layout_context);
-                        }
+
+                    if let (true, Some(traversal)) = (self.parallel_flag, self.parallel_traversal.as_mut()) {
+                        // Parallel mode.
+                        LayoutThread::solve_constraints_parallel(traversal,
+                                                                 FlowRef::deref_mut(&mut root_flow),
+                                                                 profiler_metadata,
+                                                                 self.time_profiler_chan.clone(),
+                                                                 &*layout_context);
+                    } else {
+                        //Sequential mode
+                        LayoutThread::solve_constraints(FlowRef::deref_mut(&mut root_flow), &layout_context)
                     }
                 });
             }
@@ -1556,9 +1569,9 @@ fn reflow_query_type_needs_display_list(query_type: &ReflowQueryType) -> bool {
         ReflowQueryType::HitTestQuery(..) => true,
         ReflowQueryType::ContentBoxQuery(_) | ReflowQueryType::ContentBoxesQuery(_) |
         ReflowQueryType::NodeGeometryQuery(_) | ReflowQueryType::NodeScrollGeometryQuery(_) |
-        ReflowQueryType::NodeOverflowQuery(_) | ReflowQueryType::ResolvedStyleQuery(..) |
-        ReflowQueryType::OffsetParentQuery(_) | ReflowQueryType::MarginStyleQuery(_) |
-        ReflowQueryType::NoQuery => false,
+        ReflowQueryType::NodeOverflowQuery(_) | ReflowQueryType::NodeScrollRootIdQuery(_) |
+        ReflowQueryType::ResolvedStyleQuery(..) | ReflowQueryType::OffsetParentQuery(_) |
+        ReflowQueryType::MarginStyleQuery(_) | ReflowQueryType::NoQuery => false,
     }
 }
 

@@ -255,7 +255,9 @@ def set_gecko_property(ffi_name, expr):
             % for value in keyword.values_for('gecko'):
             structs::${keyword.gecko_constant(value)} => Keyword::${to_rust_ident(value)},
             % endfor
+            % if keyword.gecko_inexhaustive:
             x => panic!("Found unexpected value in style struct for ${ident} property: {:?}", x),
+            % endif
         }
     }
 </%def>
@@ -1026,9 +1028,31 @@ fn static_assert() {
     <% display_keyword = Keyword("display", "inline block inline-block table inline-table table-row-group " +
                                             "table-header-group table-footer-group table-row table-column-group " +
                                             "table-column table-cell table-caption list-item flex none " +
-                                            "-moz-box -moz-inline-box",
-                                            gecko_enum_prefix="StyleDisplay") %>
-    ${impl_keyword('display', 'mDisplay', display_keyword, True)}
+                                            "inline-flex grid inline-grid ruby ruby-base ruby-base-container " +
+                                            "ruby-text ruby-text-container contents -webkit-box -webkit-inline-box " +
+                                            "-moz-box -moz-inline-box -moz-grid -moz-inline-grid -moz-grid-group " +
+                                            "-moz-grid-line -moz-stack -moz-inline-stack -moz-deck -moz-popup " +
+                                            "-moz-groupbox",
+                                            gecko_enum_prefix="StyleDisplay",
+                                            gecko_strip_moz_prefix=False) %>
+
+    pub fn set_display(&mut self, v: longhands::display::computed_value::T) {
+        use properties::longhands::display::computed_value::T as Keyword;
+        // FIXME(bholley): Align binary representations and ditch |match| for cast + static_asserts
+        let result = match v {
+            % for value in display_keyword.values_for('gecko'):
+                Keyword::${to_rust_ident(value)} =>
+                    structs::${display_keyword.gecko_constant(value)},
+            % endfor
+        };
+        self.gecko.mDisplay = result;
+        self.gecko.mOriginalDisplay = result;
+    }
+    pub fn copy_display_from(&mut self, other: &Self) {
+        self.gecko.mDisplay = other.gecko.mDisplay;
+        self.gecko.mOriginalDisplay = other.gecko.mOriginalDisplay;
+    }
+    <%call expr="impl_keyword_clone('display', 'mDisplay', display_keyword)"></%call>
 
     // overflow-y is implemented as a newtype of overflow-x, so we need special handling.
     // We could generalize this if we run into other newtype keywords.

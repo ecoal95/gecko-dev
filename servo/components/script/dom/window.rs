@@ -6,7 +6,6 @@ use app_units::Au;
 use bluetooth_traits::BluetoothRequest;
 use cssparser::Parser;
 use devtools_traits::{ScriptToDevtoolsControlMsg, TimelineMarker, TimelineMarkerType};
-use dom::bindings::callback::ExceptionHandling;
 use dom::bindings::cell::DOMRefCell;
 use dom::bindings::codegen::Bindings::DocumentBinding::{DocumentMethods, DocumentReadyState};
 use dom::bindings::codegen::Bindings::EventHandlerBinding::EventHandlerNonNull;
@@ -30,7 +29,7 @@ use dom::bindings::utils::{GlobalStaticData, WindowProxyHandler};
 use dom::browsingcontext::BrowsingContext;
 use dom::crypto::Crypto;
 use dom::cssstyledeclaration::{CSSModificationAccess, CSSStyleDeclaration};
-use dom::document::Document;
+use dom::document::{AnimationFrameCallback, Document};
 use dom::element::Element;
 use dom::event::Event;
 use dom::globalscope::GlobalScope;
@@ -48,6 +47,7 @@ use dom::storage::Storage;
 use dom::testrunner::TestRunner;
 use euclid::{Point2D, Rect, Size2D};
 use fetch;
+use gfx_traits::ScrollRootId;
 use ipc_channel::ipc::{self, IpcSender};
 use js::jsapi::{HandleObject, HandleValue, JSAutoCompartment, JSContext};
 use js::jsapi::{JS_GC, JS_GetRuntime, SetWindowProxy};
@@ -67,7 +67,8 @@ use script_layout_interface::TrustedNodeAddress;
 use script_layout_interface::message::{Msg, Reflow, ReflowQueryType, ScriptReflow};
 use script_layout_interface::reporter::CSSErrorReporter;
 use script_layout_interface::rpc::{ContentBoxResponse, ContentBoxesResponse, LayoutRPC};
-use script_layout_interface::rpc::{MarginStyleResponse, ResolvedStyleResponse};
+use script_layout_interface::rpc::{MarginStyleResponse, NodeScrollRootIdResponse};
+use script_layout_interface::rpc::ResolvedStyleResponse;
 use script_runtime::{CommonScriptMsg, ScriptChan, ScriptPort, ScriptThreadEventCategory};
 use script_thread::{MainThreadScriptChan, MainThreadScriptMsg, Runnable, RunnableWrapper};
 use script_thread::SendableMainThreadScriptChan;
@@ -197,7 +198,7 @@ pub struct Window {
 
     /// A handle to perform RPC calls into the layout, quickly.
     #[ignore_heap_size_of = "trait objects are hard"]
-    layout_rpc: Box<LayoutRPC + 'static>,
+    layout_rpc: Box<LayoutRPC + Send + 'static>,
 
     /// The current size of the window, in pixels.
     window_size: Cell<Option<WindowSizeData>>,
@@ -599,15 +600,8 @@ impl WindowMethods for Window {
 
     /// https://html.spec.whatwg.org/multipage/#dom-window-requestanimationframe
     fn RequestAnimationFrame(&self, callback: Rc<FrameRequestCallback>) -> u32 {
-        let doc = self.Document();
-
-        let callback = move |now: f64| {
-            // TODO: @jdm The spec says that any exceptions should be suppressed;
-            // https://github.com/servo/servo/issues/6928
-            let _ = callback.Call__(Finite::wrap(now), ExceptionHandling::Report);
-        };
-
-        doc.request_animation_frame(Box::new(callback))
+        self.Document()
+            .request_animation_frame(AnimationFrameCallback::FrameRequestCallback { callback })
     }
 
     /// https://html.spec.whatwg.org/multipage/#dom-window-cancelanimationframe
@@ -967,13 +961,20 @@ impl Window {
         //TODO Step 11
         //let document = self.Document();
         // Step 12
-        self.perform_a_scroll(x.to_f32().unwrap_or(0.0f32), y.to_f32().unwrap_or(0.0f32),
-                              behavior, None);
+        self.perform_a_scroll(x.to_f32().unwrap_or(0.0f32),
+                              y.to_f32().unwrap_or(0.0f32),
+                              ScrollRootId::root(),
+                              behavior,
+                              None);
     }
 
     /// https://drafts.csswg.org/cssom-view/#perform-a-scroll
-    pub fn perform_a_scroll(&self, x: f32, y: f32,
-                            behavior: ScrollBehavior, element: Option<&Element>) {
+    pub fn perform_a_scroll(&self,
+                            x: f32,
+                            y: f32,
+                            scroll_root_id: ScrollRootId,
+                            behavior: ScrollBehavior,
+                            element: Option<&Element>) {
         //TODO Step 1
         let point = Point2D::new(x, y);
         let smooth = match behavior {
@@ -992,7 +993,7 @@ impl Window {
 
         let global_scope = self.upcast::<GlobalScope>();
         let message = ConstellationMsg::ScrollFragmentPoint(
-            global_scope.pipeline_id(), point, smooth);
+            global_scope.pipeline_id(), scroll_root_id, point, smooth);
         global_scope.constellation_chan().send(message).unwrap();
     }
 
@@ -1083,6 +1084,7 @@ impl Window {
             window_size: window_size,
             script_join_chan: join_chan,
             query_type: query_type,
+            dom_count: self.Document().dom_count(),
         };
 
         self.layout_chan.send(Msg::Reflow(reflow)).unwrap();
@@ -1272,11 +1274,24 @@ impl Window {
     }
 
     // https://drafts.csswg.org/cssom-view/#dom-element-scroll
-    pub fn scroll_node(&self, _node: TrustedNodeAddress,
-                       x_: f64, y_: f64, behavior: ScrollBehavior) {
+    pub fn scroll_node(&self,
+                       node: TrustedNodeAddress,
+                       x_: f64,
+                       y_: f64,
+                       behavior: ScrollBehavior) {
+        if !self.reflow(ReflowGoal::ForScriptQuery,
+                        ReflowQueryType::NodeScrollRootIdQuery(node),
+                        ReflowReason::Query) {
+            return;
+        }
+        let NodeScrollRootIdResponse(scroll_root_id) = self.layout_rpc.node_scroll_root_id();
+
         // Step 12
-        self.perform_a_scroll(x_.to_f32().unwrap_or(0.0f32), y_.to_f32().unwrap_or(0.0f32),
-                              behavior, None);
+        self.perform_a_scroll(x_.to_f32().unwrap_or(0.0f32),
+                              y_.to_f32().unwrap_or(0.0f32),
+                              scroll_root_id,
+                              behavior,
+                              None);
     }
 
     pub fn resolved_style_query(&self,
@@ -1546,7 +1561,7 @@ impl Window {
                parent_info: Option<(PipelineId, FrameType)>,
                window_size: Option<WindowSizeData>)
                -> Root<Window> {
-        let layout_rpc: Box<LayoutRPC> = {
+        let layout_rpc: Box<LayoutRPC + Send> = {
             let (rpc_send, rpc_recv) = channel();
             layout_chan.send(Msg::GetRPC(rpc_send)).unwrap();
             rpc_recv.recv().unwrap()
@@ -1648,6 +1663,7 @@ fn debug_reflow_events(id: PipelineId, goal: &ReflowGoal, query_type: &ReflowQue
         ReflowQueryType::NodeGeometryQuery(_n) => "\tNodeGeometryQuery",
         ReflowQueryType::NodeOverflowQuery(_n) => "\tNodeOverFlowQuery",
         ReflowQueryType::NodeScrollGeometryQuery(_n) => "\tNodeScrollGeometryQuery",
+        ReflowQueryType::NodeScrollRootIdQuery(_n) => "\tNodeScrollRootIdQuery",
         ReflowQueryType::ResolvedStyleQuery(_, _, _) => "\tResolvedStyleQuery",
         ReflowQueryType::OffsetParentQuery(_n) => "\tOffsetParentQuery",
         ReflowQueryType::MarginStyleQuery(_n) => "\tMarginStyleQuery",

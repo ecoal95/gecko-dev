@@ -20,10 +20,10 @@ use gecko_bindings::bindings::{Gecko_GetServoDeclarationBlock, Gecko_IsHTMLEleme
 use gecko_bindings::bindings::{Gecko_IsLink, Gecko_IsRootElement};
 use gecko_bindings::bindings::{Gecko_IsUnvisitedLink, Gecko_IsVisitedLink, Gecko_Namespace};
 use gecko_bindings::bindings::{Gecko_SetNodeFlags, Gecko_UnsetNodeFlags};
-use gecko_bindings::bindings::{RawGeckoElement, RawGeckoNode};
 use gecko_bindings::bindings::Gecko_ClassOrClassList;
 use gecko_bindings::bindings::Gecko_GetStyleContext;
 use gecko_bindings::structs;
+use gecko_bindings::structs::{RawGeckoElement, RawGeckoNode};
 use gecko_bindings::structs::{nsIAtom, nsIContent, nsStyleContext};
 use gecko_bindings::structs::NODE_HAS_DIRTY_DESCENDANTS_FOR_SERVO;
 use gecko_bindings::structs::NODE_IS_IN_NATIVE_ANONYMOUS_SUBTREE;
@@ -370,6 +370,15 @@ impl<'le> TElement for GeckoElement<'le> {
 
     fn get_data(&self) -> Option<&AtomicRefCell<ElementData>> {
         unsafe { self.0.mServoData.get().as_ref() }
+    }
+
+    fn skip_root_and_item_based_display_fixup(&self) -> bool {
+        // We don't want to fix up display values of native anonymous content.
+        // Additionally, we want to skip root-based display fixup for document
+        // level native anonymous content subtree roots, since they're not
+        // really roots from the style fixup perspective.  Checking that we
+        // are NAC handles both cases.
+        self.flags() & (NODE_IS_IN_NATIVE_ANONYMOUS_SUBTREE as u32) != 0
     }
 }
 

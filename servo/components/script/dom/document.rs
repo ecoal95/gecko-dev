@@ -3,9 +3,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use core::nonzero::NonZero;
+use devtools_traits::ScriptToDevtoolsControlMsg;
 use document_loader::{DocumentLoader, LoadType};
 use dom::activation::{ActivationSource, synthetic_click_activation};
 use dom::attr::Attr;
+use dom::bindings::callback::ExceptionHandling;
 use dom::bindings::cell::DOMRefCell;
 use dom::bindings::codegen::Bindings::DOMRectBinding::DOMRectMethods;
 use dom::bindings::codegen::Bindings::DocumentBinding;
@@ -18,7 +20,7 @@ use dom::bindings::codegen::Bindings::NodeBinding::NodeMethods;
 use dom::bindings::codegen::Bindings::NodeFilterBinding::NodeFilter;
 use dom::bindings::codegen::Bindings::PerformanceBinding::PerformanceMethods;
 use dom::bindings::codegen::Bindings::TouchBinding::TouchMethods;
-use dom::bindings::codegen::Bindings::WindowBinding::{ScrollBehavior, WindowMethods};
+use dom::bindings::codegen::Bindings::WindowBinding::{FrameRequestCallback, ScrollBehavior, WindowMethods};
 use dom::bindings::codegen::UnionTypes::NodeOrString;
 use dom::bindings::error::{Error, ErrorResult, Fallible};
 use dom::bindings::inheritance::{Castable, ElementTypeId, HTMLElementTypeId, NodeTypeId};
@@ -87,6 +89,7 @@ use dom::window::{ReflowReason, Window};
 use encoding::EncodingRef;
 use encoding::all::UTF_8;
 use euclid::point::Point2D;
+use gfx_traits::ScrollRootId;
 use html5ever::tree_builder::{LimitedQuirks, NoQuirks, Quirks, QuirksMode};
 use html5ever_atoms::{LocalName, QualName};
 use ipc_channel::ipc::{self, IpcSender};
@@ -111,7 +114,6 @@ use servo_atoms::Atom;
 use servo_url::ServoUrl;
 use std::ascii::AsciiExt;
 use std::borrow::ToOwned;
-use std::boxed::FnBox;
 use std::cell::{Cell, Ref, RefMut};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
@@ -232,8 +234,7 @@ pub struct Document {
     animation_frame_ident: Cell<u32>,
     /// https://html.spec.whatwg.org/multipage/#list-of-animation-frame-callbacks
     /// List of animation frame callbacks
-    #[ignore_heap_size_of = "closures are hard"]
-    animation_frame_list: DOMRefCell<Vec<(u32, Option<Box<FnBox(f64)>>)>>,
+    animation_frame_list: DOMRefCell<Vec<(u32, Option<AnimationFrameCallback>)>>,
     /// Whether we're in the process of running animation callbacks.
     ///
     /// Tracking this is not necessary for correctness. Instead, it is an optimization to avoid
@@ -283,6 +284,12 @@ pub struct Document {
     last_click_info: DOMRefCell<Option<(Instant, Point2D<f32>)>>,
     /// https://html.spec.whatwg.org/multipage/#ignore-destructive-writes-counter
     ignore_destructive_writes_counter: Cell<u32>,
+    /// Track the total number of elements in this DOM's tree.
+    /// This is sent to the layout thread every time a reflow is done;
+    /// layout uses this to determine if the gains from parallel layout will be worth the overhead.
+    ///
+    /// See also: https://github.com/servo/servo/issues/10110
+    dom_count: Cell<u32>,
 }
 
 #[derive(JSTraceable, HeapSizeOf)]
@@ -454,6 +461,22 @@ impl Document {
         self.base_element.set(base.r());
     }
 
+    pub fn dom_count(&self) -> u32 {
+        self.dom_count.get()
+    }
+
+    /// This is called by `bind_to_tree` when a node is added to the DOM.
+    /// The internal count is used by layout to determine whether to be sequential or parallel.
+    /// (it's sequential for small DOMs)
+    pub fn increment_dom_count(&self) {
+        self.dom_count.set(self.dom_count.get() + 1);
+    }
+
+    /// This is called by `unbind_from_tree` when a node is removed from the DOM.
+    pub fn decrement_dom_count(&self) {
+        self.dom_count.set(self.dom_count.get() - 1);
+    }
+
     pub fn quirks_mode(&self) -> QuirksMode {
         self.quirks_mode.get()
     }
@@ -619,7 +642,10 @@ impl Document {
 
         if let Some((x, y)) = point {
             // Step 3
-            self.window.perform_a_scroll(x, y, ScrollBehavior::Instant,
+            self.window.perform_a_scroll(x,
+                                         y,
+                                         ScrollRootId::root(),
+                                         ScrollBehavior::Instant,
                                          target.r());
         }
     }
@@ -1457,7 +1483,7 @@ impl Document {
     }
 
     /// https://html.spec.whatwg.org/multipage/#dom-window-requestanimationframe
-    pub fn request_animation_frame(&self, callback: Box<FnBox(f64)>) -> u32 {
+    pub fn request_animation_frame(&self, callback: AnimationFrameCallback) -> u32 {
         let ident = self.animation_frame_ident.get() + 1;
 
         self.animation_frame_ident.set(ident);
@@ -1498,7 +1524,7 @@ impl Document {
 
         for (_, callback) in animation_frame_list.drain(..) {
             if let Some(callback) = callback {
-                callback(*timing);
+                callback.call(self, *timing);
             }
         }
 
@@ -1880,6 +1906,7 @@ impl Document {
             target_element: MutNullableHeap::new(None),
             last_click_info: DOMRefCell::new(None),
             ignore_destructive_writes_counter: Default::default(),
+            dom_count: Cell::new(1),
         }
     }
 
@@ -3177,4 +3204,30 @@ pub enum FocusType {
 pub enum FocusEventType {
     Focus,      // Element gained focus. Doesn't bubble.
     Blur,       // Element lost focus. Doesn't bubble.
+}
+
+#[derive(HeapSizeOf, JSTraceable)]
+pub enum AnimationFrameCallback {
+    DevtoolsFramerateTick { actor_name: String },
+    FrameRequestCallback {
+        #[ignore_heap_size_of = "Rc is hard"]
+        callback: Rc<FrameRequestCallback>
+    },
+}
+
+impl AnimationFrameCallback {
+    fn call(&self, document: &Document, now: f64) {
+        match *self {
+            AnimationFrameCallback::DevtoolsFramerateTick { ref actor_name } => {
+                let msg = ScriptToDevtoolsControlMsg::FramerateTick(actor_name.clone(), now);
+                let devtools_sender = document.window().upcast::<GlobalScope>().devtools_chan().unwrap();
+                devtools_sender.send(msg).unwrap();
+            }
+            AnimationFrameCallback::FrameRequestCallback { ref callback } => {
+                // TODO(jdm): The spec says that any exceptions should be suppressed:
+                // https://github.com/servo/servo/issues/6928
+                let _ = callback.Call__(Finite::wrap(now), ExceptionHandling::Report);
+            }
+        }
+    }
 }
