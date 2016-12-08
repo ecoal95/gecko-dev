@@ -228,10 +228,10 @@ class MOZ_RAII CacheRegisterAllocator
     // Returns the register for the given operand. If the operand is currently
     // not in a register, it will load it into one.
     ValueOperand useValueRegister(MacroAssembler& masm, ValOperandId val);
-    Register useRegister(MacroAssembler& masm, ObjOperandId obj);
+    Register useRegister(MacroAssembler& masm, TypedOperandId typedId);
 
     // Allocates an output register for the given operand.
-    Register defineRegister(MacroAssembler& masm, ObjOperandId obj);
+    Register defineRegister(MacroAssembler& masm, TypedOperandId typedId);
     ValueOperand defineValueRegister(MacroAssembler& masm, ValOperandId val);
 };
 
@@ -681,9 +681,9 @@ CacheRegisterAllocator::useValueRegister(MacroAssembler& masm, ValOperandId op)
 }
 
 Register
-CacheRegisterAllocator::useRegister(MacroAssembler& masm, ObjOperandId op)
+CacheRegisterAllocator::useRegister(MacroAssembler& masm, TypedOperandId typedId)
 {
-    OperandLocation& loc = operandLocations_[op.id()];
+    OperandLocation& loc = operandLocations_[typedId.id()];
     switch (loc.kind()) {
       case OperandLocation::PayloadReg:
         currentOpRegs_.add(loc.payloadReg());
@@ -697,7 +697,7 @@ CacheRegisterAllocator::useRegister(MacroAssembler& masm, ObjOperandId op)
         Register reg = val.scratchReg();
         availableRegs_.take(reg);
         masm.unboxObject(val, reg);
-        loc.setPayloadReg(reg, JSVAL_TYPE_OBJECT);
+        loc.setPayloadReg(reg, typedId.type());
         currentOpRegs_.add(reg);
         return reg;
       }
@@ -732,7 +732,7 @@ CacheRegisterAllocator::useRegister(MacroAssembler& masm, ObjOperandId op)
             masm.unboxObject(Address(masm.getStackPointer(), stackPushed_ - loc.valueStack()),
                              reg);
         }
-        loc.setPayloadReg(reg, JSVAL_TYPE_OBJECT);
+        loc.setPayloadReg(reg, typedId.type());
         return reg;
       }
 
@@ -744,13 +744,13 @@ CacheRegisterAllocator::useRegister(MacroAssembler& masm, ObjOperandId op)
 }
 
 Register
-CacheRegisterAllocator::defineRegister(MacroAssembler& masm, ObjOperandId op)
+CacheRegisterAllocator::defineRegister(MacroAssembler& masm, TypedOperandId typedId)
 {
-    OperandLocation& loc = operandLocations_[op.id()];
+    OperandLocation& loc = operandLocations_[typedId.id()];
     MOZ_ASSERT(loc.kind() == OperandLocation::Uninitialized);
 
     Register reg = allocateRegister(masm);
-    loc.setPayloadReg(reg, JSVAL_TYPE_OBJECT);
+    loc.setPayloadReg(reg, typedId.type());
     return reg;
 }
 
@@ -923,6 +923,28 @@ BaselineCacheIRCompiler::emitGuardIsObject()
 }
 
 bool
+BaselineCacheIRCompiler::emitGuardIsString()
+{
+    ValueOperand input = allocator.useValueRegister(masm, reader.valOperandId());
+    FailurePath* failure;
+    if (!addFailurePath(&failure))
+        return false;
+    masm.branchTestString(Assembler::NotEqual, input, failure->label());
+    return true;
+}
+
+bool
+BaselineCacheIRCompiler::emitGuardIsSymbol()
+{
+    ValueOperand input = allocator.useValueRegister(masm, reader.valOperandId());
+    FailurePath* failure;
+    if (!addFailurePath(&failure))
+        return false;
+    masm.branchTestSymbol(Assembler::NotEqual, input, failure->label());
+    return true;
+}
+
+bool
 BaselineCacheIRCompiler::emitGuardType()
 {
     ValueOperand input = allocator.useValueRegister(masm, reader.valOperandId());
@@ -1077,6 +1099,81 @@ BaselineCacheIRCompiler::emitGuardSpecificObject()
 
     Address addr(stubAddress(reader.stubOffset()));
     masm.branchPtr(Assembler::NotEqual, addr, obj, failure->label());
+    return true;
+}
+
+bool
+BaselineCacheIRCompiler::emitGuardSpecificAtom()
+{
+    Register str = allocator.useRegister(masm, reader.stringOperandId());
+    AutoScratchRegister scratch(allocator, masm);
+
+    FailurePath* failure;
+    if (!addFailurePath(&failure))
+        return false;
+
+    Address atomAddr(stubAddress(reader.stubOffset()));
+
+    Label done;
+    masm.branchPtr(Assembler::Equal, atomAddr, str, &done);
+
+    // The pointers are not equal, so if the input string is also an atom it
+    // must be a different string.
+    masm.branchTest32(Assembler::NonZero, Address(str, JSString::offsetOfFlags()),
+                      Imm32(JSString::ATOM_BIT), failure->label());
+
+    // Check the length.
+    masm.loadPtr(atomAddr, scratch);
+    masm.loadStringLength(scratch, scratch);
+    masm.branch32(Assembler::NotEqual, Address(str, JSString::offsetOfLength()),
+                  scratch, failure->label());
+
+    // We have a non-atomized string with the same length. Call a helper
+    // function to do the comparison.
+    LiveRegisterSet volatileRegs(RegisterSet::Volatile());
+    masm.PushRegsInMask(volatileRegs);
+
+    masm.setupUnalignedABICall(scratch);
+    masm.loadPtr(atomAddr, scratch);
+    masm.passABIArg(scratch);
+    masm.passABIArg(str);
+    masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, EqualStringsHelper));
+    masm.mov(ReturnReg, scratch);
+
+    LiveRegisterSet ignore;
+    ignore.add(scratch);
+    masm.PopRegsInMaskIgnore(volatileRegs, ignore);
+    masm.branchIfFalseBool(scratch, failure->label());
+
+    masm.bind(&done);
+    return true;
+}
+
+bool
+BaselineCacheIRCompiler::emitGuardSpecificSymbol()
+{
+    Register sym = allocator.useRegister(masm, reader.symbolOperandId());
+
+    FailurePath* failure;
+    if (!addFailurePath(&failure))
+        return false;
+
+    Address addr(stubAddress(reader.stubOffset()));
+    masm.branchPtr(Assembler::NotEqual, addr, sym, failure->label());
+    return true;
+}
+
+bool
+BaselineCacheIRCompiler::emitGuardMagicValue()
+{
+    ValueOperand val = allocator.useValueRegister(masm, reader.valOperandId());
+    JSWhyMagic magic = reader.whyMagic();
+
+    FailurePath* failure;
+    if (!addFailurePath(&failure))
+        return false;
+
+    masm.branchTestMagicValue(Assembler::NotEqual, val, magic, failure->label());
     return true;
 }
 
@@ -1261,6 +1358,34 @@ BaselineCacheIRCompiler::emitCallProxyGetResult()
     return true;
 }
 
+typedef bool (*ProxyGetPropertyByValueFn)(JSContext*, HandleObject, HandleValue, MutableHandleValue);
+static const VMFunction ProxyGetPropertyByValueInfo =
+    FunctionInfo<ProxyGetPropertyByValueFn>(ProxyGetPropertyByValue, "ProxyGetPropertyByValue");
+
+bool
+BaselineCacheIRCompiler::emitCallProxyGetByValueResult()
+{
+    AutoStubFrame stubFrame(*this);
+
+    Register obj = allocator.useRegister(masm, reader.objOperandId());
+    ValueOperand idVal = allocator.useValueRegister(masm, reader.valOperandId());
+
+    AutoScratchRegister scratch(allocator, masm);
+
+    allocator.discardStack(masm);
+
+    stubFrame.enter(masm, scratch);
+
+    masm.Push(idVal);
+    masm.Push(obj);
+
+    if (!callVM(masm, ProxyGetPropertyByValueInfo))
+        return false;
+
+    stubFrame.leave(masm);
+    return true;
+}
+
 bool
 BaselineCacheIRCompiler::emitLoadUnboxedPropertyResult()
 {
@@ -1282,6 +1407,38 @@ BaselineCacheIRCompiler::emitGuardNoDetachedTypedObjects()
         return false;
 
     CheckForTypedObjectWithDetachedStorage(cx_, masm, failure->label());
+    return true;
+}
+
+bool
+BaselineCacheIRCompiler::emitGuardFrameHasNoArgumentsObject()
+{
+    FailurePath* failure;
+    if (!addFailurePath(&failure))
+        return false;
+
+    masm.branchTest32(Assembler::NonZero,
+                      Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfFlags()),
+                      Imm32(BaselineFrame::HAS_ARGS_OBJ),
+                      failure->label());
+    return true;
+}
+
+bool
+BaselineCacheIRCompiler::emitLoadFrameCalleeResult()
+{
+    Address callee(BaselineFrameReg, BaselineFrame::offsetOfCalleeToken());
+    masm.loadFunctionFromCalleeToken(callee, R0.scratchReg());
+    masm.tagValue(JSVAL_TYPE_OBJECT, R0.scratchReg(), R0);
+    return true;
+}
+
+bool
+BaselineCacheIRCompiler::emitLoadFrameNumActualArgsResult()
+{
+    Address actualArgs(BaselineFrameReg, BaselineFrame::offsetOfNumActualArgs());
+    masm.loadPtr(actualArgs, R0.scratchReg());
+    masm.tagValue(JSVAL_TYPE_INT32, R0.scratchReg(), R0);
     return true;
 }
 
@@ -1401,6 +1558,17 @@ BaselineCacheIRCompiler::emitLoadArgumentsObjectLengthResult()
 }
 
 bool
+BaselineCacheIRCompiler::emitLoadStringLengthResult()
+{
+    Register str = allocator.useRegister(masm, reader.stringOperandId());
+    AutoScratchRegister scratch(allocator, masm);
+
+    masm.loadStringLength(str, R0.scratchReg());
+    masm.tagValue(JSVAL_TYPE_INT32, R0.scratchReg(), R0);
+    return true;
+}
+
+bool
 BaselineCacheIRCompiler::emitTypeMonitorResult()
 {
     allocator.discardStack(masm);
@@ -1509,8 +1677,11 @@ BaselineCacheIRCompiler::init(CacheKind kind)
     if (!allocator.init(ICStubCompiler::availableGeneralRegs(numInputs)))
         return false;
 
-    MOZ_ASSERT(numInputs == 1);
-    allocator.initInputLocation(0, R0);
+    if (numInputs >= 1) {
+        allocator.initInputLocation(0, R0);
+        if (numInputs >= 2)
+            allocator.initInputLocation(1, R1);
+    }
 
     return true;
 }
@@ -1562,6 +1733,12 @@ CacheIRWriter::copyStubData(uint8_t* dest) const
             break;
           case StubField::Type::ObjectGroup:
             InitGCPtr<ObjectGroup*>(destWords, stubFields_[i].asWord());
+            break;
+          case StubField::Type::Symbol:
+            InitGCPtr<JS::Symbol*>(destWords, stubFields_[i].asWord());
+            break;
+          case StubField::Type::String:
+            InitGCPtr<JSString*>(destWords, stubFields_[i].asWord());
             break;
           case StubField::Type::Id:
             InitGCPtr<jsid>(destWords, stubFields_[i].asWord());
@@ -1657,7 +1834,7 @@ jit::AttachBaselineCacheIRStub(JSContext* cx, const CacheIRWriter& writer,
     // unlimited number of stubs.
     MOZ_ASSERT(stub->numOptimizedStubs() < MaxOptimizedCacheIRStubs);
 
-    MOZ_ASSERT(kind == CacheKind::GetProp);
+    MOZ_ASSERT(kind == CacheKind::GetProp || kind == CacheKind::GetElem);
     uint32_t stubDataOffset = sizeof(ICCacheIR_Monitored);
 
     JitCompartment* jitCompartment = cx->compartment()->jitCompartment();
@@ -1737,6 +1914,14 @@ jit::TraceBaselineCacheIRStub(JSTracer* trc, ICStub* stub, const CacheIRStubInfo
             TraceNullableEdge(trc, &stubInfo->getStubField<JSObject*>(stub, offset),
                               "baseline-cacheir-object");
             break;
+          case StubField::Type::Symbol:
+            TraceNullableEdge(trc, &stubInfo->getStubField<JS::Symbol*>(stub, offset),
+                              "baseline-cacheir-symbol");
+            break;
+          case StubField::Type::String:
+            TraceNullableEdge(trc, &stubInfo->getStubField<JSString*>(stub, offset),
+                              "baseline-cacheir-string");
+            break;
           case StubField::Type::Id:
             TraceEdge(trc, &stubInfo->getStubField<jsid>(stub, offset), "baseline-cacheir-id");
             break;
@@ -1792,6 +1977,12 @@ CacheIRStubInfo::copyStubData(ICStub* src, ICStub* dest) const
             break;
           case StubField::Type::ObjectGroup:
             getStubField<ObjectGroup*>(dest, offset).init(getStubField<ObjectGroup*>(src, offset));
+            break;
+          case StubField::Type::Symbol:
+            getStubField<JS::Symbol*>(dest, offset).init(getStubField<JS::Symbol*>(src, offset));
+            break;
+          case StubField::Type::String:
+            getStubField<JSString*>(dest, offset).init(getStubField<JSString*>(src, offset));
             break;
           case StubField::Type::Id:
             getStubField<jsid>(dest, offset).init(getStubField<jsid>(src, offset));
