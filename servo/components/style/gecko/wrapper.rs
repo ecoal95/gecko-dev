@@ -260,10 +260,10 @@ impl<'le> GeckoElement<'le> {
     }
 
     pub fn get_pseudo_style(&self, pseudo: &PseudoElement) -> Option<Arc<ComputedValues>> {
-        // NB: Gecko sometimes resolves pseudos after an element has already been
-        // marked for restyle. We should consider fixing this, but for now just allow
-        // it with current_or_previous_styles.
-        self.borrow_data().and_then(|data| data.current_or_previous_styles().pseudos
+        // FIXME(bholley): Gecko sometimes resolves pseudos after an element has
+        // already been marked for restyle. We should consider fixing this, and
+        // then assert has_current_styles here.
+        self.borrow_data().and_then(|data| data.styles().pseudos
                                                .get(pseudo).map(|c| c.values.clone()))
     }
 
@@ -273,8 +273,7 @@ impl<'le> GeckoElement<'le> {
             Some(x) => x,
             None => {
                 debug!("Creating ElementData for {:?}", self);
-                let existing = self.get_styles_from_frame();
-                let ptr = Box::into_raw(Box::new(AtomicRefCell::new(ElementData::new(existing))));
+                let ptr = Box::into_raw(Box::new(AtomicRefCell::new(ElementData::new(None))));
                 self.0.mServoData.set(ptr);
                 unsafe { &* ptr }
             },
@@ -481,6 +480,7 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
             NonTSPseudoClass::Disabled |
             NonTSPseudoClass::Checked |
             NonTSPseudoClass::ReadWrite |
+            NonTSPseudoClass::Fullscreen |
             NonTSPseudoClass::Indeterminate => {
                 self.get_state().contains(pseudo_class.state_flag())
             },

@@ -40,7 +40,6 @@ use resource_thread::AuthCache;
 use servo_url::ServoUrl;
 use std::collections::HashSet;
 use std::error::Error;
-use std::fmt;
 use std::io::{self, Read, Write};
 use std::iter::FromIterator;
 use std::mem::swap;
@@ -129,7 +128,7 @@ struct NetworkHttpRequestFactory {
 
 impl NetworkHttpRequestFactory {
     fn create(&self, url: ServoUrl, method: Method, headers: Headers)
-              -> Result<HyperRequest<Fresh>, LoadError> {
+              -> Result<HyperRequest<Fresh>, NetworkError> {
         let connection = HyperRequest::with_connector(method,
                                                       url.clone().into_url().unwrap(),
                                                       &*self.connector);
@@ -152,55 +151,18 @@ impl NetworkHttpRequestFactory {
                     }
 
                     let error_report = error_report.join("<br>\n");
-                    return Err(LoadError::new(url, LoadErrorType::Ssl { reason: error_report }));
+                    return Err(NetworkError::SslValidation(url, error_report));
                 }
             }
         }
 
         let mut request = match connection {
             Ok(req) => req,
-            Err(e) => return Err(
-                LoadError::new(url, LoadErrorType::Connection { reason: e.description().to_owned() })),
+            Err(e) => return Err(NetworkError::Internal(e.description().to_owned())),
         };
         *request.headers_mut() = headers;
 
         Ok(request)
-    }
-}
-
-#[derive(Debug)]
-struct LoadError {
-    pub url: ServoUrl,
-    pub error: LoadErrorType,
-}
-
-impl LoadError {
-    pub fn new(url: ServoUrl, error: LoadErrorType) -> LoadError {
-        LoadError {
-            url: url,
-            error: error,
-        }
-    }
-}
-
-#[derive(Eq, PartialEq, Debug)]
-enum LoadErrorType {
-    Connection { reason: String },
-    Ssl { reason: String },
-}
-
-impl fmt::Display for LoadErrorType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.description())
-    }
-}
-
-impl Error for LoadErrorType {
-    fn description(&self) -> &str {
-        match *self {
-            LoadErrorType::Connection { ref reason } => reason,
-            LoadErrorType::Ssl { ref reason } => reason,
-        }
     }
 }
 
@@ -276,27 +238,28 @@ fn strip_url(mut referrer_url: ServoUrl, origin_only: bool) -> Option<ServoUrl> 
 }
 
 /// https://w3c.github.io/webappsec-referrer-policy/#determine-requests-referrer
+/// Steps 4-6.
 pub fn determine_request_referrer(headers: &mut Headers,
-                                  referrer_policy: Option<ReferrerPolicy>,
-                                  referrer_url: Option<ServoUrl>,
-                                  url: ServoUrl) -> Option<ServoUrl> {
-    //TODO - algorithm step 2 not addressed
+                                  referrer_policy: ReferrerPolicy,
+                                  referrer_source: ServoUrl,
+                                  current_url: ServoUrl)
+                                  -> Option<ServoUrl> {
     assert!(!headers.has::<Referer>());
-    if let Some(ref_url) = referrer_url {
-        let cross_origin = ref_url.origin() != url.origin();
-        return match referrer_policy {
-            Some(ReferrerPolicy::NoReferrer) => None,
-            Some(ReferrerPolicy::Origin) => strip_url(ref_url, true),
-            Some(ReferrerPolicy::SameOrigin) => if cross_origin { None } else { strip_url(ref_url, false) },
-            Some(ReferrerPolicy::UnsafeUrl) => strip_url(ref_url, false),
-            Some(ReferrerPolicy::OriginWhenCrossOrigin) => strip_url(ref_url, cross_origin),
-            Some(ReferrerPolicy::StrictOrigin) => strict_origin(ref_url, url),
-            Some(ReferrerPolicy::StrictOriginWhenCrossOrigin) => strict_origin_when_cross_origin(ref_url, url),
-            Some(ReferrerPolicy::NoReferrerWhenDowngrade) | None =>
-                no_referrer_when_downgrade_header(ref_url, url),
-        };
+    // FIXME(#14505): this does not seem to be the correct way of checking for
+    //                same-origin requests.
+    let cross_origin = referrer_source.origin() != current_url.origin();
+    // FIXME(#14506): some of these cases are expected to consider whether the
+    //                request's client is "TLS-protected", whatever that means.
+    match referrer_policy {
+        ReferrerPolicy::NoReferrer => None,
+        ReferrerPolicy::Origin => strip_url(referrer_source, true),
+        ReferrerPolicy::SameOrigin => if cross_origin { None } else { strip_url(referrer_source, false) },
+        ReferrerPolicy::UnsafeUrl => strip_url(referrer_source, false),
+        ReferrerPolicy::OriginWhenCrossOrigin => strip_url(referrer_source, cross_origin),
+        ReferrerPolicy::StrictOrigin => strict_origin(referrer_source, current_url),
+        ReferrerPolicy::StrictOriginWhenCrossOrigin => strict_origin_when_cross_origin(referrer_source, current_url),
+        ReferrerPolicy::NoReferrerWhenDowngrade => no_referrer_when_downgrade_header(referrer_source, current_url),
     }
-    return None;
 }
 
 pub fn set_request_cookies(url: &ServoUrl, headers: &mut Headers, cookie_jar: &Arc<RwLock<CookieStorage>>) {
@@ -444,7 +407,7 @@ fn obtain_response(request_factory: &NetworkHttpRequestFactory,
                    iters: u32,
                    request_id: Option<&str>,
                    is_xhr: bool)
-                   -> Result<(WrappedHttpResponse, Option<ChromeToDevtoolsControlMsg>), LoadError> {
+                   -> Result<(WrappedHttpResponse, Option<ChromeToDevtoolsControlMsg>), NetworkError> {
     let null_data = None;
     let connection_url = replace_hosts(&url);
 
@@ -495,14 +458,12 @@ fn obtain_response(request_factory: &NetworkHttpRequestFactory,
 
         let mut request_writer = match request.start() {
             Ok(streaming) => streaming,
-            Err(e) => return Err(LoadError::new(connection_url,
-                                                LoadErrorType::Connection { reason: e.description().to_owned() })),
+            Err(e) => return Err(NetworkError::Internal(e.description().to_owned())),
         };
 
         if let Some(ref data) = *request_body {
             if let Err(e) = request_writer.write_all(&data) {
-                return Err(LoadError::new(connection_url,
-                                          LoadErrorType::Connection { reason: e.description().to_owned() }))
+                return Err(NetworkError::Internal(e.description().to_owned()))
             }
         }
 
@@ -512,8 +473,7 @@ fn obtain_response(request_factory: &NetworkHttpRequestFactory,
                 debug!("connection aborted ({:?}), possibly stale, trying new connection", io_error.description());
                 continue;
             },
-            Err(e) => return Err(LoadError::new(connection_url,
-                                                LoadErrorType::Connection { reason: e.description().to_owned() })),
+            Err(e) => return Err(NetworkError::Internal(e.description().to_owned())),
         };
 
         let send_end = precise_time_ms();
@@ -1089,13 +1049,7 @@ fn http_network_fetch(request: Rc<Request>,
     let pipeline_id = request.pipeline_id.get();
     let (res, msg) = match wrapped_response {
         Ok(wrapped_response) => wrapped_response,
-        Err(error) => {
-            let error = match error.error {
-                LoadErrorType::Ssl { reason } => NetworkError::SslValidation(error.url, reason),
-                e => NetworkError::Internal(e.description().to_owned())
-            };
-            return Response::network_error(error);
-        }
+        Err(error) => return Response::network_error(error),
     };
 
     let mut response = Response::new(url.clone());
@@ -1248,11 +1202,9 @@ fn cors_preflight_fetch(request: Rc<Request>,
 
     // Step 3, 4
     let mut value = request.headers.borrow().iter()
-                                            .filter_map(|ref view| if is_simple_header(view) {
-                                                None
-                                            } else {
-                                                Some(UniCase(view.name().to_owned()))
-                                            }).collect::<Vec<UniCase<String>>>();
+                                            .filter(|view| !is_simple_header(view))
+                                            .map(|view| UniCase(view.name().to_owned()))
+                                            .collect::<Vec<UniCase<String>>>();
     value.sort();
 
     // Step 5

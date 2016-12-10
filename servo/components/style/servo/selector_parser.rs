@@ -13,6 +13,7 @@ use selectors::{Element, MatchAttrGeneric};
 use selectors::parser::AttrSelector;
 use std::borrow::Cow;
 use std::fmt;
+use std::fmt::Debug;
 
 /// NB: If you add to this list, be sure to update `each_pseudo_element` too.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -90,6 +91,7 @@ pub enum NonTSPseudoClass {
     Visited,
     Active,
     Focus,
+    Fullscreen,
     Hover,
     Enabled,
     Disabled,
@@ -111,6 +113,7 @@ impl ToCss for NonTSPseudoClass {
             Visited => ":visited",
             Active => ":active",
             Focus => ":focus",
+            Fullscreen => ":fullscreen",
             Hover => ":hover",
             Enabled => ":enabled",
             Disabled => ":disabled",
@@ -132,6 +135,7 @@ impl NonTSPseudoClass {
         match *self {
             Active => IN_ACTIVE_STATE,
             Focus => IN_FOCUS_STATE,
+            Fullscreen => IN_FULLSCREEN_STATE,
             Hover => IN_HOVER_STATE,
             Enabled => IN_ENABLED_STATE,
             Disabled => IN_DISABLED_STATE,
@@ -187,6 +191,7 @@ impl<'a> ::selectors::Parser for SelectorParser<'a> {
             "visited" => Visited,
             "active" => Active,
             "focus" => Focus,
+            "fullscreen" => Fullscreen,
             "hover" => Hover,
             "enabled" => Enabled,
             "disabled" => Disabled,
@@ -394,7 +399,7 @@ impl MatchAttrGeneric for ServoElementSnapshot {
     }
 }
 
-impl<E: Element<Impl=SelectorImpl>> ElementExt for E {
+impl<E: Element<Impl=SelectorImpl> + Debug> ElementExt for E {
     fn is_link(&self) -> bool {
         self.match_non_ts_pseudo_class(NonTSPseudoClass::AnyLink)
     }
