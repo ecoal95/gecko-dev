@@ -319,7 +319,7 @@ mod bindings {
             "ServoAttrSnapshot",
             "ServoElementSnapshot",
             "SheetParsingMode",
-            "mozilla::Side",
+            "Side",
             "StaticRefPtr",
             "StyleAnimation",
             "StyleBasicShape",
