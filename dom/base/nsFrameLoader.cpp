@@ -515,17 +515,70 @@ public:
   void
   ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue) override
   {
+    if (NS_WARN_IF(!mThis->mOwnerContent)) {
+      mPromise->MaybeRejectWithUndefined();
+      return;
+    }
+
     // Navigate the loader to the new index
     nsCOMPtr<nsIFrameLoader> otherLoader;
     nsresult rv = mThis->mGroupedSessionHistory->
                     GotoIndex(mGlobalIndex, getter_AddRefs(otherLoader));
-    if (NS_WARN_IF(!otherLoader || NS_FAILED(rv))) {
+
+    // Check if the gotoIndex failed because the target frameloader is dead. We
+    // need to perform a navigateAndRestoreByIndex and then return to recover.
+    if (rv == NS_ERROR_NOT_AVAILABLE) {
+      // Get the nsIXULBrowserWindow so that we can call NavigateAndRestoreByIndex on it.
+      nsCOMPtr<nsIDocShell> docShell = mThis->mOwnerContent->OwnerDoc()->GetDocShell();
+      if (NS_WARN_IF(!docShell)) {
+        mPromise->MaybeRejectWithUndefined();
+        return;
+      }
+
+      nsCOMPtr<nsIDocShellTreeOwner> treeOwner;
+      docShell->GetTreeOwner(getter_AddRefs(treeOwner));
+      if (NS_WARN_IF(!treeOwner)) {
+        mPromise->MaybeRejectWithUndefined();
+        return;
+      }
+
+      nsCOMPtr<nsIXULWindow> window = do_GetInterface(treeOwner);
+      if (NS_WARN_IF(!window)) {
+        mPromise->MaybeRejectWithUndefined();
+        return;
+      }
+
+      nsCOMPtr<nsIXULBrowserWindow> xbw;
+      window->GetXULBrowserWindow(getter_AddRefs(xbw));
+      if (NS_WARN_IF(!xbw)) {
+        mPromise->MaybeRejectWithUndefined();
+        return;
+      }
+
+      nsCOMPtr<nsIBrowser> ourBrowser = do_QueryInterface(mThis->mOwnerContent);
+      if (NS_WARN_IF(!ourBrowser)) {
+        mPromise->MaybeRejectWithUndefined();
+        return;
+      }
+
+      rv = xbw->NavigateAndRestoreByIndex(ourBrowser, mGlobalIndex);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        mPromise->MaybeRejectWithUndefined();
+        return;
+      }
+      mPromise->MaybeResolveWithUndefined();
+      return;
+    }
+
+    // Check for any other type of failure
+    if (NS_WARN_IF(NS_FAILED(rv))) {
       mPromise->MaybeRejectWithUndefined();
       return;
     }
-    nsFrameLoader* other = static_cast<nsFrameLoader*>(otherLoader.get());
 
-    if (other == mThis) {
+    // Perform the swap.
+    nsFrameLoader* other = static_cast<nsFrameLoader*>(otherLoader.get());
+    if (!other || other == mThis) {
       mPromise->MaybeRejectWithUndefined();
       return;
     }
@@ -914,16 +967,8 @@ nsFrameLoader::AddTreeItemToTreeOwner(nsIDocShellTreeItem* aItem,
   NS_PRECONDITION(mOwnerContent, "Must have owning content");
 
   nsAutoString value;
-  bool isContent = false;
-  mOwnerContent->GetAttr(kNameSpaceID_None, TypeAttrName(), value);
-
-  // we accept "content" and "content-xxx" values.
-  // at time of writing, we expect "xxx" to be "primary" or "targetable", but
-  // someday it might be an integer expressing priority or something else.
-
-  isContent = value.LowerCaseEqualsLiteral("content") ||
-    StringBeginsWith(value, NS_LITERAL_STRING("content-"),
-                     nsCaseInsensitiveStringComparator());
+  bool isContent = mOwnerContent->AttrValueIs(
+    kNameSpaceID_None, TypeAttrName(), nsGkAtoms::content, eIgnoreCase);
 
   // Force mozbrowser frames to always be typeContent, even if the
   // mozbrowser interfaces are disabled.
@@ -956,12 +1001,13 @@ nsFrameLoader::AddTreeItemToTreeOwner(nsIDocShellTreeItem* aItem,
   if (aParentType == nsIDocShellTreeItem::typeChrome && isContent) {
     retval = true;
 
-    bool is_primary = value.LowerCaseEqualsLiteral("content-primary");
-
+    bool is_primary =
+      mOwnerContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::primary,
+                                 nsGkAtoms::_true, eIgnoreCase);
     if (aOwner) {
       mOwnerContent->AddMutationObserver(this);
       mObservingOwnerContent = true;
-      aOwner->ContentShellAdded(aItem, is_primary, value);
+      aOwner->ContentShellAdded(aItem, is_primary);
     }
   }
 
@@ -1942,6 +1988,11 @@ nsFrameLoader::StartDestroy()
     }
   }
 
+  // Destroy the other frame loader owners now that we are being destroyed.
+  if (mGroupedSessionHistory) {
+    mGroupedSessionHistory->CloseInactiveFrameLoaderOwners();
+  }
+
   nsCOMPtr<nsIRunnable> destroyRunnable = new nsFrameLoaderDestroyRunnable(this);
   if (mNeedsAsyncDestroy || !doc ||
       NS_FAILED(doc->FinalizeFrameLoader(this, destroyRunnable))) {
@@ -2814,12 +2865,8 @@ nsFrameLoader::TryRemoteBrowser()
       return false;
     }
 
-    nsAutoString value;
-    mOwnerContent->GetAttr(kNameSpaceID_None, nsGkAtoms::type, value);
-
-    if (!value.LowerCaseEqualsLiteral("content") &&
-        !StringBeginsWith(value, NS_LITERAL_STRING("content-"),
-                          nsCaseInsensitiveStringComparator())) {
+    if (!mOwnerContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
+                                    nsGkAtoms::content, eIgnoreCase)) {
       return false;
     }
 
@@ -3230,7 +3277,8 @@ nsFrameLoader::AttributeChanged(nsIDocument* aDocument,
 {
   MOZ_ASSERT(mObservingOwnerContent);
 
-  if (aNameSpaceID != kNameSpaceID_None || aAttribute != TypeAttrName()) {
+  if (aNameSpaceID != kNameSpaceID_None ||
+      (aAttribute != TypeAttrName() && aAttribute != nsGkAtoms::primary)) {
     return;
   }
 
@@ -3265,10 +3313,8 @@ nsFrameLoader::AttributeChanged(nsIDocument* aDocument,
     return;
   }
 
-  nsAutoString value;
-  aElement->GetAttr(kNameSpaceID_None, TypeAttrName(), value);
-
-  bool is_primary = value.LowerCaseEqualsLiteral("content-primary");
+  bool is_primary =
+    aElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::primary, nsGkAtoms::_true, eIgnoreCase);
 
 #ifdef MOZ_XUL
   // when a content panel is no longer primary, hide any open popups it may have
@@ -3280,11 +3326,8 @@ nsFrameLoader::AttributeChanged(nsIDocument* aDocument,
 #endif
 
   parentTreeOwner->ContentShellRemoved(mDocShell);
-  if (value.LowerCaseEqualsLiteral("content") ||
-      StringBeginsWith(value, NS_LITERAL_STRING("content-"),
-                       nsCaseInsensitiveStringComparator())) {
-
-    parentTreeOwner->ContentShellAdded(mDocShell, is_primary, value);
+  if (aElement->AttrValueIs(kNameSpaceID_None, TypeAttrName(), nsGkAtoms::content, eIgnoreCase)) {
+    parentTreeOwner->ContentShellAdded(mDocShell, is_primary);
   }
 }
 
@@ -3493,10 +3536,8 @@ nsFrameLoader::MaybeUpdatePrimaryTabParent(TabParentChange aChange)
     parentTreeOwner->TabParentRemoved(mRemoteBrowser);
     if (aChange == eTabParentChanged) {
       bool isPrimary =
-        mOwnerContent->AttrValueIs(kNameSpaceID_None,
-                                   TypeAttrName(),
-                                   NS_LITERAL_STRING("content-primary"),
-                                   eIgnoreCase);
+        mOwnerContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::primary,
+                                   nsGkAtoms::_true, eIgnoreCase);
       parentTreeOwner->TabParentAdded(mRemoteBrowser, isPrimary);
     }
   }
@@ -3572,6 +3613,13 @@ nsFrameLoader::PopulateUserContextIdFromAttribute(DocShellOriginAttributes& aAtt
     }
   }
 
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsFrameLoader::GetIsDead(bool* aIsDead)
+{
+  *aIsDead = mDestroyCalled;
   return NS_OK;
 }
 

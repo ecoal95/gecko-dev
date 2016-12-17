@@ -944,7 +944,8 @@
             Components.utils.reportError(e);
           }
           try {
-            var securityUI = this.securityUI;
+            // Ensures the securityUI is initialized.
+            var securityUI = this.securityUI; // eslint-disable-line no-unused-vars
           }
           catch (e) {
           }
@@ -1280,16 +1281,16 @@
           // The request comes from a XPCOM component, we'd want to redirect
           // the request to tabbrowser so tabbrowser will be setup correctly,
           // and it will eventually call swapDocShells.
-          let tabbrowser = this.getTabBrowser();
-          if (tabbrowser) {
-            let tab = tabbrowser.getTabForBrowser(this);
-            if (tab) {
-              tabbrowser.swapBrowsers(tab, aOtherBrowser, aFlags);
-              return;
-            }
+          let ourTabBrowser = this.getTabBrowser();
+          let otherTabBrowser = aOtherBrowser.getTabBrowser();
+          if (ourTabBrowser && otherTabBrowser) {
+            let ourTab = ourTabBrowser.getTabForBrowser(this);
+            let otherTab = otherTabBrowser.getTabForBrowser(aOtherBrowser);
+            ourTabBrowser.swapBrowsers(ourTab, otherTab, aFlags);
+            return;
           }
 
-          // If we're not attached to a tabbrowser, just swap.
+          // One of us is not connected to a tabbrowser, so just swap.
           this.swapDocShells(aOtherBrowser);
         ]]>
         </body>
@@ -1569,7 +1570,6 @@
         if (!this.droppedLinkHandler || event.defaultPrevented || this.isRemoteBrowser)
           return;
 
-        let name = { };
         let linkHandler = Components.classes["@mozilla.org/content/dropped-link-handler;1"].
                             getService(Components.interfaces.nsIDroppedLinkHandler);
         try {

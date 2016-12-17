@@ -109,7 +109,6 @@ BrowserView.prototype = {
 
   scrollboxToViewportRect: function scrollboxToViewportRect(rect, clip) {
     let leftbar  = this._leftbar.getBoundingClientRect();
-    let rightbar = this._rightbar.getBoundingClientRect();
     let topbar   = this._topbar.getBoundingClientRect();
 
     let xtrans = -leftbar.width;
@@ -214,7 +213,8 @@ BrowserView.prototype = {
       currentBrowser.docShell.isOffScreenBrowser = false;
     }
 
-    browser.setAttribute("type", "content-primary");
+    browser.setAttribute("type", "content");
+    browser.setAttribute("primary", "true");
     if (!skipZoom)
       browser.docShell.isOffScreenBrowser = true;
 

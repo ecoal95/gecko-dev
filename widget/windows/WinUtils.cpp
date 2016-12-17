@@ -604,7 +604,7 @@ WinUtils::SystemScaleFactor()
   return systemScale;
 }
 
-#ifndef WM_DPICHANGED
+#if WINVER < 0x603
 typedef enum {
   MDT_EFFECTIVE_DPI = 0,
   MDT_ANGULAR_DPI = 1,
@@ -1143,7 +1143,8 @@ WinUtils::GetIsMouseFromTouch(EventMessage aEventMessage)
   const uint32_t MOZ_T_I_SIGNATURE = TABLET_INK_TOUCH | TABLET_INK_SIGNATURE;
   const uint32_t MOZ_T_I_CHECK_TCH = TABLET_INK_TOUCH | TABLET_INK_CHECK;
   return ((aEventMessage == eMouseMove || aEventMessage == eMouseDown ||
-           aEventMessage == eMouseUp || aEventMessage == eMouseDoubleClick) &&
+           aEventMessage == eMouseUp || aEventMessage == eMouseAuxClick ||
+           aEventMessage == eMouseDoubleClick) &&
          (GetMessageExtraInfo() & MOZ_T_I_SIGNATURE) == MOZ_T_I_CHECK_TCH);
 }
 

@@ -438,7 +438,6 @@ var Printing = {
   },
 
   receiveMessage(message) {
-    let objects = message.objects;
     let data = message.data;
     switch (message.name) {
       case "Printing:Preview:Enter": {
@@ -555,6 +554,13 @@ var Printing = {
       headStyleElement.setAttribute("type", "text/css");
       content.document.head.appendChild(headStyleElement);
 
+      // Create link element referencing simplifyMode.css and append it to head
+      headStyleElement = content.document.createElement("link");
+      headStyleElement.setAttribute("rel", "stylesheet");
+      headStyleElement.setAttribute("href", "chrome://global/content/simplifyMode.css");
+      headStyleElement.setAttribute("type", "text/css");
+      content.document.head.appendChild(headStyleElement);
+
       content.document.body.innerHTML = "";
 
       // Create container div (main element) and append it to body
@@ -567,12 +573,6 @@ var Printing = {
       headerElement.setAttribute("id", "reader-header");
       headerElement.setAttribute("class", "header");
       containerElement.appendChild(headerElement);
-
-      // Create style element for header div and import simplifyMode.css
-      let controlHeaderStyle = content.document.createElement("style");
-      controlHeaderStyle.setAttribute("scoped", "");
-      controlHeaderStyle.textContent = "@import url(\"chrome://global/content/simplifyMode.css\");";
-      headerElement.appendChild(controlHeaderStyle);
 
       // Jam the article's title and byline into header div
       let titleElement = content.document.createElement("h1");
@@ -664,7 +664,6 @@ var Printing = {
 
   print(contentWindow, simplifiedMode) {
     let printSettings = this.getPrintSettings();
-    let rv = Cr.NS_OK;
 
     // If we happen to be on simplified mode, we need to set docURL in order
     // to generate header/footer content correctly, since simplified tab has

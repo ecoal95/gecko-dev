@@ -70,27 +70,54 @@ GroupedSHistory::AppendPartialSessionHistory(nsIPartialSHistory* aPartialHistory
 }
 
 NS_IMETHODIMP
-GroupedSHistory::OnPartialSessionHistoryChange(
-  nsIPartialSHistory* aPartialSessionHistory)
+GroupedSHistory::HandleSHistoryUpdate(nsIPartialSHistory* aPartial, bool aTruncate)
 {
-  if (!aPartialSessionHistory) {
+  if (!aPartial) {
     return NS_ERROR_INVALID_POINTER;
   }
+  nsCOMPtr<nsIPartialSHistory> partialHistory = aPartial;
 
-  nsCOMPtr<nsIPartialSHistory> partialHistory(aPartialSessionHistory);
-  int32_t index = mPartialHistories.IndexOf(partialHistory);
-  if (NS_WARN_IF(index != mIndexOfActivePartialHistory) ||
-      NS_WARN_IF(index < 0)) {
-    // Non-active or not attached partialHistory
-    return NS_ERROR_UNEXPECTED;
+  int32_t index = partialHistory->GetGlobalIndex();
+  // Get the lower and upper bounds for the viewer window
+  int32_t lower = index - nsISHistory::VIEWER_WINDOW;
+  int32_t upper = index + nsISHistory::VIEWER_WINDOW;
+  for (uint32_t i = 0; i < mPartialHistories.Length(); ++i) {
+    nsIPartialSHistory* pHistory = mPartialHistories[i];
+    // Skip the active partial history.
+    if (pHistory == partialHistory) {
+      continue;
+    }
+
+    // Check if the given partialshistory entry is too far away in history, and
+    // if it is, close it.
+    int32_t thisCount = pHistory->GetCount();
+    int32_t thisOffset = pHistory->GetGlobalIndexOffset();
+    if ((thisOffset > upper) || ((thisCount + thisOffset) < lower)) {
+      nsCOMPtr<nsIFrameLoader> loader;
+      pHistory->GetOwnerFrameLoader(getter_AddRefs(loader));
+      if (loader && !loader->GetIsDead()) {
+        loader->RequestFrameLoaderClose();
+      }
+    }
   }
 
-  PurgePartialHistories(index);
+  // If we should be truncating, make sure to purge any partialSHistories which
+  // follow the one being updated.
+  if (aTruncate) {
+    int32_t index = mPartialHistories.IndexOf(partialHistory);
+    if (NS_WARN_IF(index != mIndexOfActivePartialHistory) ||
+        NS_WARN_IF(index < 0)) {
+      // Non-active or not attached partialHistory
+      return NS_ERROR_UNEXPECTED;
+    }
 
-  // Update global count.
-  uint32_t count = partialHistory->GetCount();
-  uint32_t offset = partialHistory->GetGlobalIndexOffset();
-  mCount = count + offset;
+    PurgePartialHistories(index);
+
+    // Update global count.
+    uint32_t count = partialHistory->GetCount();
+    uint32_t offset = partialHistory->GetGlobalIndexOffset();
+    mCount = count + offset;
+  }
 
   return NS_OK;
 }
@@ -99,6 +126,9 @@ NS_IMETHODIMP
 GroupedSHistory::GotoIndex(uint32_t aGlobalIndex,
                            nsIFrameLoader** aTargetLoaderToSwap)
 {
+  MOZ_ASSERT(aTargetLoaderToSwap);
+  *aTargetLoaderToSwap = nullptr;
+
   nsCOMPtr<nsIPartialSHistory> currentPartialHistory =
     mPartialHistories[mIndexOfActivePartialHistory];
   if (!currentPartialHistory) {
@@ -118,7 +148,15 @@ GroupedSHistory::GotoIndex(uint32_t aGlobalIndex,
     uint32_t count = partialHistory->GetCount();
     if (offset <= aGlobalIndex && (offset + count) > aGlobalIndex) {
       uint32_t targetIndex = aGlobalIndex - offset;
-      partialHistory->GetOwnerFrameLoader(aTargetLoaderToSwap);
+
+      // Check if we are trying to swap to a dead frameloader, and return
+      // NS_ERROR_NOT_AVAILABLE if we are.
+      nsCOMPtr<nsIFrameLoader> frameLoader;
+      partialHistory->GetOwnerFrameLoader(getter_AddRefs(frameLoader));
+      if (!frameLoader || frameLoader->GetIsDead()) {
+        return NS_ERROR_NOT_AVAILABLE;
+      }
+
       if ((size_t)mIndexOfActivePartialHistory == i) {
         return NS_OK;
       }
@@ -127,6 +165,9 @@ GroupedSHistory::GotoIndex(uint32_t aGlobalIndex,
           NS_FAILED(partialHistory->OnActive(mCount, targetIndex))) {
         return NS_ERROR_FAILURE;
       }
+
+      // Return the target frameloader to the caller.
+      frameLoader.forget(aTargetLoaderToSwap);
       return NS_OK;
     }
   }
@@ -166,6 +207,19 @@ GroupedSHistory::PurgePartialHistories(uint32_t aLastPartialIndexToKeep)
 /* static */ bool
 GroupedSHistory::GroupedHistoryEnabled() {
   return Preferences::GetBool("browser.groupedhistory.enabled", false);
+}
+
+NS_IMETHODIMP
+GroupedSHistory::CloseInactiveFrameLoaderOwners()
+{
+  for (int32_t i = 0; i < mPartialHistories.Count(); ++i) {
+    if (i != mIndexOfActivePartialHistory) {
+      nsCOMPtr<nsIFrameLoader> loader;
+      mPartialHistories[i]->GetOwnerFrameLoader(getter_AddRefs(loader));
+      loader->RequestFrameLoaderClose();
+    }
+  }
+  return NS_OK;
 }
 
 } // namespace dom

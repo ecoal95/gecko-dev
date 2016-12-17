@@ -806,9 +806,7 @@ nsSVGIntegrationUtils::PaintMask(const PaintFramesParams& aParams)
     Matrix clipMaskTransform;
     gfxMatrix cssPxToDevPxMatrix = GetCSSPxToDevPxMatrix(frame);
 
-    bool isOK = true;
-    nsSVGClipPathFrame *clipPathFrame =
-      effectProperties.GetClipPathFrame(&isOK);
+    nsSVGClipPathFrame *clipPathFrame = effectProperties.GetClipPathFrame();
     RefPtr<SourceSurface> maskSurface =
       maskUsage.shouldGenerateMaskLayer ? target->Snapshot() : nullptr;
     result =
@@ -864,8 +862,7 @@ nsSVGIntegrationUtils::PaintMaskAndClipPath(const PaintFramesParams& aParams)
   nsSVGEffects::EffectProperties effectProperties =
     nsSVGEffects::GetEffectProperties(firstFrame);
 
-  bool isOK = effectProperties.HasNoFilterOrHasValidFilter();
-  nsSVGClipPathFrame *clipPathFrame = effectProperties.GetClipPathFrame(&isOK);
+  nsSVGClipPathFrame *clipPathFrame = effectProperties.GetClipPathFrame();
 
   gfxMatrix cssPxToDevPxMatrix = GetCSSPxToDevPxMatrix(frame);
   nsTArray<nsSVGMaskFrame*> maskFrames = effectProperties.GetMaskFrames();
@@ -1042,7 +1039,7 @@ nsSVGIntegrationUtils::PaintFilter(const PaintFramesParams& aParams)
   nsSVGEffects::EffectProperties effectProperties =
     nsSVGEffects::GetEffectProperties(firstFrame);
 
-  if (!effectProperties.HasValidFilter()) {
+  if (effectProperties.HasInvalidFilter()) {
     return DrawResult::NOT_READY;
   }
 

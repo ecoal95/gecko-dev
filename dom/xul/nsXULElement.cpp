@@ -1277,7 +1277,7 @@ nsXULElement::IsEventStoppedFromAnonymousScrollbar(EventMessage aMessage)
             IsAnyOfXULElements(nsGkAtoms::scrollbar, nsGkAtoms::scrollcorner) &&
             (aMessage == eMouseClick || aMessage == eMouseDoubleClick ||
              aMessage == eXULCommand || aMessage == eContextMenu ||
-             aMessage == eDragStart));
+             aMessage == eDragStart  || aMessage == eMouseAuxClick));
 }
 
 nsresult
@@ -1609,10 +1609,10 @@ nsXULElement::LoadSrc()
         nsXULSlots* slots = static_cast<nsXULSlots*>(Slots());
         nsCOMPtr<nsPIDOMWindowOuter> opener = do_QueryInterface(slots->mFrameLoaderOrOpener);
         if (!opener) {
-            // If we are a content-primary xul-browser, we want to take the opener property!
+            // If we are a primary xul-browser, we want to take the opener property!
             nsCOMPtr<nsIDOMChromeWindow> chromeWindow = do_QueryInterface(OwnerDoc()->GetWindow());
-            if (AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
-                            NS_LITERAL_STRING("content-primary"), eIgnoreCase) &&
+            if (AttrValueIs(kNameSpaceID_None, nsGkAtoms::primary,
+                            nsGkAtoms::_true, eIgnoreCase) &&
                 chromeWindow) {
                 nsCOMPtr<mozIDOMWindowProxy> wp;
                 chromeWindow->TakeOpenerForInitialContentBrowser(getter_AddRefs(wp));

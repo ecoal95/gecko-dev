@@ -314,7 +314,8 @@ this.OnRefTestLoad = function OnRefTestLoad(win)
       gBrowser.setAttribute("class", "lightweight");
     }
     gBrowser.setAttribute("id", "browser");
-    gBrowser.setAttribute("type", "content-primary");
+    gBrowser.setAttribute("type", "content");
+    gBrowser.setAttribute("primary", "true");
     gBrowser.setAttribute("remote", gBrowserIsRemote ? "true" : "false");
     // Make sure the browser element is exactly 800x1000, no matter
     // what size our window is
@@ -712,6 +713,12 @@ function BuildConditionSandbox(aURL) {
     sandbox.webrtc = true;
 #else
     sandbox.webrtc = false;
+#endif
+
+#ifdef MOZ_STYLO
+    sandbox.stylo = true;
+#else
+    sandbox.stylo = false;
 #endif
 
     var hh = CC[NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX + "http"].
