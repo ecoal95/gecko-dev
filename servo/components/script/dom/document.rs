@@ -93,6 +93,8 @@ use euclid::point::Point2D;
 use gfx_traits::ScrollRootId;
 use html5ever::tree_builder::{LimitedQuirks, NoQuirks, Quirks, QuirksMode};
 use html5ever_atoms::{LocalName, QualName};
+use hyper::header::{Header, SetCookie};
+use hyper_serde::Serde;
 use ipc_channel::ipc::{self, IpcSender};
 use js::jsapi::{JSContext, JSObject, JSRuntime};
 use js::jsapi::JS_GetRuntime;
@@ -113,6 +115,7 @@ use script_traits::{ScriptMsg as ConstellationMsg, TouchpadPressurePhase};
 use script_traits::{TouchEventType, TouchId};
 use script_traits::UntrustedNodeAddress;
 use servo_atoms::Atom;
+use servo_config::prefs::PREFS;
 use servo_url::ServoUrl;
 use std::ascii::AsciiExt;
 use std::borrow::ToOwned;
@@ -133,7 +136,6 @@ use style::str::{split_html_space_chars, str_join};
 use style::stylesheets::Stylesheet;
 use time;
 use url::percent_encoding::percent_decode;
-use util::prefs::PREFS;
 
 pub enum TouchEventResult {
     Processed(bool),
@@ -2670,7 +2672,7 @@ impl DocumentMethods for Document {
             None => DOMString::new(),
             Some(ref title) => {
                 // Steps 3-4.
-                let value = Node::collect_text_contents(title.children());
+                let value = title.child_text_content();
                 DOMString::from(str_join(split_html_space_chars(&value), " "))
             },
         }
@@ -2960,11 +2962,15 @@ impl DocumentMethods for Document {
             return Err(Error::Security);
         }
 
-        let url = self.url();
-        let _ = self.window
-                    .upcast::<GlobalScope>()
-                    .resource_threads()
-                    .send(SetCookiesForUrl(url, String::from(cookie), NonHTTP));
+        let header = Header::parse_header(&[cookie.into()]);
+        if let Ok(SetCookie(cookies)) = header {
+            let cookies = cookies.into_iter().map(Serde).collect();
+            let _ = self.window
+                        .upcast::<GlobalScope>()
+                        .resource_threads()
+                        .send(SetCookiesForUrl(self.url(), cookies, NonHTTP));
+        }
+
         Ok(())
     }
 

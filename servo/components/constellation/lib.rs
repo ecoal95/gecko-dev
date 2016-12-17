@@ -36,13 +36,14 @@ extern crate script_traits;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
+extern crate servo_config;
+extern crate servo_remutex;
 extern crate servo_url;
 extern crate style_traits;
-#[macro_use]
-extern crate util;
 extern crate webrender_traits;
 
 mod constellation;
+mod event_loop;
 mod pipeline;
 #[cfg(not(target_os = "windows"))]
 mod sandboxing;

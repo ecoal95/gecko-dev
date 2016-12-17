@@ -9,10 +9,10 @@ use gleam::gl;
 use ipc_channel::ipc::{self, IpcSender};
 use offscreen_gl_context::{ColorAttachmentType, GLContext, GLLimits};
 use offscreen_gl_context::{GLContextAttributes, NativeGLContext, OSMesaContext};
+use servo_config::opts;
 use std::borrow::ToOwned;
 use std::sync::mpsc::channel;
-use util::opts;
-use util::thread::spawn_named;
+use std::thread;
 use webrender_traits;
 
 enum GLContextWrapper {
@@ -116,7 +116,8 @@ impl WebGLPaintThread {
            webrender_api_sender: webrender_traits::RenderApiSender)
         -> Result<(WebGLPaintThread, GLLimits), String> {
         let wr_api = webrender_api_sender.create_api();
-        match wr_api.request_webgl_context(&size, attrs) {
+        let device_size = webrender_traits::DeviceIntSize::from_untyped(&size);
+        match wr_api.request_webgl_context(&device_size, attrs) {
             Ok((id, limits)) => {
                 let painter = WebGLPaintThread {
                     data: WebGLPaintTaskData::WebRender(wr_api, id),
@@ -151,7 +152,7 @@ impl WebGLPaintThread {
                  -> Result<(IpcSender<CanvasMsg>, GLLimits), String> {
         let (sender, receiver) = ipc::channel::<CanvasMsg>().unwrap();
         let (result_chan, result_port) = channel();
-        spawn_named("WebGLThread".to_owned(), move || {
+        thread::Builder::new().name("WebGLThread".to_owned()).spawn(move || {
             let mut painter = match WebGLPaintThread::new(size, attrs, webrender_api_sender) {
                 Ok((thread, limits)) => {
                     result_chan.send(Ok(limits)).unwrap();
@@ -191,7 +192,7 @@ impl WebGLPaintThread {
                     CanvasMsg::Canvas2d(_) => panic!("Wrong message sent to WebGLThread"),
                 }
             }
-        });
+        }).expect("Thread spawning failed");
 
         result_port.recv().unwrap().map(|limits| (sender, limits))
     }
@@ -252,7 +253,8 @@ impl WebGLPaintThread {
                 }
             }
             WebGLPaintTaskData::WebRender(ref api, id) => {
-                api.resize_webgl_context(id, &size);
+                let device_size = webrender_traits::DeviceIntSize::from_untyped(&size);
+                api.resize_webgl_context(id, &device_size);
             }
         }
 

@@ -18,13 +18,14 @@ use servo_atoms::Atom;
 use servo_url::ServoUrl;
 use std::borrow::ToOwned;
 use std::collections::HashMap;
+use std::fmt;
 use std::mem;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::u32;
 use style::font_face::{EffectiveSources, Source};
 use style::properties::longhands::font_family::computed_value::FontFamily;
-use util::thread::spawn_named;
 use webrender_traits;
 
 /// A list of font templates that make up a given font family.
@@ -222,31 +223,36 @@ impl FontCache {
                 let channel_to_self = self.channel_to_self.clone();
                 let bytes = Mutex::new(Vec::new());
                 let response_valid = Mutex::new(false);
+                debug!("Loading @font-face {} from {}", family_name, url);
                 fetch_async(request, &self.core_resource_thread, move |response| {
                     match response {
                         FetchResponseMsg::ProcessRequestBody |
                         FetchResponseMsg::ProcessRequestEOF => (),
                         FetchResponseMsg::ProcessResponse(meta_result) => {
+                            trace!("@font-face {} metadata ok={:?}", family_name, meta_result.is_ok());
                             *response_valid.lock().unwrap() = meta_result.is_ok();
                         }
                         FetchResponseMsg::ProcessResponseChunk(new_bytes) => {
+                            trace!("@font-face {} chunk={:?}", family_name, new_bytes);
                             if *response_valid.lock().unwrap() {
                                 bytes.lock().unwrap().extend(new_bytes.into_iter())
                             }
                         }
                         FetchResponseMsg::ProcessResponseEOF(response) => {
+                            trace!("@font-face {} EOF={:?}", family_name, response);
                             if response.is_err() || !*response_valid.lock().unwrap() {
                                 let msg = Command::AddWebFont(family_name.clone(), sources.clone(), sender.clone());
                                 channel_to_self.send(msg).unwrap();
                                 return;
                             }
                             let bytes = mem::replace(&mut *bytes.lock().unwrap(), vec![]);
+                            trace!("@font-face {} data={:?}", family_name, bytes);
                             let bytes = match fontsan::process(&bytes) {
                                 Ok(san) => san,
                                 Err(_) => {
                                     // FIXME(servo/fontsan#1): get an error message
                                     debug!("Sanitiser rejected web font: \
-                                            family={:?} url={:?}", family_name, url);
+                                            family={} url={:?}", family_name, url);
                                     let msg = Command::AddWebFont(family_name.clone(), sources.clone(), sender.clone());
                                     channel_to_self.send(msg).unwrap();
                                     return;
@@ -396,7 +402,7 @@ impl FontCacheThread {
         let (chan, port) = ipc::channel().unwrap();
 
         let channel_to_self = chan.clone();
-        spawn_named("FontCacheThread".to_owned(), move || {
+        thread::Builder::new().name("FontCacheThread".to_owned()).spawn(move || {
             // TODO: Allow users to specify these.
             let generic_fonts = populate_generic_fonts();
 
@@ -414,7 +420,7 @@ impl FontCacheThread {
 
             cache.refresh_local_families();
             cache.run();
-        });
+        }).expect("Thread spawning failed");
 
         FontCacheThread {
             chan: chan,
@@ -486,5 +492,11 @@ impl Deref for LowercaseString {
     #[inline]
     fn deref(&self) -> &str {
         &*self.inner
+    }
+}
+
+impl fmt::Display for LowercaseString {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.inner.fmt(f)
     }
 }

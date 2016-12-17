@@ -11,6 +11,7 @@ use net_traits::image_cache_thread::{ImageCacheChan, ImageCacheCommand, ImageCac
 use net_traits::image_cache_thread::{ImageCacheResult, ImageOrMetadataAvailable, ImageResponse, UsePlaceholder};
 use net_traits::image_cache_thread::ImageResponder;
 use net_traits::request::{Destination, RequestInit, Type as RequestType};
+use servo_config::resource_files::resources_dir_path;
 use servo_url::ServoUrl;
 use std::borrow::ToOwned;
 use std::collections::HashMap;
@@ -20,9 +21,8 @@ use std::io::{self, Read};
 use std::mem;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::thread;
 use threadpool::ThreadPool;
-use util::resource_files::resources_dir_path;
-use util::thread::spawn_named;
 use webrender_traits;
 
 ///
@@ -225,17 +225,8 @@ impl ImageListener {
     }
 }
 
-/// A legacy type that's mostly redundant with FetchResponseMsg.
-// FIXME(#13717): remove this type.
-#[derive(Deserialize, Serialize)]
-enum ResponseAction {
-    HeadersAvailable(Result<Metadata, NetworkError>),
-    DataAvailable(Vec<u8>),
-    ResponseComplete(Result<(), NetworkError>)
-}
-
 struct ResourceLoadInfo {
-    action: ResponseAction,
+    action: FetchResponseMsg,
     key: LoadKey,
 }
 
@@ -417,8 +408,10 @@ impl ImageCache {
     // Handle progress messages from the resource thread
     fn handle_progress(&mut self, msg: ResourceLoadInfo) {
         match (msg.action, msg.key) {
-            (ResponseAction::HeadersAvailable(_), _) => {}
-            (ResponseAction::DataAvailable(data), _) => {
+            (FetchResponseMsg::ProcessRequestBody, _) |
+            (FetchResponseMsg::ProcessRequestEOF, _) => return,
+            (FetchResponseMsg::ProcessResponse(_), _) => {}
+            (FetchResponseMsg::ProcessResponseChunk(data), _) => {
                 let pending_load = self.pending_loads.get_by_key_mut(&msg.key).unwrap();
                 pending_load.bytes.extend_from_slice(&data);
                 //jmr0 TODO: possibly move to another task?
@@ -434,7 +427,7 @@ impl ImageCache {
                     }
                 }
             }
-            (ResponseAction::ResponseComplete(result), key) => {
+            (FetchResponseMsg::ProcessResponseEOF(result), key) => {
                 match result {
                     Ok(()) => {
                         let pending_load = self.pending_loads.get_by_key_mut(&msg.key).unwrap();
@@ -550,20 +543,7 @@ impl ImageCache {
                             let action = match action {
                                 FetchResponseMsg::ProcessRequestBody |
                                 FetchResponseMsg::ProcessRequestEOF => return,
-                                FetchResponseMsg::ProcessResponse(meta_result) => {
-                                    ResponseAction::HeadersAvailable(meta_result.map(|m| {
-                                        match m {
-                                            FetchMetadata::Unfiltered(m) => m,
-                                            FetchMetadata::Filtered { unsafe_, .. } => unsafe_
-                                        }
-                                    }))
-                                }
-                                FetchResponseMsg::ProcessResponseChunk(new_bytes) => {
-                                    ResponseAction::DataAvailable(new_bytes)
-                                }
-                                FetchResponseMsg::ProcessResponseEOF(response) => {
-                                    ResponseAction::ResponseComplete(response)
-                                }
+                                a => a
                             };
                             progress_sender.send(ResourceLoadInfo {
                                 action: action,
@@ -630,12 +610,12 @@ impl ImageCache {
                           loaded_bytes: Vec<u8>) {
         let (cache_result, load_key, _) = self.pending_loads.get_cached(ref_url.clone());
         assert!(cache_result == CacheResult::Miss);
-        let action = ResponseAction::DataAvailable(loaded_bytes);
+        let action = FetchResponseMsg::ProcessResponseChunk(loaded_bytes);
         let _ = self.progress_sender.send(ResourceLoadInfo {
             action: action,
             key: load_key,
         });
-        let action = ResponseAction::ResponseComplete(Ok(()));
+        let action = FetchResponseMsg::ProcessResponseEOF(Ok(()));
         let _ = self.progress_sender.send(ResourceLoadInfo {
             action: action,
             key: load_key,
@@ -648,9 +628,9 @@ pub fn new_image_cache_thread(core_resource_thread: CoreResourceThread,
                               webrender_api: webrender_traits::RenderApi) -> ImageCacheThread {
     let (ipc_command_sender, ipc_command_receiver) = ipc::channel().unwrap();
 
-    spawn_named("ImageCacheThread".to_owned(), move || {
+    thread::Builder::new().name("ImageCacheThread".to_owned()).spawn(move || {
         ImageCache::run(core_resource_thread, webrender_api, ipc_command_receiver)
-    });
+    }).expect("Thread spawning failed");
 
     ImageCacheThread::new(ipc_command_sender)
 }

@@ -16,11 +16,10 @@ use std::ptr;
 use std::sync::{Arc, Mutex};
 use style::arc_ptr_eq;
 use style::atomic_refcell::AtomicRefMut;
-use style::context::{LocalStyleContextCreationInfo, ReflowGoal, SharedStyleContext};
+use style::context::{ThreadLocalStyleContextCreationInfo, ReflowGoal, SharedStyleContext, StyleContext};
 use style::data::{ElementData, RestyleData};
 use style::dom::{ShowSubtreeData, TElement, TNode};
 use style::error_reporting::StdoutErrorReporter;
-use style::gecko::context::StandaloneStyleContext;
 use style::gecko::context::clear_local_context;
 use style::gecko::data::{NUM_THREADS, PerDocumentStyleData, PerDocumentStyleDataImpl};
 use style::gecko::restyle_damage::GeckoRestyleDamage;
@@ -58,8 +57,9 @@ use style::string_cache::Atom;
 use style::stylesheets::{CssRule, CssRules, Origin, Stylesheet, StyleRule};
 use style::thread_state;
 use style::timer::Timer;
-use style::traversal::{recalc_style_at, DomTraversalContext, PerLevelTraversalData};
+use style::traversal::{recalc_style_at, DomTraversal, PerLevelTraversalData};
 use style_traits::ToCss;
+use stylesheet_loader::StylesheetLoader;
 
 /*
  * For Gecko->Servo function calls, we need to redeclare the same signature that was declared in
@@ -88,7 +88,7 @@ pub extern "C" fn Servo_Shutdown() -> () {
     // Destroy our default computed values.
     unsafe { ComputedValues::shutdown(); }
 
-    // In general, LocalStyleContexts will get destroyed when the worker thread
+    // In general, ThreadLocalStyleContexts will get destroyed when the worker thread
     // is joined and the TLS is dropped. However, under some configurations we
     // may do sequential style computation on the main thread, so we need to be
     // sure to clear the main thread TLS entry as well.
@@ -100,7 +100,7 @@ fn create_shared_context(mut per_doc_data: &mut AtomicRefMut<PerDocumentStyleDat
     per_doc_data.flush_stylesheets();
 
     let local_context_data =
-        LocalStyleContextCreationInfo::new(per_doc_data.new_animations_sender.clone());
+        ThreadLocalStyleContextCreationInfo::new(per_doc_data.new_animations_sender.clone());
 
     SharedStyleContext {
         // FIXME (bug 1303229): Use the actual viewport size here
@@ -131,7 +131,7 @@ fn traverse_subtree(element: GeckoElement, raw_data: RawServoStyleSetBorrowed,
     // When new content is inserted in a display:none subtree, we will call into
     // servo to try to style it. Detect that here and bail out.
     if let Some(parent) = element.parent_element() {
-        if parent.get_data().is_none() || parent.is_display_none() {
+        if parent.borrow_data().map_or(true, |d| d.styles().is_display_none()) {
             debug!("{:?} has unstyled parent - ignoring call to traverse_subtree", parent);
             return;
         }
@@ -149,14 +149,14 @@ fn traverse_subtree(element: GeckoElement, raw_data: RawServoStyleSetBorrowed,
     debug!("{:?}", ShowSubtreeData(element.as_node()));
 
     let shared_style_context = create_shared_context(&mut per_doc_data);
+    let traversal = RecalcStyleOnly::new(shared_style_context);
     let known_depth = None;
 
     if per_doc_data.num_threads == 1 || per_doc_data.work_queue.is_none() {
-        sequential::traverse_dom::<_, RecalcStyleOnly>(element, &shared_style_context, token);
+        sequential::traverse_dom(&traversal, element, token);
     } else {
-        parallel::traverse_dom::<_, RecalcStyleOnly>(element, known_depth,
-                                                     &shared_style_context, token,
-                                                     per_doc_data.work_queue.as_mut().unwrap());
+        parallel::traverse_dom(&traversal, element, known_depth, token,
+                               per_doc_data.work_queue.as_mut().unwrap());
     }
 }
 
@@ -232,8 +232,10 @@ pub extern "C" fn Servo_StyleSheet_Empty(mode: SheetParsingMode) -> RawServoStyl
         SheetParsingMode::eUserSheetFeatures => Origin::User,
         SheetParsingMode::eAgentSheetFeatures => Origin::UserAgent,
     };
+    let loader = StylesheetLoader::new();
     let sheet = Arc::new(Stylesheet::from_str(
-        "", url, origin, Default::default(), Box::new(StdoutErrorReporter), extra_data));
+        "", url, origin, Default::default(), Some(&loader),
+        Box::new(StdoutErrorReporter), extra_data));
     unsafe {
         transmute(sheet)
     }
@@ -262,8 +264,10 @@ pub extern "C" fn Servo_StyleSheet_FromUTF8Bytes(data: *const nsACString,
         referrer: Some(GeckoArcURI::new(referrer)),
         principal: Some(GeckoArcPrincipal::new(principal)),
     }};
+    let loader = StylesheetLoader::new();
     let sheet = Arc::new(Stylesheet::from_str(
-        input, url, origin, Default::default(), Box::new(StdoutErrorReporter), extra_data));
+        input, url, origin, Default::default(), Some(&loader),
+        Box::new(StdoutErrorReporter), extra_data));
     unsafe {
         transmute(sheet)
     }
@@ -825,13 +829,22 @@ pub extern "C" fn Servo_ResolveStyle(element: RawGeckoElementBorrowed,
 
             let mut per_doc_data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
             let shared_style_context = create_shared_context(&mut per_doc_data);
-            let context = StandaloneStyleContext::new(&shared_style_context);
+            let traversal = RecalcStyleOnly::new(shared_style_context);
+            let tlc = traversal.create_or_get_thread_local_context();
 
             let mut traversal_data = PerLevelTraversalData {
                 current_dom_depth: None,
             };
 
-            recalc_style_at::<_, _, RecalcStyleOnly>(&context, &mut traversal_data, element, &mut data);
+            let context = StyleContext {
+                shared: traversal.shared_context(),
+                thread_local: &*tlc,
+            };
+
+            recalc_style_at(&traversal, &mut traversal_data, &context, element, &mut data);
+
+            // We don't want to keep any cached style around after this one-off style resolution.
+            tlc.style_sharing_candidate_cache.borrow_mut().clear();
 
             // The element was either unstyled or needed restyle. If it was unstyled, it may have
             // additional unstyled children that subsequent traversals won't find now that the style

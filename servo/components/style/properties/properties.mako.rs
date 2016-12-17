@@ -28,6 +28,7 @@ use font_metrics::FontMetricsProvider;
 #[cfg(feature = "servo")] use logical_geometry::{LogicalMargin, PhysicalSide};
 use logical_geometry::WritingMode;
 use parser::{Parse, ParserContext, ParserContextExtraData};
+#[cfg(feature = "servo")] use servo_config::prefs::PREFS;
 use servo_url::ServoUrl;
 use style_traits::ToCss;
 use stylesheets::Origin;
@@ -846,7 +847,7 @@ impl PropertyDeclaration {
                             }
                         % endif
                         % if property.experimental and product == "servo":
-                            if !::util::prefs::PREFS.get("${property.experimental}")
+                            if !PREFS.get("${property.experimental}")
                                 .as_boolean().unwrap_or(false) {
                                 return PropertyDeclarationParseResult::ExperimentalProperty
                             }
@@ -878,7 +879,7 @@ impl PropertyDeclaration {
                         }
                     % endif
                     % if shorthand.experimental and product == "servo":
-                        if !::util::prefs::PREFS.get("${shorthand.experimental}")
+                        if !PREFS.get("${shorthand.experimental}")
                             .as_boolean().unwrap_or(false) {
                             return PropertyDeclarationParseResult::ExperimentalProperty
                         }
@@ -1198,6 +1199,8 @@ impl ComputedValues {
     pub fn custom_properties(&self) -> Option<Arc<::custom_properties::ComputedValuesMap>> {
         self.custom_properties.as_ref().map(|x| x.clone())
     }
+
+    pub fn has_moz_binding(&self) -> bool { false }
 
     pub fn root_font_size(&self) -> Au { self.root_font_size }
     pub fn set_root_font_size(&mut self, size: Au) { self.root_font_size = size }

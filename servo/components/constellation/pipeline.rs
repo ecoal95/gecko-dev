@@ -6,12 +6,10 @@ use bluetooth_traits::BluetoothRequest;
 use compositing::CompositionPipeline;
 use compositing::CompositorProxy;
 use compositing::compositor_thread::Msg as CompositorMsg;
-use constellation::ScriptChan;
 use devtools_traits::{DevtoolsControlMsg, ScriptToDevtoolsControlMsg};
 use euclid::scale_factor::ScaleFactor;
 use euclid::size::TypedSize2D;
-#[cfg(not(target_os = "windows"))]
-use gaol;
+use event_loop::EventLoop;
 use gfx::font_cache_thread::FontCacheThread;
 use gfx_traits::DevicePixel;
 use ipc_channel::ipc::{self, IpcReceiver, IpcSender};
@@ -26,6 +24,8 @@ use script_traits::{ConstellationControlMsg, InitialScriptState};
 use script_traits::{LayoutControlMsg, LayoutMsg, LoadData, MozBrowserEvent};
 use script_traits::{NewLayoutInfo, SWManagerMsg, SWManagerSenders, ScriptMsg};
 use script_traits::{ScriptThreadFactory, TimerEventRequest, WindowSizeData};
+use servo_config::opts::{self, Opts};
+use servo_config::prefs::{PREFS, Pref};
 use servo_url::ServoUrl;
 use std::collections::HashMap;
 use std::env;
@@ -35,16 +35,7 @@ use std::process;
 use std::rc::Rc;
 use std::sync::mpsc::Sender;
 use style_traits::{PagePx, ViewportPx};
-use util::opts::{self, Opts};
-use util::prefs::{PREFS, Pref};
 use webrender_traits;
-
-pub enum ChildProcess {
-    #[cfg(not(target_os = "windows"))]
-    Sandboxed(gaol::platform::process::Process),
-    #[cfg(not(target_os = "windows"))]
-    Unsandboxed(process::Child),
-}
 
 /// A uniquely-identifiable pipeline of script thread, layout thread, and paint thread.
 pub struct Pipeline {
@@ -52,7 +43,7 @@ pub struct Pipeline {
     /// The ID of the frame that contains this Pipeline.
     pub frame_id: FrameId,
     pub parent_info: Option<(PipelineId, FrameType)>,
-    pub script_chan: Rc<ScriptChan>,
+    pub event_loop: Rc<EventLoop>,
     /// A channel to layout, for performing reflows and shutdown.
     pub layout_chan: IpcSender<LayoutControlMsg>,
     /// A channel to the compositor.
@@ -115,10 +106,9 @@ pub struct InitialPipelineState {
     pub window_size: Option<TypedSize2D<f32, PagePx>>,
     /// Information about the device pixel ratio.
     pub device_pixel_ratio: ScaleFactor<f32, ViewportPx, DevicePixel>,
-    /// A channel to the script thread, if applicable.
-    /// If this is `None`, create a new script thread.
-    /// If this is `Some`, then reuse an existing script thread.
-    pub script_chan: Option<Rc<ScriptChan>>,
+    /// The event loop to run in, if applicable. If this is `Some`,
+    /// then `parent_info` must also be `Some`.
+    pub event_loop: Option<Rc<EventLoop>>,
     /// Information about the page to load.
     pub load_data: LoadData,
     /// The ID of the pipeline namespace for this script thread.
@@ -134,15 +124,14 @@ pub struct InitialPipelineState {
 impl Pipeline {
     /// Starts a paint thread, layout thread, and possibly a script thread, in
     /// a new process if requested.
-    pub fn spawn<Message, LTF, STF>(state: InitialPipelineState)
-                                    -> Result<(Pipeline, Option<ChildProcess>), IOError>
+    pub fn spawn<Message, LTF, STF>(state: InitialPipelineState) -> Result<Pipeline, IOError>
         where LTF: LayoutThreadFactory<Message=Message>,
               STF: ScriptThreadFactory<Message=Message>
     {
         // Note: we allow channel creation to panic, since recovering from this
         // probably requires a general low-memory strategy.
         let (pipeline_chan, pipeline_port) = ipc::channel()
-            .expect("Pipeline main chan");;
+            .expect("Pipeline main chan");
 
         let (layout_content_process_shutdown_chan, layout_content_process_shutdown_port) =
             ipc::channel().expect("Pipeline layout content shutdown chan");
@@ -156,7 +145,7 @@ impl Pipeline {
             }
         });
 
-        let (script_chan, content_ports) = match state.script_chan {
+        let (script_chan, content_ports) = match state.event_loop {
             Some(script_chan) => {
                 let new_layout_info = NewLayoutInfo {
                     parent_info: state.parent_info,
@@ -176,11 +165,10 @@ impl Pipeline {
             }
             None => {
                 let (script_chan, script_port) = ipc::channel().expect("Pipeline script chan");
-                (ScriptChan::new(script_chan), Some((script_port, pipeline_port)))
+                (EventLoop::new(script_chan), Some((script_port, pipeline_port)))
             }
         };
 
-        let mut child_process = None;
         if let Some((script_port, pipeline_port)) = content_ports {
             // Route messages coming from content to devtools as appropriate.
             let script_to_devtools_chan = state.devtools_chan.as_ref().map(|devtools_chan| {
@@ -236,24 +224,22 @@ impl Pipeline {
             //
             // Yes, that's all there is to it!
             if opts::multiprocess() {
-                child_process = Some(try!(unprivileged_pipeline_content.spawn_multiprocess()));
+                let _ = try!(unprivileged_pipeline_content.spawn_multiprocess());
             } else {
                 unprivileged_pipeline_content.start_all::<Message, LTF, STF>(false);
             }
         }
 
-        let pipeline = Pipeline::new(state.id,
-                                     state.frame_id,
-                                     state.parent_info,
-                                     script_chan,
-                                     pipeline_chan,
-                                     state.compositor_proxy,
-                                     state.is_private,
-                                     state.load_data.url,
-                                     state.window_size,
-                                     state.prev_visibility.unwrap_or(true));
-
-        Ok((pipeline, child_process))
+        Ok(Pipeline::new(state.id,
+                         state.frame_id,
+                         state.parent_info,
+                         script_chan,
+                         pipeline_chan,
+                         state.compositor_proxy,
+                         state.is_private,
+                         state.load_data.url,
+                         state.window_size,
+                         state.prev_visibility.unwrap_or(true)))
     }
 
     /// Creates a new `Pipeline`, after the script and layout threads have been
@@ -261,7 +247,7 @@ impl Pipeline {
     pub fn new(id: PipelineId,
                frame_id: FrameId,
                parent_info: Option<(PipelineId, FrameType)>,
-               script_chan: Rc<ScriptChan>,
+               event_loop: Rc<EventLoop>,
                layout_chan: IpcSender<LayoutControlMsg>,
                compositor_proxy: Box<CompositorProxy + 'static + Send>,
                is_private: bool,
@@ -273,7 +259,7 @@ impl Pipeline {
             id: id,
             frame_id: frame_id,
             parent_info: parent_info,
-            script_chan: script_chan,
+            event_loop: event_loop,
             layout_chan: layout_chan,
             compositor_proxy: compositor_proxy,
             url: url,
@@ -307,25 +293,25 @@ impl Pipeline {
 
         // Script thread handles shutting down layout, and layout handles shutting down the painter.
         // For now, if the script thread has failed, we give up on clean shutdown.
-        if let Err(e) = self.script_chan.send(ConstellationControlMsg::ExitPipeline(self.id)) {
+        if let Err(e) = self.event_loop.send(ConstellationControlMsg::ExitPipeline(self.id)) {
             warn!("Sending script exit message failed ({}).", e);
         }
     }
 
     pub fn freeze(&self) {
-        if let Err(e) = self.script_chan.send(ConstellationControlMsg::Freeze(self.id)) {
+        if let Err(e) = self.event_loop.send(ConstellationControlMsg::Freeze(self.id)) {
             warn!("Sending freeze message failed ({}).", e);
         }
     }
 
     pub fn thaw(&self) {
-        if let Err(e) = self.script_chan.send(ConstellationControlMsg::Thaw(self.id)) {
+        if let Err(e) = self.event_loop.send(ConstellationControlMsg::Thaw(self.id)) {
             warn!("Sending freeze message failed ({}).", e);
         }
     }
 
     pub fn force_exit(&self) {
-        if let Err(e) = self.script_chan.send(ConstellationControlMsg::ExitPipeline(self.id)) {
+        if let Err(e) = self.event_loop.send(ConstellationControlMsg::ExitPipeline(self.id)) {
             warn!("Sending script exit message failed ({}).", e);
         }
         if let Err(e) = self.layout_chan.send(LayoutControlMsg::ExitNow) {
@@ -336,7 +322,7 @@ impl Pipeline {
     pub fn to_sendable(&self) -> CompositionPipeline {
         CompositionPipeline {
             id: self.id.clone(),
-            script_chan: self.script_chan.sender(),
+            script_chan: self.event_loop.sender(),
             layout_chan: self.layout_chan.clone(),
         }
     }
@@ -360,16 +346,16 @@ impl Pipeline {
         let event = ConstellationControlMsg::MozBrowserEvent(self.id,
                                                              child_id,
                                                              event);
-        if let Err(e) = self.script_chan.send(event) {
+        if let Err(e) = self.event_loop.send(event) {
             warn!("Sending mozbrowser event to script failed ({}).", e);
         }
     }
 
     fn notify_visibility(&self) {
-        self.script_chan.send(ConstellationControlMsg::ChangeFrameVisibilityStatus(self.id, self.visible))
-                        .expect("Pipeline script chan");
-
-        self.compositor_proxy.send(CompositorMsg::PipelineVisibilityChanged(self.id, self.visible));
+        let script_msg = ConstellationControlMsg::ChangeFrameVisibilityStatus(self.id, self.visible);
+        let compositor_msg = CompositorMsg::PipelineVisibilityChanged(self.id, self.visible);
+        self.event_loop.send(script_msg).expect("Pipeline script chan");
+        self.compositor_proxy.send(compositor_msg);
     }
 
     pub fn change_visibility(&mut self, visible: bool) {
@@ -464,7 +450,7 @@ impl UnprivilegedPipelineContent {
     }
 
     #[cfg(not(target_os = "windows"))]
-    pub fn spawn_multiprocess(self) -> Result<ChildProcess, IOError> {
+    pub fn spawn_multiprocess(self) -> Result<(), IOError> {
         use gaol::sandbox::{self, Sandbox, SandboxMethods};
         use ipc_channel::ipc::IpcOneShotServer;
         use sandboxing::content_process_sandbox_profile;
@@ -489,31 +475,30 @@ impl UnprivilegedPipelineContent {
             .expect("Failed to create IPC one-shot server.");
 
         // If there is a sandbox, use the `gaol` API to create the child process.
-        let child_process = if opts::get().sandbox {
+        if opts::get().sandbox {
             let mut command = sandbox::Command::me().expect("Failed to get current sandbox.");
             self.setup_common(&mut command, token);
 
             let profile = content_process_sandbox_profile();
-            ChildProcess::Sandboxed(Sandbox::new(profile).start(&mut command)
-                                    .expect("Failed to start sandboxed child process!"))
+            let _ = Sandbox::new(profile)
+                .start(&mut command)
+                .expect("Failed to start sandboxed child process!");
         } else {
             let path_to_self = env::current_exe()
                 .expect("Failed to get current executor.");
             let mut child_process = process::Command::new(path_to_self);
             self.setup_common(&mut child_process, token);
-
-            ChildProcess::Unsandboxed(child_process.spawn()
-                                      .expect("Failed to start unsandboxed child process!"))
-        };
+            let _ = child_process.spawn().expect("Failed to start unsandboxed child process!");
+        }
 
         let (_receiver, sender) = server.accept().expect("Server failed to accept.");
         try!(sender.send(self));
 
-        Ok(child_process)
+        Ok(())
     }
 
     #[cfg(target_os = "windows")]
-    pub fn spawn_multiprocess(self) -> Result<ChildProcess, IOError> {
+    pub fn spawn_multiprocess(self) -> Result<(), IOError> {
         error!("Multiprocess is not supported on Windows.");
         process::exit(1);
     }

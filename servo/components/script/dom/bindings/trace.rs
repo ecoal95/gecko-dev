@@ -98,7 +98,7 @@ use style::keyframes::Keyframe;
 use style::media_queries::MediaList;
 use style::properties::PropertyDeclarationBlock;
 use style::selector_parser::{PseudoElement, Snapshot};
-use style::stylesheets::{CssRules, KeyframesRule, MediaRule, NamespaceRule, StyleRule};
+use style::stylesheets::{CssRules, KeyframesRule, MediaRule, NamespaceRule, StyleRule, ImportRule};
 use style::values::specified::Length;
 use style::viewport::ViewportRule;
 use time::Duration;
@@ -525,6 +525,12 @@ unsafe impl JSTraceable for RwLock<KeyframesRule> {
     }
 }
 
+unsafe impl JSTraceable for RwLock<ImportRule> {
+    unsafe fn trace(&self, _trc: *mut JSTracer) {
+        // Do nothing.
+    }
+}
+
 unsafe impl JSTraceable for RwLock<MediaRule> {
     unsafe fn trace(&self, _trc: *mut JSTracer) {
         // Do nothing.
@@ -574,8 +580,8 @@ pub struct RootedTraceableSet {
 
 thread_local!(
     /// TLV Holds a set of JSTraceables that need to be rooted
-    static ROOTED_TRACEABLES: Rc<RefCell<RootedTraceableSet>> =
-        Rc::new(RefCell::new(RootedTraceableSet::new()));
+    static ROOTED_TRACEABLES: RefCell<RootedTraceableSet> =
+        RefCell::new(RootedTraceableSet::new());
 );
 
 impl RootedTraceableSet {

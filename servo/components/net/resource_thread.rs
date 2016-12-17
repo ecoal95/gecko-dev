@@ -14,17 +14,12 @@ use filemanager_thread::{FileManager, TFDProvider};
 use hsts::HstsList;
 use http_loader::HttpState;
 use hyper::client::pool::Pool;
-use hyper::header::{ContentType, Header, SetCookie};
-use hyper::mime::{Mime, SubLevel, TopLevel};
 use hyper_serde::Serde;
 use ipc_channel::ipc::{self, IpcReceiver, IpcReceiverSet, IpcSender};
-use mime_classifier::{ApacheBugFlag, MimeClassifier, NoSniffFlag};
-use net_traits::{CookieSource, CoreResourceThread, Metadata, ProgressMsg};
-use net_traits::{CoreResourceMsg, FetchResponseMsg, FetchTaskTarget, LoadConsumer};
-use net_traits::{CustomResponseMediator, LoadResponse, NetworkError, ResourceId};
+use net_traits::{CookieSource, CoreResourceThread};
+use net_traits::{CoreResourceMsg, FetchResponseMsg};
+use net_traits::{CustomResponseMediator, ResourceId};
 use net_traits::{ResourceThreads, WebSocketCommunicate, WebSocketConnectData};
-use net_traits::LoadContext;
-use net_traits::ProgressMsg::Done;
 use net_traits::request::{Request, RequestInit};
 use net_traits::storage_thread::StorageThreadMsg;
 use profile_traits::time::ProfilerChan;
@@ -41,16 +36,11 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, RwLock};
 use std::sync::mpsc::Sender;
+use std::thread;
 use storage_thread::StorageThreadFactory;
-use util::prefs::PREFS;
-use util::thread::spawn_named;
 use websocket_loader;
 
 const TFD_PROVIDER: &'static TFDProvider = &TFDProvider;
-
-pub enum ProgressSender {
-    Channel(IpcSender<ProgressMsg>),
-}
 
 #[derive(Clone)]
 pub struct ResourceGroup {
@@ -58,82 +48,6 @@ pub struct ResourceGroup {
     auth_cache: Arc<RwLock<AuthCache>>,
     hsts_list: Arc<RwLock<HstsList>>,
     connector: Arc<Pool<Connector>>,
-}
-
-impl ProgressSender {
-    //XXXjdm return actual error
-    pub fn send(&self, msg: ProgressMsg) -> Result<(), ()> {
-        match *self {
-            ProgressSender::Channel(ref c) => c.send(msg).map_err(|_| ()),
-        }
-    }
-}
-
-pub fn send_error(url: ServoUrl, err: NetworkError, start_chan: LoadConsumer) {
-    let mut metadata: Metadata = Metadata::default(url);
-    metadata.status = None;
-
-    if let Ok(p) = start_sending_opt(start_chan, metadata) {
-        p.send(Done(Err(err))).unwrap();
-    }
-}
-
-/// For use by loaders in responding to a Load message that allows content sniffing.
-pub fn start_sending_sniffed_opt(start_chan: LoadConsumer, mut metadata: Metadata,
-                                 classifier: Arc<MimeClassifier>, partial_body: &[u8],
-                                 context: LoadContext)
-                                 -> Result<ProgressSender, ()> {
-    if PREFS.get("network.mime.sniff").as_boolean().unwrap_or(false) {
-        // TODO: should be calculated in the resource loader, from pull requeset #4094
-        let mut no_sniff = NoSniffFlag::Off;
-        let mut check_for_apache_bug = ApacheBugFlag::Off;
-
-        if let Some(ref headers) = metadata.headers {
-            if let Some(ref content_type) = headers.get_raw("content-type").and_then(|c| c.last()) {
-                check_for_apache_bug = ApacheBugFlag::from_content_type(content_type)
-            }
-            if let Some(ref raw_content_type_options) = headers.get_raw("X-content-type-options") {
-                if raw_content_type_options.iter().any(|ref opt| *opt == b"nosniff") {
-                    no_sniff = NoSniffFlag::On
-                }
-            }
-        }
-
-        let supplied_type =
-            metadata.content_type.as_ref().map(|&Serde(ContentType(Mime(ref toplevel, ref sublevel, _)))| {
-            (toplevel.to_owned(), format!("{}", sublevel))
-        });
-        let (toplevel, sublevel) = classifier.classify(context,
-                                                       no_sniff,
-                                                       check_for_apache_bug,
-                                                       &supplied_type,
-                                                       &partial_body);
-        let mime_tp: TopLevel = toplevel.into();
-        let mime_sb: SubLevel = sublevel.parse().unwrap();
-        metadata.content_type =
-            Some(Serde(ContentType(Mime(mime_tp, mime_sb, vec![]))));
-    }
-
-    start_sending_opt(start_chan, metadata)
-}
-
-/// For use by loaders in responding to a Load message.
-/// It takes an optional NetworkError, so that we can extract the SSL Validation errors
-/// and take it to the HTML parser
-fn start_sending_opt(start_chan: LoadConsumer, metadata: Metadata) -> Result<ProgressSender, ()> {
-    match start_chan {
-        LoadConsumer::Channel(start_chan) => {
-            let (progress_chan, progress_port) = ipc::channel().unwrap();
-            let result = start_chan.send(LoadResponse {
-                metadata: metadata,
-                progress_port: progress_port,
-            });
-            match result {
-                Ok(_) => Ok(ProgressSender::Channel(progress_chan)),
-                Err(_) => Err(())
-            }
-        }
-    }
 }
 
 /// Returns a tuple of (public, private) senders to the new threads.
@@ -161,7 +75,7 @@ pub fn new_core_resource_thread(user_agent: Cow<'static, str>,
                                 -> (CoreResourceThread, CoreResourceThread) {
     let (public_setup_chan, public_setup_port) = ipc::channel().unwrap();
     let (private_setup_chan, private_setup_port) = ipc::channel().unwrap();
-    spawn_named("ResourceManager".to_owned(), move || {
+    thread::Builder::new().name("ResourceManager".to_owned()).spawn(move || {
         let resource_manager = CoreResourceManager::new(
             user_agent, devtools_chan, profiler_chan
         );
@@ -172,7 +86,7 @@ pub fn new_core_resource_thread(user_agent: Cow<'static, str>,
         };
         channel_manager.start(public_setup_port,
                               private_setup_port);
-    });
+    }).expect("Thread spawning failed");
     (public_setup_chan, private_setup_chan)
 }
 
@@ -244,10 +158,13 @@ impl ResourceChannelManager {
                 self.resource_manager.fetch(init, sender, group),
             CoreResourceMsg::WebsocketConnect(connect, connect_data) =>
                 self.resource_manager.websocket_connect(connect, connect_data, group),
-            CoreResourceMsg::SetCookiesForUrl(request, cookie_list, source) =>
-                self.resource_manager.set_cookies_for_url(request, cookie_list, source, group),
-            CoreResourceMsg::SetCookiesForUrlWithData(request, cookie, source) =>
-                self.resource_manager.set_cookies_for_url_with_data(request, cookie, source, group),
+            CoreResourceMsg::SetCookieForUrl(request, cookie, source) =>
+                self.resource_manager.set_cookie_for_url(&request, cookie, source, group),
+            CoreResourceMsg::SetCookiesForUrl(request, cookies, source) => {
+                for cookie in cookies {
+                    self.resource_manager.set_cookie_for_url(&request, cookie.0, source, group);
+                }
+            }
             CoreResourceMsg::GetCookiesForUrl(url, consumer, source) => {
                 let mut cookie_jar = group.cookie_jar.write().unwrap();
                 consumer.send(cookie_jar.cookies_for_url(&url, source)).unwrap();
@@ -391,24 +308,8 @@ impl CoreResourceManager {
         }
     }
 
-    fn set_cookies_for_url(&mut self,
-                           request: ServoUrl,
-                           cookie_list: String,
-                           source: CookieSource,
-                           resource_group: &ResourceGroup) {
-        let header = Header::parse_header(&[cookie_list.into_bytes()]);
-        if let Ok(SetCookie(cookies)) = header {
-            for bare_cookie in cookies {
-                if let Some(cookie) = cookie::Cookie::new_wrapped(bare_cookie, &request, source) {
-                    let mut cookie_jar = resource_group.cookie_jar.write().unwrap();
-                    cookie_jar.push(cookie, source);
-                }
-            }
-        }
-    }
-
-    fn set_cookies_for_url_with_data(&mut self, request: ServoUrl, cookie: cookie_rs::Cookie, source: CookieSource,
-                                     resource_group: &ResourceGroup) {
+    fn set_cookie_for_url(&mut self, request: &ServoUrl, cookie: cookie_rs::Cookie, source: CookieSource,
+                          resource_group: &ResourceGroup) {
         if let Some(cookie) = cookie::Cookie::new_wrapped(cookie, &request, source) {
             let mut cookie_jar = resource_group.cookie_jar.write().unwrap();
             cookie_jar.push(cookie, source)
@@ -417,7 +318,7 @@ impl CoreResourceManager {
 
     fn fetch(&self,
              init: RequestInit,
-             sender: IpcSender<FetchResponseMsg>,
+             mut sender: IpcSender<FetchResponseMsg>,
              group: &ResourceGroup) {
         let http_state = HttpState {
             hsts_list: group.hsts_list.clone(),
@@ -428,21 +329,20 @@ impl CoreResourceManager {
         let ua = self.user_agent.clone();
         let dc = self.devtools_chan.clone();
         let filemanager = self.filemanager.clone();
-        spawn_named(format!("fetch thread for {}", init.url), move || {
+        thread::Builder::new().name(format!("fetch thread for {}", init.url)).spawn(move || {
             let request = Request::from_init(init);
             // XXXManishearth: Check origin against pipeline id (also ensure that the mode is allowed)
             // todo load context / mimesniff in fetch
             // todo referrer policy?
             // todo service worker stuff
-            let mut target = Some(Box::new(sender) as Box<FetchTaskTarget + Send + 'static>);
             let context = FetchContext {
                 state: http_state,
                 user_agent: ua,
                 devtools_chan: dc,
                 filemanager: filemanager,
             };
-            fetch(Rc::new(request), &mut target, &context);
-        })
+            fetch(Rc::new(request), &mut sender, &context);
+        }).expect("Thread spawning failed");
     }
 
     fn websocket_connect(&self,

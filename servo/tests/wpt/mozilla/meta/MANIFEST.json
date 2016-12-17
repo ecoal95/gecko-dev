@@ -6498,6 +6498,18 @@
             "url": "/_mozilla/mozilla/table_valign_uneven_height.html"
           }
         ],
+        "mozilla/textarea_placeholder.html": [
+          {
+            "path": "mozilla/textarea_placeholder.html",
+            "references": [
+              [
+                "/_mozilla/mozilla/textarea_placeholder_ref.html",
+                "=="
+              ]
+            ],
+            "url": "/_mozilla/mozilla/textarea_placeholder.html"
+          }
+        ],
         "mozilla/webgl/clearcolor.html": [
           {
             "path": "mozilla/webgl/clearcolor.html",
@@ -6626,6 +6638,12 @@
             "url": "/_mozilla/css/float_relative_to_position.html"
           }
         ],
+        "css/import_serialization.html": [
+          {
+            "path": "css/import_serialization.html",
+            "url": "/_mozilla/css/import_serialization.html"
+          }
+        ],
         "css/matchMedia.html": [
           {
             "path": "css/matchMedia.html",
@@ -6732,6 +6750,12 @@
           {
             "path": "mozilla/binding_keyword.html",
             "url": "/_mozilla/mozilla/binding_keyword.html"
+          }
+        ],
+        "mozilla/bluetooth/advertisingEvent/watchAdvertisements-succeeds.html": [
+          {
+            "path": "mozilla/bluetooth/advertisingEvent/watchAdvertisements-succeeds.html",
+            "url": "/_mozilla/mozilla/bluetooth/advertisingEvent/watchAdvertisements-succeeds.html"
           }
         ],
         "mozilla/bluetooth/connect/connection-succeeds.html": [
@@ -8274,6 +8298,12 @@
           {
             "path": "mozilla/iterable.html",
             "url": "/_mozilla/mozilla/iterable.html"
+          }
+        ],
+        "mozilla/keyframe-infinite-percentage.html": [
+          {
+            "path": "mozilla/keyframe-infinite-percentage.html",
+            "url": "/_mozilla/mozilla/keyframe-infinite-percentage.html"
           }
         ],
         "mozilla/lenient_this.html": [
@@ -21544,6 +21574,18 @@
             ]
           ],
           "url": "/_mozilla/mozilla/table_valign_uneven_height.html"
+        }
+      ],
+      "mozilla/textarea_placeholder.html": [
+        {
+          "path": "mozilla/textarea_placeholder.html",
+          "references": [
+            [
+              "/_mozilla/mozilla/textarea_placeholder_ref.html",
+              "=="
+            ]
+          ],
+          "url": "/_mozilla/mozilla/textarea_placeholder.html"
         }
       ],
       "mozilla/webgl/clearcolor.html": [

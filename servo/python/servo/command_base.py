@@ -50,12 +50,14 @@ def setlocale(name):
 
 def find_dep_path_newest(package, bin_path):
     deps_path = path.join(path.split(bin_path)[0], "build")
+    candidates = []
     with cd(deps_path):
-        candidates = glob(package + '-*')
-    candidates = (path.join(deps_path, c) for c in candidates)
-    candidate_times = sorted(((path.getmtime(c), c) for c in candidates), reverse=True)
-    if len(candidate_times) > 0:
-        return candidate_times[0][1]
+        for c in glob(package + '-*'):
+            candidate_path = path.join(deps_path, c)
+            if path.exists(path.join(candidate_path, "output")):
+                candidates.append(candidate_path)
+    if candidates:
+        return max(candidates, key=lambda c: path.getmtime(path.join(c, "output")))
     return None
 
 
@@ -216,7 +218,10 @@ def is_linux():
 def set_osmesa_env(bin_path, env):
     """Set proper LD_LIBRARY_PATH and DRIVE for software rendering on Linux and OSX"""
     if is_linux():
-        osmesa_path = path.join(find_dep_path_newest('osmesa-src', bin_path), "out", "lib", "gallium")
+        dep_path = find_dep_path_newest('osmesa-src', bin_path)
+        if not dep_path:
+            return None
+        osmesa_path = path.join(dep_path, "out", "lib", "gallium")
         env["LD_LIBRARY_PATH"] = osmesa_path
         env["GALLIUM_DRIVER"] = "softpipe"
     elif is_macosx():
@@ -224,6 +229,8 @@ def set_osmesa_env(bin_path, env):
                                 "out", "src", "gallium", "targets", "osmesa", ".libs")
         glapi_path = path.join(find_dep_path_newest('osmesa-src', bin_path),
                                "out", "src", "mapi", "shared-glapi", ".libs")
+        if not (osmesa_path and glapi_path):
+            return None
         env["DYLD_LIBRARY_PATH"] = osmesa_path + ":" + glapi_path
         env["GALLIUM_DRIVER"] = "softpipe"
     return env
@@ -297,6 +304,7 @@ class CommandBase(object):
         self.config["build"].setdefault("mode", "")
         self.config["build"].setdefault("debug-mozjs", False)
         self.config["build"].setdefault("ccache", "")
+        self.config["build"].setdefault("rustflags", "")
 
         self.config.setdefault("android", {})
         self.config["android"].setdefault("sdk", "")
@@ -420,6 +428,10 @@ class CommandBase(object):
             # Link moztools
             env["MOZTOOLS_PATH"] = path.join(msvc_deps_dir, "moztools", "bin")
 
+        if is_windows():
+            if not os.environ.get("NATIVE_WIN32_PYTHON"):
+                env["NATIVE_WIN32_PYTHON"] = sys.executable
+
         if not self.config["tools"]["system-rust"] \
                 or self.config["tools"]["rust-root"]:
             env["RUST_ROOT"] = self.config["tools"]["rust-root"]
@@ -485,6 +497,9 @@ class CommandBase(object):
             env['HOST_FILE'] = hosts_file_path
 
         env['RUSTDOC'] = path.join(self.context.topdir, 'etc', 'rustdoc-with-private')
+
+        if self.config["build"]["rustflags"]:
+            env['RUSTFLAGS'] = env.get('RUSTFLAGS', "") + " " + self.config["build"]["rustflags"]
 
         # Don't run the gold linker if on Windows https://github.com/servo/servo/issues/9499
         if self.config["tools"]["rustc-with-gold"] and sys.platform not in ("win32", "msys"):

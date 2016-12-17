@@ -8,7 +8,7 @@ extern crate ipc_channel;
 extern crate regex;
 #[macro_use]
 extern crate serde_derive;
-extern crate util;
+extern crate servo_config;
 
 pub mod blocklist;
 pub mod scanfilter;
@@ -27,14 +27,18 @@ pub enum BluetoothError {
 }
 
 #[derive(Deserialize, Serialize)]
+pub enum GATTType {
+    PrimaryService,
+    Characteristic,
+    IncludedService,
+    Descriptor,
+}
+
+#[derive(Deserialize, Serialize)]
 pub struct BluetoothDeviceMsg {
     // Bluetooth Device properties
     pub id: String,
     pub name: Option<String>,
-    // Advertising Data properties
-    pub appearance: Option<u16>,
-    pub tx_power: Option<i8>,
-    pub rssi: Option<i8>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -82,17 +86,11 @@ pub enum BluetoothRequest {
     RequestDevice(RequestDeviceoptions, IpcSender<BluetoothResponseResult>),
     GATTServerConnect(String, IpcSender<BluetoothResponseResult>),
     GATTServerDisconnect(String, IpcSender<BluetoothResult<bool>>),
-    GetPrimaryService(String, String, IpcSender<BluetoothResponseResult>),
-    GetPrimaryServices(String, Option<String>, IpcSender<BluetoothResponseResult>),
-    GetIncludedService(String, String, IpcSender<BluetoothResponseResult>),
-    GetIncludedServices(String, Option<String>, IpcSender<BluetoothResponseResult>),
-    GetCharacteristic(String, String, IpcSender<BluetoothResponseResult>),
-    GetCharacteristics(String, Option<String>, IpcSender<BluetoothResponseResult>),
-    GetDescriptor(String, String, IpcSender<BluetoothResponseResult>),
-    GetDescriptors(String, Option<String>, IpcSender<BluetoothResponseResult>),
+    GetGATTChildren(String, Option<String>, bool, GATTType, IpcSender<BluetoothResponseResult>),
     ReadValue(String, IpcSender<BluetoothResponseResult>),
     WriteValue(String, Vec<u8>, IpcSender<BluetoothResponseResult>),
     EnableNotification(String, bool, IpcSender<BluetoothResponseResult>),
+    WatchAdvertisements(String, IpcSender<BluetoothResponseResult>),
     Test(String, IpcSender<BluetoothResult<()>>),
     Exit,
 }
@@ -101,17 +99,14 @@ pub enum BluetoothRequest {
 pub enum BluetoothResponse {
     RequestDevice(BluetoothDeviceMsg),
     GATTServerConnect(bool),
-    GetPrimaryService(BluetoothServiceMsg),
-    GetPrimaryServices(BluetoothServicesMsg),
-    GetIncludedService(BluetoothServiceMsg),
-    GetIncludedServices(BluetoothServicesMsg),
-    GetCharacteristic(BluetoothCharacteristicMsg),
-    GetCharacteristics(BluetoothCharacteristicsMsg),
-    GetDescriptor(BluetoothDescriptorMsg),
-    GetDescriptors(BluetoothDescriptorsMsg),
+    GetPrimaryServices(BluetoothServicesMsg, bool),
+    GetIncludedServices(BluetoothServicesMsg, bool),
+    GetCharacteristics(BluetoothCharacteristicsMsg, bool),
+    GetDescriptors(BluetoothDescriptorsMsg, bool),
     ReadValue(Vec<u8>),
     WriteValue(Vec<u8>),
     EnableNotification(()),
+    WatchAdvertisements(()),
 }
 
 pub trait BluetoothResponseListener {

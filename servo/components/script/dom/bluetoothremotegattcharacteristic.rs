@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use bluetooth_traits::{BluetoothRequest, BluetoothResponse};
+use bluetooth_traits::{BluetoothRequest, BluetoothResponse, GATTType};
 use bluetooth_traits::blocklist::{Blocklist, uuid_is_blocklisted};
 use dom::bindings::cell::DOMRefCell;
 use dom::bindings::codegen::Bindings::BluetoothCharacteristicPropertiesBinding::
@@ -19,7 +19,7 @@ use dom::bindings::inheritance::Castable;
 use dom::bindings::js::{MutJS, Root};
 use dom::bindings::reflector::{DomObject, reflect_dom_object};
 use dom::bindings::str::{ByteString, DOMString};
-use dom::bluetooth::{AsyncBluetoothListener, response_async};
+use dom::bluetooth::{AsyncBluetoothListener, get_gatt_children, response_async};
 use dom::bluetoothcharacteristicproperties::BluetoothCharacteristicProperties;
 use dom::bluetoothremotegattservice::BluetoothRemoteGATTService;
 use dom::bluetoothuuid::{BluetoothDescriptorUUID, BluetoothUUID};
@@ -102,83 +102,18 @@ impl BluetoothRemoteGATTCharacteristicMethods for BluetoothRemoteGATTCharacteris
 
     #[allow(unrooted_must_root)]
     // https://webbluetoothcg.github.io/web-bluetooth/#dom-bluetoothremotegattcharacteristic-getdescriptor
-    // https://webbluetoothcg.github.io/web-bluetooth/#getgattchildren
     fn GetDescriptor(&self, descriptor: BluetoothDescriptorUUID) -> Rc<Promise> {
-        let p = Promise::new(&self.global());
-        let p_cx = p.global().get_cx();
-
-        // Step 1.
-        let uuid = match BluetoothUUID::descriptor(descriptor) {
-            Ok(uuid) => uuid.to_string(),
-            Err(e) => {
-                p.reject_error(p_cx, e);
-                return p;
-            }
-        };
-
-        // Step 2.
-        if uuid_is_blocklisted(uuid.as_ref(), Blocklist::All) {
-            p.reject_error(p_cx, Security);
-            return p;
-        }
-
-        // Step 3 - 4.
-        if !self.Service().Device().Gatt().Connected() {
-            p.reject_error(p_cx, Network);
-            return p;
-        }
-
-        // TODO: Step 5: Implement representedService internal slot for BluetoothRemoteGATTService.
-
-        // Note: Steps 6 - 7 are implemented in components/bluetooth/lib.rs in get_descriptor function
-        // and in handle_response function.
-        let sender = response_async(&p, self);
-        self.get_bluetooth_thread().send(
-            BluetoothRequest::GetDescriptor(self.get_instance_id(), uuid, sender)).unwrap();
-        return p;
+        get_gatt_children(self, true, BluetoothUUID::descriptor, Some(descriptor), self.get_instance_id(),
+                          self.Service().Device().Gatt().Connected(), GATTType::Descriptor)
     }
 
     #[allow(unrooted_must_root)]
     // https://webbluetoothcg.github.io/web-bluetooth/#dom-bluetoothremotegattcharacteristic-getdescriptors
-    // https://webbluetoothcg.github.io/web-bluetooth/#getgattchildren
     fn GetDescriptors(&self,
                       descriptor: Option<BluetoothDescriptorUUID>)
                       -> Rc<Promise> {
-        let p = Promise::new(&self.global());
-        let p_cx = p.global().get_cx();
-        let mut uuid: Option<String> = None;
-        if let Some(d) = descriptor {
-            // Step 1.
-            uuid = match BluetoothUUID::descriptor(d) {
-                Ok(uuid) => Some(uuid.to_string()),
-                Err(e) => {
-                    p.reject_error(p_cx, e);
-                    return p;
-                }
-            };
-            if let Some(ref uuid) = uuid {
-                // Step 2.
-                if uuid_is_blocklisted(uuid.as_ref(), Blocklist::All) {
-                    p.reject_error(p_cx, Security);
-                    return p;
-                }
-            }
-        };
-
-        // Step 3 - 4.
-        if !self.Service().Device().Gatt().Connected() {
-            p.reject_error(p_cx, Network);
-            return p;
-        }
-
-        // TODO: Step 5: Implement representedService internal slot for BluetoothRemoteGATTService.
-
-        // Note: Steps 6 - 7 are implemented in components/bluetooth/lib.rs in get_descriptors function
-        // and in handle_response function.
-        let sender = response_async(&p, self);
-        self.get_bluetooth_thread().send(
-            BluetoothRequest::GetDescriptors(self.get_instance_id(), uuid, sender)).unwrap();
-        return p;
+        get_gatt_children(self, false, BluetoothUUID::descriptor, descriptor, self.get_instance_id(),
+                          self.Service().Device().Gatt().Connected(), GATTType::Descriptor)
     }
 
     // https://webbluetoothcg.github.io/web-bluetooth/#dom-bluetoothremotegattcharacteristic-value
@@ -204,8 +139,6 @@ impl BluetoothRemoteGATTCharacteristicMethods for BluetoothRemoteGATTCharacteris
             return p;
         }
 
-        // TODO: Step 3 - 4: Implement representedCharacteristic internal slot for BluetoothRemoteGATTCharacteristic.
-
         // TODO: Step 5: Implement the `connection-checking-wrapper` algorithm for BluetoothRemoteGATTServer.
 
         // Step 5.1.
@@ -214,8 +147,8 @@ impl BluetoothRemoteGATTCharacteristicMethods for BluetoothRemoteGATTCharacteris
             return p;
         }
 
-        // Note: Remaining substeps of Step 5 are implemented in components/bluetooth/lib.rs in readValue function
-        // and in handle_response function.
+        // Note: Steps 3 - 4 and the remaining substeps of Step 5 are implemented in components/bluetooth/lib.rs
+        // in readValue function and in handle_response function.
         let sender = response_async(&p, self);
         self.get_bluetooth_thread().send(
             BluetoothRequest::ReadValue(self.get_instance_id(), sender)).unwrap();
@@ -246,8 +179,6 @@ impl BluetoothRemoteGATTCharacteristicMethods for BluetoothRemoteGATTCharacteris
             return p;
         }
 
-        // TODO: Step 5 - 6: Implement representedCharacteristic internal slot for BluetoothRemoteGATTCharacteristic.
-
         // TODO: Step 7: Implement the `connection-checking-wrapper` algorithm for BluetoothRemoteGATTServer.
 
         // Step 7.1.
@@ -258,8 +189,8 @@ impl BluetoothRemoteGATTCharacteristicMethods for BluetoothRemoteGATTCharacteris
             return p;
         }
 
-        // Note: Remaining substeps of Step 7 are implemented in components/bluetooth/lib.rs in writeValue function
-        // and in handle_response function.
+        // Note: Steps 5 - 6 and the remaining substeps of Step 7 are implemented in components/bluetooth/lib.rs
+        // in writeValue function and in handle_response function.
         let sender = response_async(&p, self);
         self.get_bluetooth_thread().send(
             BluetoothRequest::WriteValue(self.get_instance_id(), value, sender)).unwrap();
@@ -278,8 +209,6 @@ impl BluetoothRemoteGATTCharacteristicMethods for BluetoothRemoteGATTCharacteris
             return p;
         }
 
-        // TODO: Step 2 - 3: Implement representedCharacteristic internal slot for BluetoothRemoteGATTCharacteristic.
-
         // Step 4.
         if !(self.Properties().Notify() ||
              self.Properties().Indicate()) {
@@ -295,7 +224,7 @@ impl BluetoothRemoteGATTCharacteristicMethods for BluetoothRemoteGATTCharacteris
             return p;
         }
 
-        // Note: Steps 7 - 11 are implemented in components/bluetooth/lib.rs in enable_notification function
+        // Note: Steps 2 - 3, 7 - 11 are implemented in components/bluetooth/lib.rs in enable_notification function
         // and in handle_response function.
         let sender = response_async(&p, self);
         self.get_bluetooth_thread().send(
@@ -311,11 +240,10 @@ impl BluetoothRemoteGATTCharacteristicMethods for BluetoothRemoteGATTCharacteris
         let p = Promise::new(&self.global());
         let sender = response_async(&p, self);
 
-        // TODO: Step 1 - 4: Implement representedCharacteristic internal slot and
-        // `active notification context set` for BluetoothRemoteGATTCharacteristic,
+        // TODO: Step 3 - 4: Implement `active notification context set` for BluetoothRemoteGATTCharacteristic,
 
-        // Note: Part of Step 4 and Step 5 are implemented in components/bluetooth/lib.rs in enable_notification
-        // function and in handle_response function.
+        // Note: Steps 1 - 2, and part of Step 4 and Step 5 are implemented in components/bluetooth/lib.rs
+        // in enable_notification function and in handle_response function.
         self.get_bluetooth_thread().send(
             BluetoothRequest::EnableNotification(self.get_instance_id(),
                                                  false,
@@ -331,17 +259,13 @@ impl AsyncBluetoothListener for BluetoothRemoteGATTCharacteristic {
     fn handle_response(&self, response: BluetoothResponse, promise_cx: *mut JSContext, promise: &Rc<Promise>) {
         let device = self.Service().Device();
         match response {
-            // https://webbluetoothcg.github.io/web-bluetooth/#dom-bluetoothremotegattcharacteristic-getdescriptor
             // https://webbluetoothcg.github.io/web-bluetooth/#getgattchildren
             // Step 7.
-            BluetoothResponse::GetDescriptor(descriptor) => {
-                let bt_descriptor = device.get_or_create_descriptor(&descriptor, &self);
-                promise.resolve_native(promise_cx, &bt_descriptor);
-            },
-            // https://webbluetoothcg.github.io/web-bluetooth/#dom-bluetoothremotegattcharacteristic-getdescriptors
-            // https://webbluetoothcg.github.io/web-bluetooth/#getgattchildren
-            // Step 7.
-            BluetoothResponse::GetDescriptors(descriptors_vec) => {
+            BluetoothResponse::GetDescriptors(descriptors_vec, single) => {
+                if single {
+                    promise.resolve_native(promise_cx, &device.get_or_create_descriptor(&descriptors_vec[0], &self));
+                    return;
+                }
                 let mut descriptors = vec!();
                 for descriptor in descriptors_vec {
                     let bt_descriptor = device.get_or_create_descriptor(&descriptor, &self);

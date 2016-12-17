@@ -11,10 +11,10 @@ use style_traits::ToCss;
 use super::{CSSFloat, specified};
 
 pub use cssparser::Color as CSSColor;
-pub use self::image::{EndingShape as GradientShape, Gradient, GradientKind, Image};
+pub use self::image::{AngleOrCorner, EndingShape as GradientShape, Gradient, GradientKind, Image};
 pub use self::image::{LengthOrKeyword, LengthOrPercentageOrKeyword};
 pub use super::{Either, None_};
-pub use super::specified::{Angle, BorderStyle, Time, UrlOrNone};
+pub use super::specified::{Angle, BorderStyle, GridLine, Time, UrlOrNone};
 pub use super::specified::url::UrlExtraData;
 pub use self::length::{CalcLengthOrPercentage, Length, LengthOrNumber, LengthOrPercentage, LengthOrPercentageOrAuto};
 pub use self::length::{LengthOrPercentageOrAutoOrContent, LengthOrPercentageOrNone, LengthOrNone};
@@ -165,6 +165,17 @@ impl ToCss for BorderRadiusSize {
         try!(dest.write_str("/"));
         self.0.height.to_css(dest)
     }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+pub struct Shadow {
+    pub offset_x: Au,
+    pub offset_y: Au,
+    pub blur_radius: Au,
+    pub spread_radius: Au,
+    pub color: CSSColor,
+    pub inset: bool,
 }
 
 pub type Number = CSSFloat;

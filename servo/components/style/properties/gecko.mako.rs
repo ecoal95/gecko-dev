@@ -5,7 +5,7 @@
 // `data` comes from components/style/properties.mako.rs; see build.rs for more details.
 
 <%!
-    from data import to_rust_ident
+    from data import to_rust_ident, to_camel_case
     from data import Keyword
 %>
 <%namespace name="helpers" file="/helpers.mako.rs" />
@@ -168,6 +168,11 @@ impl ComputedValues {
 
     pub fn custom_properties(&self) -> Option<Arc<ComputedValuesMap>> {
         self.custom_properties.as_ref().map(|x| x.clone())
+    }
+
+    #[allow(non_snake_case)]
+    pub fn has_moz_binding(&self) -> bool {
+        !self.get_box().gecko.mBinding.mRawPtr.is_null()
     }
 
     pub fn root_font_size(&self) -> Au { self.root_font_size }
@@ -626,8 +631,15 @@ class Corner(object):
         self.x_index = 2 * index
         self.y_index = 2 * index + 1
 
+class GridLine(object):
+    def __init__(self, name):
+        self.ident = "grid-" + name.lower()
+        self.name = self.ident.replace('-', '_')
+        self.gecko = "m" + to_camel_case(self.ident)
+
 SIDES = [Side("Top", 0), Side("Right", 1), Side("Bottom", 2), Side("Left", 3)]
 CORNERS = [Corner("TOP_LEFT", 0), Corner("TOP_RIGHT", 1), Corner("BOTTOM_RIGHT", 2), Corner("BOTTOM_LEFT", 3)]
+GRID_LINES = map(GridLine, ["row-start", "row-end", "column-start", "column-end"])
 %>
 
 #[allow(dead_code)]
@@ -817,7 +829,7 @@ fn static_assert() {
     % endfor
 </%self:impl_trait>
 
-<% skip_position_longhands = " ".join(x.ident for x in SIDES) %>
+<% skip_position_longhands = " ".join(x.ident for x in SIDES + GRID_LINES) %>
 <%self:impl_trait style_struct_name="Position"
                   skip_longhands="${skip_position_longhands} z-index box-sizing order">
 
@@ -878,6 +890,27 @@ fn static_assert() {
     }
 
     ${impl_simple_copy('order', 'mOrder')}
+
+    % for value in GRID_LINES:
+    pub fn set_${value.name}(&mut self, v: longhands::${value.name}::computed_value::T) {
+        use nsstring::nsCString;
+        use gecko_bindings::structs::{nsStyleGridLine_kMinLine, nsStyleGridLine_kMaxLine};
+
+        let ident = v.ident.unwrap_or(String::new());
+        self.gecko.${value.gecko}.mLineName.assign_utf8(&nsCString::from(&*ident));
+        self.gecko.${value.gecko}.mHasSpan = v.is_span;
+        self.gecko.${value.gecko}.mInteger = v.integer.map(|i| {
+            // clamping the integer between a range
+            cmp::max(nsStyleGridLine_kMinLine, cmp::min(i, nsStyleGridLine_kMaxLine))
+        }).unwrap_or(0);
+    }
+
+    pub fn copy_${value.name}_from(&mut self, other: &Self) {
+        self.gecko.${value.gecko}.mHasSpan = other.gecko.${value.gecko}.mHasSpan;
+        self.gecko.${value.gecko}.mInteger = other.gecko.${value.gecko}.mInteger;
+        self.gecko.${value.gecko}.mLineName.assign(&other.gecko.${value.gecko}.mLineName);
+    }
+    % endfor
 
 </%self:impl_trait>
 
@@ -1384,6 +1417,7 @@ fn static_assert() {
         }
     </%self:simple_image_array_property>
 
+    % if shorthand != "background":
     pub fn copy_${shorthand}_position_from(&mut self, other: &Self) {
         use gecko_bindings::structs::nsStyleImageLayers_LayerType as LayerType;
 
@@ -1419,7 +1453,7 @@ fn static_assert() {
     pub fn clone_${shorthand}_position(&self)
         -> longhands::${shorthand}_position::computed_value::T {
         use values::computed::position::Position;
-        longhands::background_position::computed_value::T(
+        longhands::${shorthand}_position::computed_value::T(
             self.gecko.${image_layers_field}.mLayers.iter()
                 .take(self.gecko.${image_layers_field}.mPositionXCount as usize)
                 .take(self.gecko.${image_layers_field}.mPositionYCount as usize)
@@ -1448,6 +1482,7 @@ fn static_assert() {
             geckolayer.mPosition.mYPosition = servo.vertical.into();
         }
     }
+    % endif
 
     <%self:simple_image_array_property name="size" shorthand="${shorthand}" field_name="mSize">
         use gecko_bindings::structs::nsStyleImageLayers_Size_Dimension;
@@ -1597,7 +1632,9 @@ fn static_assert() {
                                   background-image background-clip
                                   background-origin background-attachment
                                   background-size background-position
-                                  background-blend-mode""" %>
+                                  background-blend-mode
+                                  background-position-x
+                                  background-position-y""" %>
 <%self:impl_trait style_struct_name="Background"
                   skip_longhands="${skip_background_longhands}"
                   skip_additionals="*">
@@ -1635,6 +1672,56 @@ fn static_assert() {
             T::luminosity => structs::NS_STYLE_BLEND_LUMINOSITY as u8,
         }
     </%self:simple_image_array_property>
+
+    % for orientation in [("x", "Horizontal"), ("y", "Vertical")]:
+    pub fn copy_background_position_${orientation[0]}_from(&mut self, other: &Self) {
+        use gecko_bindings::structs::nsStyleImageLayers_LayerType as LayerType;
+
+        self.gecko.mImage.mPosition${orientation[0].upper()}Count
+                = cmp::min(1, other.gecko.mImage.mPosition${orientation[0].upper()}Count);
+        self.gecko.mImage.mLayers.mFirstElement.mPosition =
+            other.gecko.mImage.mLayers.mFirstElement.mPosition;
+        unsafe {
+            Gecko_EnsureImageLayersLength(&mut self.gecko.mImage,
+                                          other.gecko.mImage.mLayers.len(),
+                                          LayerType::Background);
+        }
+        for (layer, other) in self.gecko.mImage.mLayers.iter_mut()
+                                  .zip(other.gecko.mImage.mLayers.iter()) {
+            layer.mPosition.m${orientation[0].upper()}Position
+                = other.mPosition.m${orientation[0].upper()}Position;
+        }
+        self.gecko.mImage.mPosition${orientation[0].upper()}Count
+                = other.gecko.mImage.mPosition${orientation[0].upper()}Count;
+    }
+
+    pub fn clone_background_position_${orientation[0]}(&self)
+        -> longhands::background_position_${orientation[0]}::computed_value::T {
+        use values::computed::position::${orientation[1]}Position;
+        longhands::background_position_${orientation[0]}::computed_value::T(
+            self.gecko.mImage.mLayers.iter()
+                .take(self.gecko.mImage.mPosition${orientation[0].upper()}Count as usize)
+                .map(|position| ${orientation[1]}Position(position.mPosition.m${orientation[0].upper()}Position.into()))
+                .collect()
+        )
+    }
+
+    pub fn set_background_position_${orientation[0]}(&mut self,
+                                     v: longhands::background_position_${orientation[0]}::computed_value::T) {
+        use gecko_bindings::structs::nsStyleImageLayers_LayerType as LayerType;
+
+        unsafe {
+          Gecko_EnsureImageLayersLength(&mut self.gecko.mImage, v.0.len(),
+                                        LayerType::Background);
+        }
+
+        self.gecko.mImage.mPosition${orientation[0].upper()}Count = v.0.len() as u32;
+        for (servo, geckolayer) in v.0.into_iter().zip(self.gecko.mImage
+                                                           .mLayers.iter_mut()) {
+            geckolayer.mPosition.m${orientation[0].upper()}Position = servo.0.into();
+        }
+    }
+    % endfor
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="List"
@@ -1809,7 +1896,7 @@ fn static_assert() {
                 Sepia(factor)      => fill_filter(NS_STYLE_FILTER_SEPIA,
                                                   CoordDataValue::Factor(factor),
                                                   gecko_filter),
-                DropShadow(offset_x, offset_y, blur_radius, ref color) => {
+                DropShadow(shadow) => {
                     gecko_filter.mType = NS_STYLE_FILTER_DROP_SHADOW;
 
                     fn init_shadow(filter: &mut nsStyleFilter) -> &mut nsCSSShadowArray {
@@ -1823,13 +1910,13 @@ fn static_assert() {
                     }
 
                     let mut gecko_shadow = init_shadow(gecko_filter);
-                    gecko_shadow.mArray[0].mXOffset = offset_x.0;
-                    gecko_shadow.mArray[0].mYOffset = offset_y.0;
-                    gecko_shadow.mArray[0].mRadius = blur_radius.0;
+                    gecko_shadow.mArray[0].mXOffset = shadow.offset_x.0;
+                    gecko_shadow.mArray[0].mYOffset = shadow.offset_y.0;
+                    gecko_shadow.mArray[0].mRadius = shadow.blur_radius.0;
                     // mSpread is not supported in the spec, so we leave it as 0
                     gecko_shadow.mArray[0].mInset = false; // Not supported in spec level 1
 
-                    gecko_shadow.mArray[0].mColor = match *color {
+                    gecko_shadow.mArray[0].mColor = match shadow.color {
                         Color::RGBA(rgba) => {
                             gecko_shadow.mArray[0].mHasColor = true;
                             convert_rgba_to_nscolor(&rgba)

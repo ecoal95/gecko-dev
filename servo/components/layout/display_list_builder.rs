@@ -35,6 +35,7 @@ use model::{self, MaybeAuto, ToGfxMatrix};
 use net_traits::image::base::PixelFormat;
 use net_traits::image_cache_thread::UsePlaceholder;
 use range::Range;
+use servo_config::opts;
 use servo_url::ServoUrl;
 use std::{cmp, f32};
 use std::collections::HashMap;
@@ -53,11 +54,10 @@ use style::properties::{self, ServoComputedValues};
 use style::properties::style_structs;
 use style::servo::restyle_damage::REPAINT;
 use style::values::{self, Either, RGBA, computed};
-use style::values::computed::{Gradient, GradientKind, LengthOrPercentage, LengthOrPercentageOrAuto};
-use style::values::specified::{AngleOrCorner, HorizontalDirection, VerticalDirection};
+use style::values::computed::{AngleOrCorner, Gradient, GradientKind, LengthOrPercentage, LengthOrPercentageOrAuto};
+use style::values::specified::{HorizontalDirection, VerticalDirection};
 use style_traits::cursor::Cursor;
 use table_cell::CollapsedBordersForCell;
-use util::opts;
 use webrender_traits::{ColorF, GradientStop};
 
 trait RgbColor {
@@ -755,11 +755,12 @@ impl FragmentDisplayListBuilding for Fragment {
                 }
             };
 
-            let position = *get_cyclic(&background.background_position.0, index);
+            let horiz_position = *get_cyclic(&background.background_position_x.0, index);
+            let vert_position = *get_cyclic(&background.background_position_y.0, index);
             // Use `background-position` to get the offset.
-            let horizontal_position = model::specified(position.horizontal,
+            let horizontal_position = model::specified(horiz_position.0,
                                                        bounds.size.width - image_size.width);
-            let vertical_position = model::specified(position.vertical,
+            let vertical_position = model::specified(vert_position.0,
                                                      bounds.size.height - image_size.height);
 
             // The anchor position for this background, based on both the background-attachment

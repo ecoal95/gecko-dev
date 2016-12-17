@@ -27,9 +27,9 @@ extern crate num_traits;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
+extern crate servo_config;
 extern crate servo_url;
 extern crate url;
-extern crate util;
 extern crate uuid;
 extern crate webrender_traits;
 extern crate websocket;
@@ -245,12 +245,6 @@ impl<T: BluetoothResponseListener> Action<T> for BluetoothResponseResult {
     }
 }
 
-/// A wrapper for a network load that can either be channel or event-based.
-#[derive(Deserialize, Serialize)]
-pub enum LoadConsumer {
-    Channel(IpcSender<LoadResponse>),
-}
-
 /// Handle to a resource thread
 pub type CoreResourceThread = IpcSender<CoreResourceMsg>;
 
@@ -361,16 +355,16 @@ pub enum CoreResourceMsg {
     Fetch(RequestInit, IpcSender<FetchResponseMsg>),
     /// Try to make a websocket connection to a URL.
     WebsocketConnect(WebSocketCommunicate, WebSocketConnectData),
-    /// Store a set of cookies for a given originating URL
-    SetCookiesForUrl(ServoUrl, String, CookieSource),
-    /// Store a set of cookies for a given originating URL
-    SetCookiesForUrlWithData(
+    /// Store a cookie for a given originating URL
+    SetCookieForUrl(
         ServoUrl,
         #[serde(deserialize_with = "::hyper_serde::deserialize",
                 serialize_with = "::hyper_serde::serialize")]
         Cookie,
         CookieSource
     ),
+    /// Store cookies for a given originating URL
+    SetCookiesForUrl(ServoUrl, Vec<Serde<Cookie>>, CookieSource),
     /// Retrieve the stored cookies for a given URL
     GetCookiesForUrl(ServoUrl, IpcSender<Option<String>>, CookieSource),
     /// Get a cookie by name for a given originating URL
@@ -399,19 +393,6 @@ pub fn fetch_async<F>(request: RequestInit,
         f(message.to().unwrap());
     });
     core_resource_thread.send(CoreResourceMsg::Fetch(request, action_sender)).unwrap();
-}
-
-/// Message sent in response to `Load`.  Contains metadata, and a port
-/// for receiving the data.
-///
-/// Even if loading fails immediately, we send one of these and the
-/// progress_port will provide the error.
-#[derive(Serialize, Deserialize)]
-pub struct LoadResponse {
-    /// Metadata, such as from HTTP headers.
-    pub metadata: Metadata,
-    /// Port for reading data.
-    pub progress_port: IpcReceiver<ProgressMsg>,
 }
 
 #[derive(Clone, Deserialize, Serialize, HeapSizeOf)]
@@ -497,15 +478,6 @@ pub enum CookieSource {
     HTTP,
     /// A non-HTTP API
     NonHTTP,
-}
-
-/// Messages sent in response to a `Load` message
-#[derive(PartialEq, Debug, Deserialize, Serialize)]
-pub enum ProgressMsg {
-    /// Binary data - there may be multiple of these
-    Payload(Vec<u8>),
-    /// Indicates loading is complete, either successfully or not
-    Done(Result<(), NetworkError>),
 }
 
 /// Convenience function for synchronously loading a whole resource.

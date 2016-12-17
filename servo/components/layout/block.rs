@@ -55,13 +55,12 @@ use std::fmt;
 use std::sync::Arc;
 use style::computed_values::{border_collapse, box_sizing, display, float, overflow_x, overflow_y};
 use style::computed_values::{position, text_align};
-use style::context::{SharedStyleContext, StyleContext};
+use style::context::SharedStyleContext;
 use style::logical_geometry::{LogicalPoint, LogicalRect, LogicalSize, WritingMode};
 use style::properties::ServoComputedValues;
 use style::servo::restyle_damage::{BUBBLE_ISIZES, REFLOW, REFLOW_OUT_OF_FLOW, REPOSITION};
 use style::values::computed::{LengthOrPercentageOrNone, LengthOrPercentage};
 use style::values::computed::LengthOrPercentageOrAuto;
-use util::clamp;
 
 /// Information specific to floated blocks.
 #[derive(Clone, Serialize)]
@@ -1534,7 +1533,7 @@ impl BlockFlow {
                         size + self.fragment.border_padding.inline_start_end(),
                 }
             } else {
-                clamp(min_inline_size, available_inline_size, max_inline_size)
+                max(min_inline_size, min(available_inline_size, max_inline_size))
             };
         self.base.position.size.inline = inline_size + self.fragment.margin.inline_start_end();
 
