@@ -713,7 +713,7 @@ Navigator::GetDoNotTrack(nsAString &aResult)
 }
 
 bool
-Navigator::JavaEnabled(ErrorResult& aRv)
+Navigator::JavaEnabled(CallerType aCallerType, ErrorResult& aRv)
 {
   Telemetry::AutoTimer<Telemetry::CHECK_JAVA_ENABLED> telemetryTimer;
 
@@ -731,7 +731,7 @@ Navigator::JavaEnabled(ErrorResult& aRv)
 
   RefreshMIMEArray();
 
-  nsMimeType *mimeType = mMimeTypes->NamedItem(javaMIME);
+  nsMimeType *mimeType = mMimeTypes->NamedItem(javaMIME, aCallerType);
 
   return mimeType && mimeType->GetEnabledPlugin();
 }
@@ -1727,7 +1727,7 @@ Navigator::GetConnection(ErrorResult& aRv)
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return nullptr;
     }
-    mConnection = new network::Connection(mWindow);
+    mConnection = network::Connection::CreateForWindow(mWindow);
   }
 
   return mConnection;

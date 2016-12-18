@@ -6992,7 +6992,8 @@ DispatchPointerFromMouseOrTouch(PresShell* aShell,
       event.mTimeStamp = touchEvent->mTimeStamp;
       event.mFlags = touchEvent->mFlags;
       event.button = WidgetMouseEvent::eLeftButton;
-      event.buttons = WidgetMouseEvent::eLeftButtonFlag;
+      event.buttons = pointerMessage == ePointerUp ?
+                        0 : WidgetMouseEvent::eLeftButtonFlag;
       event.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_TOUCH;
       event.convertToPointer = touch->convertToPointer = false;
       PreHandlePointerEventsPreventDefault(&event, aEvent);
@@ -7396,7 +7397,11 @@ PresShell::HandleEvent(nsIFrame* aFrame,
 
     RefPtr<AccessibleCaretEventHub> eventHub =
       presShell ? presShell->GetAccessibleCaretEventHub() : nullptr;
-    if (eventHub) {
+    if (eventHub && *aEventStatus != nsEventStatus_eConsumeNoDefault) {
+      // Don't dispatch event to AccessibleCaretEventHub when the event status
+      // is nsEventStatus_eConsumeNoDefault. This might be happened when content
+      // preventDefault on the pointer events. In such case, we also call
+      // preventDefault on mouse events to stop default behaviors.
       *aEventStatus = eventHub->HandleEvent(aEvent);
       if (*aEventStatus == nsEventStatus_eConsumeNoDefault) {
         // If the event is consumed, cancel APZC panning by setting

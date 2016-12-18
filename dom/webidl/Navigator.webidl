@@ -13,6 +13,7 @@
  * https://dvcs.w3.org/hg/gamepad/raw-file/default/gamepad.html#navigator-interface-extension
  * http://www.w3.org/TR/beacon/#sec-beacon-method
  * https://html.spec.whatwg.org/#navigatorconcurrenthardware
+ * http://wicg.github.io/netinfo/#extensions-to-the-navigator-interface
  *
  * © Copyright 2004-2011 Apple Computer, Inc., Mozilla Foundation, and
  * Opera Software ASA. You are granted a license to use, reproduce
@@ -191,7 +192,7 @@ partial interface Navigator {
   readonly attribute MozPowerManager mozPower;
 
   // WebKit/Blink/Trident/Presto support this.
-  [Throws]
+  [Throws, NeedsCallerType]
   boolean javaEnabled();
 
   /**
