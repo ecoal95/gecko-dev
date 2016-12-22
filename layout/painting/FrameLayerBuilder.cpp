@@ -3885,6 +3885,15 @@ ContainerState::SetupMaskLayerForCSSMask(Layer* aLayer,
   bool snap;
   nsRect bounds = aMaskItem->GetBounds(mBuilder, &snap);
   nsIntRect itemRect = ScaleToOutsidePixels(bounds, snap);
+
+  // Setup mask layer offset.
+  // We do not repaint mask for mask position change, so update base transform
+  // each time is required.
+  Matrix4x4 matrix;
+  matrix.PreTranslate(itemRect.x, itemRect.y, 0);
+  matrix.PreTranslate(mParameters.mOffset.x, mParameters.mOffset.y, 0);
+  maskLayer->SetBaseTransform(matrix);
+
   CSSMaskLayerUserData newUserData(aMaskItem->Frame(), itemRect.Size());
   nsRect dirtyRect;
   if (!aMaskItem->IsInvalid(dirtyRect) && *oldUserData == newUserData) {
@@ -3915,13 +3924,6 @@ ContainerState::SetupMaskLayerForCSSMask(Layer* aLayer,
     // Mostly because of mask resource is not ready.
     return;
   }
-
-  // Setup mask layer offset.
-  Matrix4x4 matrix;
-  matrix.PreTranslate(itemRect.x, itemRect.y, 0);
-  matrix.PreTranslate(mParameters.mOffset.x, mParameters.mOffset.y, 0);
-
-  maskLayer->SetBaseTransform(matrix);
 
   RefPtr<ImageContainer> imgContainer =
     imageData.CreateImageAndImageContainer();
@@ -4314,7 +4316,6 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
                    "If we have rounded rects, we must have a clip rect");
 
       // It has its own layer. Update that layer's clip and visible rects.
-
       ownLayer->SetClipRect(Nothing());
       ownLayer->SetScrolledClip(Nothing());
       if (layerClip.HasClip()) {
@@ -4337,7 +4338,11 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
             SetupMaskLayer(ownLayer, layerClip);
           }
         }
-      } else if (item->GetType() == nsDisplayItem::TYPE_MASK) {
+      }
+
+      if (item->GetType() == nsDisplayItem::TYPE_MASK) {
+        MOZ_ASSERT(layerClip.GetRoundedRectCount() == 0);
+
         nsDisplayMask* maskItem = static_cast<nsDisplayMask*>(item);
         SetupMaskLayerForCSSMask(ownLayer, maskItem);
 
@@ -4346,6 +4351,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
           // Since we do build a layer for mask, there is no need for this
           // scroll info layer anymore.
           aList->RemoveBottom();
+          next->~nsDisplayItem();
         }
       }
 

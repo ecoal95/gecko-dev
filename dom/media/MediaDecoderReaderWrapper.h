@@ -67,8 +67,7 @@ public:
   bool IsWaitingAudioData() const;
   bool IsWaitingVideoData() const;
 
-  RefPtr<SeekPromise> Seek(const SeekTarget& aTarget,
-                           const media::TimeUnit& aEndTime);
+  RefPtr<SeekPromise> Seek(const SeekTarget& aTarget);
   RefPtr<ShutdownPromise> Shutdown();
 
   void ReleaseResources();
@@ -78,7 +77,6 @@ public:
   bool IsWaitForDataSupported() const { return mReader->IsWaitForDataSupported(); }
   bool IsAsync() const { return mReader->IsAsync(); }
   bool UseBufferingHeuristics() const { return mReader->UseBufferingHeuristics(); }
-  bool ForceZeroStartTime() const { return mReader->ForceZeroStartTime(); }
 
   bool VideoIsHardwareAccelerated() const {
     return mReader->VideoIsHardwareAccelerated();
