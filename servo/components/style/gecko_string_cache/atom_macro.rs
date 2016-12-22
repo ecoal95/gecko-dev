@@ -1364,8 +1364,6 @@ cfg_if! {
             pub static nsGkAtoms_onattributewritereq: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms14onaudioprocessE"]
             pub static nsGkAtoms_onaudioprocess: *mut nsIAtom;
-            #[link_name = "_ZN9nsGkAtoms10onauxclickE"]
-            pub static nsGkAtoms_onauxclick: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms12onbeforecopyE"]
             pub static nsGkAtoms_onbeforecopy: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms11onbeforecutE"]
@@ -2302,6 +2300,8 @@ cfg_if! {
             pub static nsGkAtoms_spinner: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms5splitE"]
             pub static nsGkAtoms_split: *mut nsIAtom;
+            #[link_name = "_ZN9nsGkAtoms9splitmenuE"]
+            pub static nsGkAtoms_splitmenu: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms8splitterE"]
             pub static nsGkAtoms_splitter: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms6springE"]
@@ -6283,8 +6283,6 @@ cfg_if! {
             pub static nsGkAtoms_onattributewritereq: *mut nsIAtom;
             #[link_name = "?onaudioprocess@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_onaudioprocess: *mut nsIAtom;
-            #[link_name = "?onauxclick@nsGkAtoms@@2PEAVnsIAtom@@EA"]
-            pub static nsGkAtoms_onauxclick: *mut nsIAtom;
             #[link_name = "?onbeforecopy@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_onbeforecopy: *mut nsIAtom;
             #[link_name = "?onbeforecut@nsGkAtoms@@2PEAVnsIAtom@@EA"]
@@ -7221,6 +7219,8 @@ cfg_if! {
             pub static nsGkAtoms_spinner: *mut nsIAtom;
             #[link_name = "?split@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_split: *mut nsIAtom;
+            #[link_name = "?splitmenu@nsGkAtoms@@2PEAVnsIAtom@@EA"]
+            pub static nsGkAtoms_splitmenu: *mut nsIAtom;
             #[link_name = "?splitter@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_splitter: *mut nsIAtom;
             #[link_name = "?spring@nsGkAtoms@@2PEAVnsIAtom@@EA"]
@@ -11202,8 +11202,6 @@ cfg_if! {
             pub static nsGkAtoms_onattributewritereq: *mut nsIAtom;
             #[link_name = "\x01?onaudioprocess@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_onaudioprocess: *mut nsIAtom;
-            #[link_name = "\x01?onauxclick@nsGkAtoms@@2PAVnsIAtom@@A"]
-            pub static nsGkAtoms_onauxclick: *mut nsIAtom;
             #[link_name = "\x01?onbeforecopy@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_onbeforecopy: *mut nsIAtom;
             #[link_name = "\x01?onbeforecut@nsGkAtoms@@2PAVnsIAtom@@A"]
@@ -12140,6 +12138,8 @@ cfg_if! {
             pub static nsGkAtoms_spinner: *mut nsIAtom;
             #[link_name = "\x01?split@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_split: *mut nsIAtom;
+            #[link_name = "\x01?splitmenu@nsGkAtoms@@2PAVnsIAtom@@A"]
+            pub static nsGkAtoms_splitmenu: *mut nsIAtom;
             #[link_name = "\x01?splitter@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_splitter: *mut nsIAtom;
             #[link_name = "\x01?spring@nsGkAtoms@@2PAVnsIAtom@@A"]
@@ -16124,8 +16124,6 @@ macro_rules! atom {
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_onattributewritereq as *mut _) } };
 ("onaudioprocess") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_onaudioprocess as *mut _) } };
-("onauxclick") =>
-  { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_onauxclick as *mut _) } };
 ("onbeforecopy") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_onbeforecopy as *mut _) } };
 ("onbeforecut") =>
@@ -17062,6 +17060,8 @@ macro_rules! atom {
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_spinner as *mut _) } };
 ("split") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_split as *mut _) } };
+("splitmenu") =>
+  { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_splitmenu as *mut _) } };
 ("splitter") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_splitter as *mut _) } };
 ("spring") =>

@@ -1,5 +1,5 @@
-use super::*;
 use super::internal::*;
+use super::*;
 use std;
 
 pub struct VecIter<T: Send> {
@@ -22,6 +22,10 @@ impl<T: Send> ParallelIterator for VecIter<T> {
         where C: UnindexedConsumer<Self::Item>
     {
         bridge(self, consumer)
+    }
+
+    fn opt_len(&mut self) -> Option<usize> {
+        Some(self.len())
     }
 }
 
@@ -63,10 +67,10 @@ impl<T: Send> IndexedParallelIterator for VecIter<T> {
     }
 }
 
-///////////////////////////////////////////////////////////////////////////
+/// ////////////////////////////////////////////////////////////////////////
 
 pub struct VecProducer<'data, T: 'data + Send> {
-    slice: &'data mut [T]
+    slice: &'data mut [T],
 }
 
 impl<'data, T: 'data + Send> Producer for VecProducer<'data, T> {
@@ -99,18 +103,19 @@ impl<'data, T: 'data + Send> Drop for VecProducer<'data, T> {
     }
 }
 
-///////////////////////////////////////////////////////////////////////////
+/// ////////////////////////////////////////////////////////////////////////
 
 // like std::vec::Drain, without updating a source Vec
 pub struct SliceDrain<'data, T: 'data> {
-    iter: std::slice::IterMut<'data, T>
+    iter: std::slice::IterMut<'data, T>,
 }
 
 impl<'data, T: 'data> Iterator for SliceDrain<'data, T> {
     type Item = T;
 
     fn next(&mut self) -> Option<T> {
-        self.iter.next()
+        self.iter
+            .next()
             .map(|ptr| unsafe { std::ptr::read(ptr) })
     }
 }
@@ -118,8 +123,9 @@ impl<'data, T: 'data> Iterator for SliceDrain<'data, T> {
 impl<'data, T: 'data> Drop for SliceDrain<'data, T> {
     fn drop(&mut self) {
         for ptr in &mut self.iter {
-            // use drop_in_place once stable
-            unsafe { std::ptr::read(ptr); }
+            unsafe {
+                std::ptr::drop_in_place(ptr);
+            }
         }
     }
 }

@@ -1152,7 +1152,10 @@ fn static_assert() {
             Either::Second(_none) => debug_assert!(self.gecko.mBinding.mRawPtr.is_null()),
             Either::First(ref url) => {
                 let extra_data = url.extra_data();
-                let (ptr, len) = url.as_slice_components();
+                let (ptr, len) = match url.as_slice_components() {
+                    Ok(value) => value,
+                    Err(_) => (ptr::null(), 0),
+                };
                 unsafe {
                     Gecko_SetMozBinding(&mut self.gecko,
                                         ptr,
@@ -1737,7 +1740,9 @@ fn static_assert() {
                 }
             }
             Either::First(ref url) => {
-                let (ptr, len) = url.as_slice_components();
+                let (ptr, len) = match url.as_slice_components() {
+                    Ok(value) | Err(value) => value
+                };
                 let extra_data = url.extra_data();
                 unsafe {
                     Gecko_SetListStyleImage(&mut self.gecko,
@@ -2433,7 +2438,9 @@ clip-path
         for i in 0..v.images.len() {
             let image = &v.images[i];
             let extra_data = image.url.extra_data();
-            let (ptr, len) = image.url.as_slice_components();
+            let (ptr, len) = match image.url.as_slice_components() {
+                Ok(value) | Err(value) => value,
+            };
             unsafe {
                 Gecko_SetCursorImage(&mut self.gecko.mCursorImages[i],
                                      ptr, len as u32,
@@ -2457,7 +2464,7 @@ clip-path
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="Column"
-                  skip_longhands="column-count column-gap -moz-column-rule-width">
+                  skip_longhands="column-count column-gap column-rule-width">
 
     #[allow(unused_unsafe)]
     pub fn set_column_count(&mut self, v: longhands::column_count::computed_value::T) {
@@ -2484,7 +2491,7 @@ clip-path
 
     <%call expr="impl_coord_copy('column_gap', 'mColumnGap')"></%call>
 
-    <% impl_app_units("_moz_column_rule_width", "mColumnRuleWidth", need_clone=True,
+    <% impl_app_units("column_rule_width", "mColumnRuleWidth", need_clone=True,
                       round_to_pixels=True) %>
 </%self:impl_trait>
 

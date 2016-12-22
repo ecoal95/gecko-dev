@@ -1,7 +1,11 @@
 // (C) 2015 Viktor Dahl <pazaconyoman@gmail.com>
 // This file is licensed under the same terms as Rust itself.
 
+#![cfg_attr(not(feature="float"), no_std)]
+extern crate core;
+
 extern crate unreachable;
+extern crate nodrop;
 #[cfg(feature  = "float")]
 extern crate num_traits;
 

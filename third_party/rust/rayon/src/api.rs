@@ -23,11 +23,15 @@ pub enum InitError {
 impl fmt::Display for InitError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            InitError::NumberOfThreadsZero =>
-                write!(f, "The number of threads was set to zero but must be greater than zero."),
-            InitError::GlobalPoolAlreadyInitialized =>
-                write!(f, "The gobal thread pool has already been initialized with a different \
-                           configuration. Only one valid configuration is allowed.")
+            InitError::NumberOfThreadsZero => {
+                write!(f,
+                       "The number of threads was set to zero but must be greater than zero.")
+            }
+            InitError::GlobalPoolAlreadyInitialized => {
+                write!(f,
+                       "The gobal thread pool has already been initialized with a different \
+                        configuration. Only one valid configuration is allowed.")
+            }
         }
     }
 }
@@ -35,10 +39,10 @@ impl fmt::Display for InitError {
 impl Error for InitError {
     fn description(&self) -> &str {
         match *self {
-            InitError::NumberOfThreadsZero =>
-                "number of threads set to zero",
-            InitError::GlobalPoolAlreadyInitialized =>
+            InitError::NumberOfThreadsZero => "number of threads set to zero",
+            InitError::GlobalPoolAlreadyInitialized => {
                 "global thread pool has already been initialized"
+            }
         }
     }
 }
@@ -47,7 +51,7 @@ impl Error for InitError {
 #[derive(Clone, Debug)]
 pub struct Configuration {
     /// The number of threads in the rayon thread pool. Must not be zero.
-    num_threads: Option<usize>
+    num_threads: Option<usize>,
 }
 
 impl Configuration {
@@ -127,13 +131,14 @@ pub fn dump_stats() {
     dump_stats!();
 }
 
-pub fn join<A,B,RA,RB>(oper_a: A,
-                       oper_b: B)
-                       -> (RA, RB)
+/// The `join` function takes two closures and potentially runs them in parallel but is not
+/// guaranteed to. However, the call to `join` incurs low overhead and is much different compared
+/// to spawning two separate threads.
+pub fn join<A, B, RA, RB>(oper_a: A, oper_b: B) -> (RA, RB)
     where A: FnOnce() -> RA + Send,
           B: FnOnce() -> RB + Send,
           RA: Send,
-          RB: Send,
+          RB: Send
 {
     unsafe {
         let worker_thread = WorkerThread::current();
@@ -151,6 +156,10 @@ pub fn join<A,B,RA,RB>(oper_a: A,
         let job_b = StackJob::new(oper_b, SpinLatch::new());
         (*worker_thread).push(job_b.as_job_ref());
 
+        // record how many async spawns have occurred on this thread
+        // before task A is executed
+        let spawn_count = (*worker_thread).current_spawn_count();
+
         // execute task a; hopefully b gets stolen
         let result_a;
         {
@@ -164,6 +173,10 @@ pub fn join<A,B,RA,RB>(oper_a: A,
             result_a = oper_a();
             mem::forget(guard);
         }
+
+        // before we can try to pop b, we have to first pop off any async spawns
+        // that have occurred on this thread
+        (*worker_thread).pop_spawned_jobs(spawn_count);
 
         // if b was not stolen, do it ourselves, else wait for the thief to finish
         let result_b;
@@ -182,13 +195,11 @@ pub fn join<A,B,RA,RB>(oper_a: A,
 }
 
 #[cold] // cold path
-unsafe fn join_inject<A,B,RA,RB>(oper_a: A,
-                                 oper_b: B)
-                                 -> (RA, RB)
+unsafe fn join_inject<A, B, RA, RB>(oper_a: A, oper_b: B) -> (RA, RB)
     where A: FnOnce() -> RA + Send,
           B: FnOnce() -> RB + Send,
           RA: Send,
-          RB: Send,
+          RB: Send
 {
     let job_a = StackJob::new(oper_a, LockLatch::new());
     let job_b = StackJob::new(oper_b, LockLatch::new());
@@ -202,23 +213,21 @@ unsafe fn join_inject<A,B,RA,RB>(oper_a: A,
 }
 
 pub struct ThreadPool {
-    registry: Arc<Registry>
+    registry: Arc<Registry>,
 }
 
 impl ThreadPool {
     /// Constructs a new thread pool with the given configuration. If
     /// the configuration is not valid, returns a suitable `Err`
     /// result.  See `InitError` for more details.
-    pub fn new(configuration: Configuration) -> Result<ThreadPool,InitError> {
+    pub fn new(configuration: Configuration) -> Result<ThreadPool, InitError> {
         try!(configuration.validate());
-        Ok(ThreadPool {
-            registry: Registry::new(configuration.num_threads)
-        })
+        Ok(ThreadPool { registry: Registry::new(configuration.num_threads) })
     }
 
     /// Executes `op` within the threadpool. Any attempts to `join`
     /// which occur there will then operate within that threadpool.
-    pub fn install<OP,R>(&self, op: OP) -> R
+    pub fn install<OP, R>(&self, op: OP) -> R
         where OP: FnOnce() -> R + Send
     {
         unsafe {
@@ -226,6 +235,42 @@ impl ThreadPool {
             self.registry.inject(&[job_a.as_job_ref()]);
             job_a.latch.wait();
             job_a.into_result()
+        }
+    }
+
+    /// Returns the number of threads in the thread pool.
+    pub fn num_threads(&self) -> usize {
+        self.registry.num_threads()
+    }
+
+    /// If called from a Rayon worker thread in this thread-pool,
+    /// returns the index of that thread; if not called from a Rayon
+    /// thread, or called from a Rayon thread that belongs to a
+    /// different thread-pool, returns `None`.
+    ///
+    /// The index for a given thread will not change over the thread's
+    /// lifetime. However, multiple threads may share the same index if
+    /// they are in distinct thread-pools.
+    ///
+    /// ### Future compatibility note
+    ///
+    /// Currently, every thread-pool (including the global thread-pool)
+    /// has a fixed number of threads, but this may change in future Rayon
+    /// versions. In that case, the index for a thread would not change
+    /// during its lifetime, but thread indices may wind up being reused
+    /// if threads are terminated and restarted. (If this winds up being
+    /// an untenable policy, then a semver-incompatible version can be
+    /// used.)
+    pub fn current_thread_index(&self) -> Option<usize> {
+        unsafe {
+            let curr = WorkerThread::current();
+            if curr.is_null() {
+                None
+            } else if (*curr).registry().id() != self.registry.id() {
+                None
+            } else {
+                Some((*curr).index())
+            }
         }
     }
 }

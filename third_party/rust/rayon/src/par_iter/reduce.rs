@@ -1,4 +1,3 @@
-use std;
 use super::ParallelIterator;
 use super::len::*;
 use super::internal::*;
@@ -132,9 +131,11 @@ pub const SUM: &'static SumOp = &SumOp;
 macro_rules! sum_rule {
     ($i:ty, $z:expr) => {
         impl ReduceOp<$i> for SumOp {
+            #[inline]
             fn start_value(&self) -> $i {
                 $z
             }
+            #[inline]
             fn reduce(&self, value1: $i, value2: $i) -> $i {
                 value1 + value2
             }
@@ -155,16 +156,18 @@ sum_rule!(usize, 0);
 sum_rule!(f32, 0.0);
 sum_rule!(f64, 0.0);
 
-pub struct MulOp;
+pub struct ProductOp;
 
-pub const MUL: &'static MulOp = &MulOp;
+pub const PRODUCT: &'static ProductOp = &ProductOp;
 
-macro_rules! mul_rule {
+macro_rules! product_rule {
     ($i:ty, $z:expr) => {
-        impl ReduceOp<$i> for MulOp {
+        impl ReduceOp<$i> for ProductOp {
+            #[inline]
             fn start_value(&self) -> $i {
                 $z
             }
+            #[inline]
             fn reduce(&self, value1: $i, value2: $i) -> $i {
                 value1 * value2
             }
@@ -172,78 +175,18 @@ macro_rules! mul_rule {
     }
 }
 
-mul_rule!(i8, 1);
-mul_rule!(i16, 1);
-mul_rule!(i32, 1);
-mul_rule!(i64, 1);
-mul_rule!(isize, 1);
-mul_rule!(u8, 1);
-mul_rule!(u16, 1);
-mul_rule!(u32, 1);
-mul_rule!(u64, 1);
-mul_rule!(usize, 1);
-mul_rule!(f32, 1.0);
-mul_rule!(f64, 1.0);
-
-pub struct MinOp;
-
-pub const MIN: &'static MinOp = &MinOp;
-
-macro_rules! min_rule {
-    ($i:ty, $z:expr, $f:expr) => {
-        impl ReduceOp<$i> for MinOp {
-            fn start_value(&self) -> $i {
-                $z
-            }
-            fn reduce(&self, value1: $i, value2: $i) -> $i {
-                $f(value1, value2)
-            }
-        }
-    }
-}
-
-min_rule!(i8, std::i8::MAX, std::cmp::min);
-min_rule!(i16, std::i16::MAX, std::cmp::min);
-min_rule!(i32, std::i32::MAX, std::cmp::min);
-min_rule!(i64, std::i64::MAX, std::cmp::min);
-min_rule!(isize, std::isize::MAX, std::cmp::min);
-min_rule!(u8, std::u8::MAX, std::cmp::min);
-min_rule!(u16, std::u16::MAX, std::cmp::min);
-min_rule!(u32, std::u32::MAX, std::cmp::min);
-min_rule!(u64, std::u64::MAX, std::cmp::min);
-min_rule!(usize, std::usize::MAX, std::cmp::min);
-min_rule!(f32, std::f32::INFINITY, f32::min);
-min_rule!(f64, std::f64::INFINITY, f64::min);
-
-pub struct MaxOp;
-
-pub const MAX: &'static MaxOp = &MaxOp;
-
-macro_rules! max_rule {
-    ($i:ty, $z:expr, $f:expr) => {
-        impl ReduceOp<$i> for MaxOp {
-            fn start_value(&self) -> $i {
-                $z
-            }
-            fn reduce(&self, value1: $i, value2: $i) -> $i {
-                $f(value1, value2)
-            }
-        }
-    }
-}
-
-max_rule!(i8, std::i8::MIN, std::cmp::max);
-max_rule!(i16, std::i16::MIN, std::cmp::max);
-max_rule!(i32, std::i32::MIN, std::cmp::max);
-max_rule!(i64, std::i64::MIN, std::cmp::max);
-max_rule!(isize, std::isize::MIN, std::cmp::max);
-max_rule!(u8, std::u8::MIN, std::cmp::max);
-max_rule!(u16, std::u16::MIN, std::cmp::max);
-max_rule!(u32, std::u32::MIN, std::cmp::max);
-max_rule!(u64, std::u64::MIN, std::cmp::max);
-max_rule!(usize, std::usize::MIN, std::cmp::max);
-max_rule!(f32, std::f32::NEG_INFINITY, f32::max);
-max_rule!(f64, std::f64::NEG_INFINITY, f64::max);
+product_rule!(i8, 1);
+product_rule!(i16, 1);
+product_rule!(i32, 1);
+product_rule!(i64, 1);
+product_rule!(isize, 1);
+product_rule!(u8, 1);
+product_rule!(u16, 1);
+product_rule!(u32, 1);
+product_rule!(u64, 1);
+product_rule!(usize, 1);
+product_rule!(f32, 1.0);
+product_rule!(f64, 1.0);
 
 pub struct ReduceWithIdentityOp<'r, IDENTITY: 'r, OP: 'r> {
     identity: &'r IDENTITY,

@@ -1,22 +1,31 @@
 extern crate rand;
 
+use Configuration;
 use {scope, Scope};
+use ThreadPool;
 use prelude::*;
 use rand::{Rng, SeedableRng, XorShiftRng};
+use std::cmp;
 use std::iter::once;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 #[test]
 fn scope_empty() {
-    scope(|_| { });
+    scope(|_| {
+    });
 }
 
 #[test]
 fn scope_two() {
     let counter = &AtomicUsize::new(0);
     scope(|s| {
-        s.spawn(move |_| { counter.fetch_add(1, Ordering::SeqCst); });
-        s.spawn(move |_| { counter.fetch_add(10, Ordering::SeqCst); });
+        s.spawn(move |_| {
+            counter.fetch_add(1, Ordering::SeqCst);
+        });
+        s.spawn(move |_| {
+            counter.fetch_add(10, Ordering::SeqCst);
+        });
     });
 
     let v = counter.load(Ordering::SeqCst);
@@ -36,9 +45,7 @@ fn scope_divide_and_conquer() {
     assert_eq!(p, s);
 }
 
-fn divide_and_conquer<'scope>(
-    scope: &Scope<'scope>, counter: &'scope AtomicUsize, size: usize)
-{
+fn divide_and_conquer<'scope>(scope: &Scope<'scope>, counter: &'scope AtomicUsize, size: usize) {
     if size > 1 {
         scope.spawn(move |scope| divide_and_conquer(scope, counter, size / 2));
         scope.spawn(move |scope| divide_and_conquer(scope, counter, size / 2));
@@ -68,12 +75,12 @@ fn scope_mix() {
         s.spawn(move |_| {
             let a: Vec<i32> = (0..1024).collect();
             let r1 = a.par_iter()
-                      .weight_max()
-                      .map(|&i| i + 1)
-                      .reduce_with(|i, j| i + j);
+                .weight_max()
+                .map(|&i| i + 1)
+                .reduce_with(|i, j| i + j);
             let r2 = a.iter()
-                      .map(|&i| i + 1)
-                      .fold(0, |a,b| a+b);
+                .map(|&i| i + 1)
+                .fold(0, |a, b| a + b);
             assert_eq!(r1.unwrap(), r2);
         });
     });
@@ -85,8 +92,7 @@ struct Tree<T> {
 }
 
 impl<T> Tree<T> {
-    pub fn iter<'s>(&'s self) -> impl Iterator<Item=&'s T> + 's
-    {
+    pub fn iter<'s>(&'s self) -> impl Iterator<Item = &'s T> + 's {
         once(&self.value)
             .chain(self.children.iter().flat_map(|c| c.iter()))
             .collect::<Vec<_>>() // seems like it shouldn't be needed... but prevents overflow
@@ -94,7 +100,8 @@ impl<T> Tree<T> {
     }
 
     pub fn update<OP>(&mut self, op: OP)
-        where OP: Fn(&mut T) + Sync, T: Send,
+        where OP: Fn(&mut T) + Sync,
+              T: Send
     {
         scope(|s| self.update_in_scope(&op, s));
     }
@@ -128,7 +135,10 @@ fn random_tree1(depth: usize, rng: &mut XorShiftRng) -> Tree<u32> {
             .collect()
     };
 
-    Tree { value: rng.next_u32() % 1_000_000, children: children }
+    Tree {
+        value: rng.next_u32() % 1_000_000,
+        children: children,
+    }
 }
 
 #[test]
@@ -140,5 +150,46 @@ fn update_tree() {
     assert_eq!(values.len(), new_values.len());
     for (&i, &j) in values.iter().zip(&new_values) {
         assert_eq!(i + 1, j);
+    }
+}
+
+/// Check that if you have a chain of scoped tasks where T0 spawns T1
+/// spawns T2 and so forth down to Tn, the stack space should not grow
+/// linearly with N. We test this by some unsafe hackery and
+/// permitting an approx 10% change with a 10x input change.
+#[test]
+fn linear_stack_growth() {
+    let config = Configuration::new().set_num_threads(1);
+    let pool = ThreadPool::new(config).unwrap();
+    pool.install(|| {
+        let mut max_diff = Mutex::new(0);
+        let bottom_of_stack = 0;
+        scope(|s| the_final_countdown(s, &bottom_of_stack, &max_diff, 5));
+        let diff_when_5 = *max_diff.get_mut().unwrap() as f64;
+
+        scope(|s| the_final_countdown(s, &bottom_of_stack, &max_diff, 500));
+        let diff_when_500 = *max_diff.get_mut().unwrap() as f64;
+
+        let ratio = diff_when_5 / diff_when_500;
+        assert!(ratio > 0.9 && ratio < 1.1,
+                "stack usage ratio out of bounds: {}",
+                ratio);
+    });
+}
+
+fn the_final_countdown<'scope>(s: &Scope<'scope>,
+                               bottom_of_stack: &'scope i32,
+                               max: &'scope Mutex<usize>,
+                               n: usize) {
+    let top_of_stack = 0;
+    let p = bottom_of_stack as *const i32 as usize;
+    let q = &top_of_stack as *const i32 as usize;
+    let diff = if p > q { p - q } else { q - p };
+
+    let mut data = max.lock().unwrap();
+    *data = cmp::max(diff, *data);
+
+    if n > 0 {
+        s.spawn(move |s| the_final_countdown(s, bottom_of_stack, max, n - 1));
     }
 }

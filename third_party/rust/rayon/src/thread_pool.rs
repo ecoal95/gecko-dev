@@ -15,7 +15,7 @@ use unwind;
 use util::leak;
 use num_cpus;
 
-///////////////////////////////////////////////////////////////////////////
+/// ////////////////////////////////////////////////////////////////////////
 
 pub struct Registry {
     thread_infos: Vec<ThreadInfo>,
@@ -29,8 +29,8 @@ struct RegistryState {
     injected_jobs: VecDeque<JobRef>,
 }
 
-///////////////////////////////////////////////////////////////////////////
-// Initialization
+/// ////////////////////////////////////////////////////////////////////////
+/// Initialization
 
 static mut THE_REGISTRY: Option<&'static Registry> = None;
 static THE_REGISTRY_SET: Once = ONCE_INIT;
@@ -69,15 +69,15 @@ impl Registry {
     pub fn new(num_threads: Option<usize>) -> Arc<Registry> {
         let limit_value = match num_threads {
             Some(value) => value,
-            None => num_cpus::get()
+            None => num_cpus::get(),
         };
 
-        let (workers, stealers) : (Vec<_>, Vec<_>) =
-            (0..limit_value).map(|_| deque::new()).unzip();
+        let (workers, stealers): (Vec<_>, Vec<_>) = (0..limit_value).map(|_| deque::new()).unzip();
 
         let registry = Arc::new(Registry {
-            thread_infos: stealers.into_iter().map(|s| ThreadInfo::new(s))
-                                          .collect(),
+            thread_infos: stealers.into_iter()
+                .map(|s| ThreadInfo::new(s))
+                .collect(),
             state: Mutex::new(RegistryState::new()),
             work_available: Condvar::new(),
         });
@@ -88,6 +88,13 @@ impl Registry {
         }
 
         registry
+    }
+
+    /// Returns an opaque identifier for this registry.
+    pub fn id(&self) -> RegistryId {
+        // We can rely on `self` not to change since we only ever create
+        // registries that are boxed up in an `Arc` (see `new()` above).
+        RegistryId { addr: self as *const Self as usize }
     }
 
     pub fn num_threads(&self) -> usize {
@@ -104,11 +111,11 @@ impl Registry {
         }
     }
 
-    ///////////////////////////////////////////////////////////////////////////
-    // MAIN LOOP
-    //
-    // So long as all of the worker threads are hanging out in their
-    // top-level loop, there is no work to be done.
+    /// ////////////////////////////////////////////////////////////////////////
+    /// MAIN LOOP
+    ///
+    /// So long as all of the worker threads are hanging out in their
+    /// top-level loop, there is no work to be done.
 
     fn start_working(&self, index: usize) {
         log!(StartWorking { index: index });
@@ -137,7 +144,10 @@ impl Registry {
     }
 
     fn wait_for_work(&self, _worker: usize, was_active: bool) -> Work {
-        log!(WaitForWork { worker: _worker, was_active: was_active });
+        log!(WaitForWork {
+            worker: _worker,
+            was_active: was_active,
+        });
 
         let mut state = self.state.lock().unwrap();
 
@@ -185,6 +195,11 @@ impl Registry {
     }
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RegistryId {
+    addr: usize
+}
+
 impl RegistryState {
     pub fn new() -> RegistryState {
         RegistryState {
@@ -211,21 +226,56 @@ impl ThreadInfo {
     }
 }
 
-///////////////////////////////////////////////////////////////////////////
-// WorkerThread identifiers
+/// ////////////////////////////////////////////////////////////////////////
+/// WorkerThread identifiers
 
 pub struct WorkerThread {
     worker: Worker<JobRef>,
     stealers: Vec<Stealer<JobRef>>,
     index: usize,
 
-    /// a counter tracking how many calls to `Scope::spawn` occurred
+    /// A counter tracking how many calls to `Scope::spawn` occurred
     /// on the current thread; this is used by the scope code to
-    /// ensure that the depth of the local deque is maintained
+    /// ensure that the depth of the local deque is maintained.
+    ///
+    /// The actual logic here is a bit subtle. Perhaps more subtle
+    /// than it has to be. The problem is this: if you have only join,
+    /// then you can easily pair each push onto the deque with a pop.
+    /// But when you have spawn, you push onto the deque without a
+    /// corresponding pop. The `spawn_count` is used to track how many
+    /// of these "unpaired pushes" have occurred.
+    ///
+    /// The basic pattern is that people record the spawned count
+    /// before they execute a task (let's call it N). Then, if they
+    /// want to pop the local tasks that this task may have spawned,
+    /// they invoke `pop_spawned_jobs` with N. `pop_spawned_jobs` will
+    /// pop things from the local deque and execute them until the
+    /// spawn count drops to N, or the deque is empty, whichever
+    /// happens first. (Either way, it resets the spawn count to N.)
+    ///
+    /// So e.g. join will push the right task, record the spawn count
+    /// as N, run the left task, and then pop spawned jobs. Once pop
+    /// spawned jobs returns, we can go ahead and try to pop the right
+    /// task -- it has either been stolen, or should be on the top of the deque.
+    ///
+    /// Similarly, `scope` will record the spawn count and run the
+    /// main task.  It can then pop the spawned jobs. At this point,
+    /// until the "all done!" latch is set, it can go and steal from
+    /// other people, confident in the knowledge that the local deque
+    /// is empty. This is a bit subtle: basically, since all the
+    /// locally spawned tasks were popped, the only way that we are
+    /// not all done is if one was stolen. If one was stolen, the
+    /// stuff pushed before the scope was stolen too.
+    ///
+    /// Finally, we have to make sure to pop spawned tasks after we
+    /// steal, so as to maintain the invariant that our local deque is
+    /// empty when we go to steal.
     spawn_count: Cell<usize>,
 
     /// A weak random number generator.
     rng: rand::XorShiftRng,
+
+    registry: Arc<Registry>,
 }
 
 // This is a bit sketchy, but basically: the WorkerThread is
@@ -256,14 +306,52 @@ impl WorkerThread {
         });
     }
 
+    /// Returns the registry that owns this worker thread.
+    pub fn registry(&self) -> &Arc<Registry> {
+        &self.registry
+    }
+
+    /// Our index amongst the worker threads (ranges from `0..self.num_threads()`).
     #[inline]
     pub fn index(&self) -> usize {
         self.index
     }
 
+    /// Read current value of the spawn counter.
+    ///
+    /// See the `spawn_count` field for an extensive comment on the
+    /// meaning of the spawn counter.
     #[inline]
-    pub fn spawn_count(&self) -> &Cell<usize> {
-        &self.spawn_count
+    pub fn current_spawn_count(&self) -> usize {
+        self.spawn_count.get()
+    }
+
+    /// Increment the spawn count by 1.
+    ///
+    /// See the `spawn_count` field for an extensive comment on the
+    /// meaning of the spawn counter.
+    #[inline]
+    pub fn bump_spawn_count(&self) {
+        self.spawn_count.set(self.spawn_count.get() + 1);
+    }
+
+    /// Pops spawned (async) jobs until our spawn count reaches
+    /// `start_count` or the deque is empty. This routine is used to
+    /// ensure that the local deque is "balanced".
+    ///
+    /// See the `spawn_count` field for an extensive comment on the
+    /// meaning of the spawn counter and use of this function.
+    #[inline]
+    pub unsafe fn pop_spawned_jobs(&self, start_count: usize) {
+        while self.spawn_count.get() != start_count {
+            if let Some(job_ref) = self.pop() {
+                self.spawn_count.set(self.spawn_count.get() - 1);
+                job_ref.execute(JobMode::Execute);
+            } else {
+                self.spawn_count.set(start_count);
+                break;
+            }
+        }
     }
 
     #[inline]
@@ -281,12 +369,16 @@ impl WorkerThread {
     /// Keep stealing jobs until the latch is set.
     #[cold]
     pub unsafe fn steal_until(&mut self, latch: &SpinLatch) {
+        let spawn_count = self.spawn_count.get();
+
         // If another thread stole our job when we panic, we must halt unwinding
         // until that thread is finished using it.
         let guard = unwind::finally(&latch, |latch| latch.spin());
         while !latch.probe() {
             if let Some(job) = self.steal_work() {
+                debug_assert!(self.spawn_count.get() == spawn_count);
                 job.execute(JobMode::Execute);
+                self.pop_spawned_jobs(spawn_count);
             } else {
                 thread::yield_now();
             }
@@ -296,24 +388,34 @@ impl WorkerThread {
 
     /// Steal a single job and return it.
     unsafe fn steal_work(&mut self) -> Option<JobRef> {
-        if self.stealers.is_empty() { return None }
+        // at no point should we try to steal unless our local deque is empty
+        debug_assert!(self.pop().is_none());
+
+        if self.stealers.is_empty() {
+            return None;
+        }
         let start = self.rng.next_u32() % self.stealers.len() as u32;
         let (lo, hi) = self.stealers.split_at(start as usize);
-        hi.iter().chain(lo)
-            .filter_map(|stealer| match stealer.steal() {
-                Stolen::Empty => None,
-                Stolen::Abort => None, // loop?
-                Stolen::Data(v) => Some(v),
+        hi.iter()
+            .chain(lo)
+            .filter_map(|stealer| {
+                match stealer.steal() {
+                    Stolen::Empty => None,
+                    Stolen::Abort => None, // loop?
+                    Stolen::Data(v) => Some(v),
+                }
             })
             .next()
     }
 }
 
-///////////////////////////////////////////////////////////////////////////
+/// ////////////////////////////////////////////////////////////////////////
 
 unsafe fn main_loop(worker: Worker<JobRef>, registry: Arc<Registry>, index: usize) {
-    let stealers = registry.thread_infos.iter()
-        .enumerate().filter(|&(i, _)| i != index)
+    let stealers = registry.thread_infos
+        .iter()
+        .enumerate()
+        .filter(|&(i, _)| i != index)
         .map(|(_, ti)| ti.stealer.clone())
         .collect::<Vec<_>>();
 
@@ -326,6 +428,7 @@ unsafe fn main_loop(worker: Worker<JobRef>, registry: Arc<Registry>, index: usiz
         index: index,
         spawn_count: Cell::new(0),
         rng: rand::weak_rng(),
+        registry: registry.clone(),
     };
     worker_thread.set_current();
 
@@ -346,13 +449,15 @@ unsafe fn main_loop(worker: Worker<JobRef>, registry: Arc<Registry>, index: usiz
                 continue;
             }
             Work::Terminate => break,
-            Work::None => {},
+            Work::None => {}
         }
 
         if let Some(stolen_job) = worker_thread.steal_work() {
             log!(StoleWork { worker: index });
             registry.start_working(index);
+            debug_assert!(worker_thread.spawn_count.get() == 0);
             stolen_job.execute(JobMode::Execute);
+            worker_thread.pop_spawned_jobs(0);
             was_active = true;
         } else {
             was_active = false;

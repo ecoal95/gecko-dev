@@ -1,9 +1,13 @@
 language: rust
 rust:
+  - 1.12.0
   - stable
   - nightly
 script:
   - cargo build
+  - |
+    [ $TRAVIS_RUST_VERSION != nightly ] ||
+    cargo test && cargo clean
   - |
     [ $TRAVIS_RUST_VERSION != nightly ] ||
     cargo test --features "unstable"

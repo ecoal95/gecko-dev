@@ -1,9 +1,9 @@
-use super::*;
 use super::internal::*;
+use super::*;
 use std;
 
 pub struct OptionIter<T: Send> {
-    opt: Option<T>
+    opt: Option<T>,
 }
 
 impl<T: Send> IntoParallelIterator for Option<T> {
@@ -60,7 +60,7 @@ impl<'a, T: Send, E> IntoParallelIterator for &'a mut Result<T, E> {
     }
 }
 
-///////////////////////////////////////////////////////////////////////////
+/// ////////////////////////////////////////////////////////////////////////
 
 impl<T: Send> ParallelIterator for OptionIter<T> {
     type Item = T;
@@ -69,6 +69,10 @@ impl<T: Send> ParallelIterator for OptionIter<T> {
         where C: UnindexedConsumer<Self::Item>
     {
         bridge(self, consumer)
+    }
+
+    fn opt_len(&mut self) -> Option<usize> {
+        Some(self.len())
     }
 }
 
@@ -86,7 +90,10 @@ impl<T: Send> BoundedParallelIterator for OptionIter<T> {
 
 impl<T: Send> ExactParallelIterator for OptionIter<T> {
     fn len(&mut self) -> usize {
-        match self.opt { Some(_) => 1, None => 0 }
+        match self.opt {
+            Some(_) => 1,
+            None => 0,
+        }
     }
 }
 
@@ -98,10 +105,10 @@ impl<T: Send> IndexedParallelIterator for OptionIter<T> {
     }
 }
 
-///////////////////////////////////////////////////////////////////////////
+/// ////////////////////////////////////////////////////////////////////////
 
 pub struct OptionProducer<T: Send> {
-    opt: Option<T>
+    opt: Option<T>,
 }
 
 impl<T: Send> Producer for OptionProducer<T> {
@@ -111,7 +118,11 @@ impl<T: Send> Producer for OptionProducer<T> {
 
     fn split_at(self, index: usize) -> (Self, Self) {
         let none = OptionProducer { opt: None };
-        if index == 0 { (none, self) } else { (self, none) }
+        if index == 0 {
+            (none, self)
+        } else {
+            (self, none)
+        }
     }
 }
 
