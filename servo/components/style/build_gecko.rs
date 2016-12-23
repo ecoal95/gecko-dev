@@ -216,7 +216,6 @@ mod bindings {
             "NS_FONT_.*",
             "NS_STYLE_.*",
             "NS_CORNER_.*",
-            "NS_RADIUS_.*",
             "BORDER_COLOR_.*",
             "BORDER_STYLE_.*"
         ];
@@ -333,6 +332,7 @@ mod bindings {
             "StyleBasicShapeType",
             "StyleClipPath",
             "StyleClipPathGeometryBox",
+            "mozilla::StyleShapeRadius",
             "StyleTransition",
             "mozilla::UniquePtr",
             "mozilla::DefaultDelete",
