@@ -234,8 +234,6 @@ pub mod root {
     pub const NS_CORNER_BOTTOM_RIGHT_Y: ::std::os::raw::c_uint = 5;
     pub const NS_CORNER_BOTTOM_LEFT_X: ::std::os::raw::c_uint = 6;
     pub const NS_CORNER_BOTTOM_LEFT_Y: ::std::os::raw::c_uint = 7;
-    pub const NS_RADIUS_FARTHEST_SIDE: ::std::os::raw::c_uint = 0;
-    pub const NS_RADIUS_CLOSEST_SIDE: ::std::os::raw::c_uint = 1;
     pub const NS_STYLE_STACK_SIZING_IGNORE: ::std::os::raw::c_uint = 0;
     pub const NS_STYLE_STACK_SIZING_STRETCH_TO_FIT: ::std::os::raw::c_uint =
         1;
@@ -2772,6 +2770,9 @@ pub mod root {
             Border = 3,
             Margin = 4,
         }
+        #[repr(u8)]
+        #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+        pub enum StyleShapeRadius { FarthestSide = 0, ClosestSide = 1, }
         #[repr(u8)]
         #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
         pub enum StyleShapeSourceType {
