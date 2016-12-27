@@ -6,8 +6,7 @@
 
 use app_units::Au;
 use cssparser::RGBA;
-use gecko_bindings::structs::StyleShapeRadius;
-use gecko_bindings::structs::nsStyleCoord;
+use gecko_bindings::structs::{nsStyleCoord, StyleShapeRadius};
 use gecko_bindings::sugar::ns_style_coord::{CoordData, CoordDataMut, CoordDataValue};
 use std::cmp::max;
 use values::{Auto, Either};
@@ -151,11 +150,14 @@ impl GeckoStyleCoordConvertible for ShapeRadius {
 
     fn from_gecko_style_coord<T: CoordData>(coord: &T) -> Option<Self> {
         match coord.as_value() {
-            CoordDataValue::Enumerated(side) if side == StyleShapeRadius::ClosestSide as u32 => {
-                Some(ShapeRadius::ClosestSide)
-            }
-            CoordDataValue::Enumerated(side) if side == StyleShapeRadius::FarthestSide as u32 => {
-                Some(ShapeRadius::FarthestSide)
+            CoordDataValue::Enumerated(v) => {
+                if v == StyleShapeRadius::ClosestSide as u32 {
+                    Some(ShapeRadius::ClosestSide)
+                } else if v == StyleShapeRadius::FarthestSide as u32 {
+                    Some(ShapeRadius::FarthestSide)
+                } else {
+                    None
+                }
             }
             _ => LengthOrPercentage::from_gecko_style_coord(coord).map(ShapeRadius::Length),
         }

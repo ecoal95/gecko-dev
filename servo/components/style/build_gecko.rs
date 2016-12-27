@@ -216,6 +216,7 @@ mod bindings {
             "NS_FONT_.*",
             "NS_STYLE_.*",
             "NS_CORNER_.*",
+            "NS_RADIUS_.*",
             "BORDER_COLOR_.*",
             "BORDER_STYLE_.*"
         ];
@@ -229,6 +230,7 @@ mod bindings {
             "mozilla::DisplayItemClip",  // Needed because bindgen generates
                                          // specialization tests for this even
                                          // though it shouldn't.
+            "mozilla::StyleShapeRadius",
             ".*ThreadSafe.*Holder",
             "AnonymousContent",
             "AudioContext",
@@ -332,13 +334,12 @@ mod bindings {
             "StyleBasicShapeType",
             "StyleClipPath",
             "StyleClipPathGeometryBox",
-            "mozilla::StyleShapeRadius",
             "StyleTransition",
             "mozilla::UniquePtr",
             "mozilla::DefaultDelete",
         ];
         let opaque_types = [
-            "atomic___base", "std::atomic__My_base",
+            "std::namespace::atomic___base", "std::atomic__My_base",
             "nsAString_internal_char_traits",
             "nsAString_internal_incompatible_char_type",
             "nsACString_internal_char_traits",

@@ -325,6 +325,8 @@ pub trait LayoutElementHelpers {
     #[allow(unsafe_code)]
     unsafe fn get_colspan(self) -> u32;
     #[allow(unsafe_code)]
+    unsafe fn get_rowspan(self) -> u32;
+    #[allow(unsafe_code)]
     unsafe fn html_element_in_html_document_for_layout(&self) -> bool;
     fn id_attribute(&self) -> *const Option<Atom>;
     fn style_attribute(&self) -> *const Option<Arc<RwLock<PropertyDeclarationBlock>>>;
@@ -621,6 +623,17 @@ impl LayoutElementHelpers for LayoutJS<Element> {
     unsafe fn get_colspan(self) -> u32 {
         if let Some(this) = self.downcast::<HTMLTableCellElement>() {
             this.get_colspan().unwrap_or(1)
+        } else {
+            // Don't panic since `display` can cause this to be called on arbitrary
+            // elements.
+            1
+        }
+    }
+
+    #[allow(unsafe_code)]
+    unsafe fn get_rowspan(self) -> u32 {
+        if let Some(this) = self.downcast::<HTMLTableCellElement>() {
+            this.get_rowspan().unwrap_or(1)
         } else {
             // Don't panic since `display` can cause this to be called on arbitrary
             // elements.
@@ -2663,15 +2676,11 @@ impl Element {
                 self.set_enabled_state(false);
                 return;
             }
-            match ancestor.children()
-                          .find(|child| child.is::<HTMLLegendElement>()) {
-                Some(ref legend) => {
-                    // XXXabinader: should we save previous ancestor to avoid this iteration?
-                    if node.ancestors().any(|ancestor| ancestor == *legend) {
-                        continue;
-                    }
-                },
-                None => (),
+            if let Some(ref legend) = ancestor.children().find(|n| n.is::<HTMLLegendElement>()) {
+                // XXXabinader: should we save previous ancestor to avoid this iteration?
+                if node.ancestors().any(|ancestor| ancestor == *legend) {
+                    continue;
+                }
             }
             self.set_disabled_state(true);
             self.set_enabled_state(false);

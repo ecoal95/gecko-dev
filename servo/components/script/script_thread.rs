@@ -498,13 +498,10 @@ impl<'a> ScriptMemoryFailsafe<'a> {
 impl<'a> Drop for ScriptMemoryFailsafe<'a> {
     #[allow(unrooted_must_root)]
     fn drop(&mut self) {
-        match self.owner {
-            Some(owner) => {
-                for (_, document) in owner.documents.borrow().iter() {
-                    document.window().clear_js_runtime_for_script_deallocation();
-                }
+        if let Some(owner) = self.owner {
+            for (_, document) in owner.documents.borrow().iter() {
+                document.window().clear_js_runtime_for_script_deallocation();
             }
-            None => (),
         }
     }
 }
@@ -725,10 +722,8 @@ impl ScriptThread {
 
         for (id, document) in self.documents.borrow().iter() {
             // Only process a resize if layout is idle.
-            let resize_event = document.window().steal_resize_event();
-            match resize_event {
-                Some((size, size_type)) => resizes.push((id, size, size_type)),
-                None => ()
+            if let Some((size, size_type)) = document.window().steal_resize_event() {
+                resizes.push((id, size, size_type));
             }
         }
 
@@ -1049,8 +1044,11 @@ impl ScriptThread {
             TimerSource::FromWorker => panic!("Worker timeouts must not be sent to script thread"),
         };
 
-        let window = self.documents.borrow().find_window(pipeline_id)
-            .expect("ScriptThread: received fire timer msg for a pipeline not in this script thread. This is a bug.");
+        let window = self.documents.borrow().find_window(pipeline_id);
+        let window = match window {
+            Some(w) => w,
+            None => return warn!("Received fire timer msg for a closed pipeline {}.", pipeline_id),
+        };
 
         window.handle_fire_timer(id);
     }

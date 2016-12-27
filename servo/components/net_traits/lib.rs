@@ -42,7 +42,6 @@ use hyper::mime::{Attr, Mime};
 use hyper_serde::Serde;
 use ipc_channel::ipc::{self, IpcReceiver, IpcSender};
 use ipc_channel::router::ROUTER;
-use msg::constellation_msg::PipelineId;
 use request::{Request, RequestInit};
 use response::{HttpsState, Response};
 use servo_url::ServoUrl;
@@ -438,24 +437,17 @@ impl Metadata {
 
     /// Extract the parts of a Mime that we care about.
     pub fn set_content_type(&mut self, content_type: Option<&Mime>) {
-        match self.headers {
-            None => self.headers = Some(Serde(Headers::new())),
-            Some(_) => (),
+        if self.headers.is_none() {
+            self.headers = Some(Serde(Headers::new()));
         }
 
-        match content_type {
-            None => (),
-            Some(mime) => {
-                if let Some(headers) = self.headers.as_mut() {
-                    headers.set(ContentType(mime.clone()));
-                }
-
-                self.content_type = Some(Serde(ContentType(mime.clone())));
-                let &Mime(_, _, ref parameters) = mime;
-                for &(ref k, ref v) in parameters {
-                    if &Attr::Charset == k {
-                        self.charset = Some(v.to_string());
-                    }
+        if let Some(mime) = content_type {
+            self.headers.as_mut().unwrap().set(ContentType(mime.clone()));
+            self.content_type = Some(Serde(ContentType(mime.clone())));
+            let Mime(_, _, ref parameters) = *mime;
+            for &(ref k, ref v) in parameters {
+                if Attr::Charset == *k {
+                    self.charset = Some(v.to_string());
                 }
             }
         }
@@ -506,12 +498,6 @@ pub fn unwrap_websocket_protocol(wsp: Option<&header::WebSocketProtocol>) -> Opt
 /// An unique identifier to keep track of each load message in the resource handler
 #[derive(Clone, PartialEq, Eq, Copy, Hash, Debug, Deserialize, Serialize, HeapSizeOf)]
 pub struct ResourceId(pub u32);
-
-#[derive(Deserialize, Serialize)]
-pub enum ConstellationMsg {
-    /// Queries whether a pipeline or its ancestors are private
-    IsPrivate(PipelineId, IpcSender<bool>),
-}
 
 /// Network errors that have to be exported out of the loaders
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize, HeapSizeOf)]
