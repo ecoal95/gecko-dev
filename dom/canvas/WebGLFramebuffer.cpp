@@ -423,13 +423,14 @@ WebGLFBAttachPoint::GetParameter(const char* funcName, WebGLContext* webgl, JSCo
         default:
             break;
         }
-
+        nsCString attachmentName;
+        WebGLContext::EnumName(attachment, &attachmentName);
         if (webgl->IsWebGL2()) {
             webgl->ErrorInvalidOperation("%s: No attachment at %s.", funcName,
-                                         webgl->EnumName(attachment));
+                                         attachmentName.BeginReading());
         } else {
             webgl->ErrorInvalidEnum("%s: No attachment at %s.", funcName,
-                                    webgl->EnumName(attachment));
+                                    attachmentName.BeginReading());
         }
         return JS::NullValue();
     }
@@ -501,8 +502,12 @@ WebGLFBAttachPoint::GetParameter(const char* funcName, WebGLContext* webgl, JSCo
     }
 
     const auto usage = Format();
-    if (!usage)
+    if (!usage) {
+        if (pname == LOCAL_GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING)
+            return JS::NumberValue(LOCAL_GL_LINEAR);
+
         return JS::NullValue();
+    }
 
     auto format = usage->format;
 
@@ -867,6 +872,44 @@ WebGLFramebuffer::ValidateAndInitAttachments(const char* funcName)
 }
 
 bool
+WebGLFramebuffer::ValidateClearBufferType(const char* funcName, GLenum buffer,
+                                          uint32_t drawBuffer, GLenum funcType) const
+{
+    if (buffer != LOCAL_GL_COLOR)
+        return true;
+
+    const auto& attach = mColorAttachments[drawBuffer];
+    if (!count(mResolvedCompleteData->colorDrawBuffers.begin(),
+               mResolvedCompleteData->colorDrawBuffers.end(),
+               &attach))
+    {
+        return true; // DRAW_BUFFERi set to NONE.
+    }
+
+    GLenum attachType;
+    switch (attach.Format()->format->componentType) {
+    case webgl::ComponentType::Int:
+        attachType = LOCAL_GL_INT;
+        break;
+    case webgl::ComponentType::UInt:
+        attachType = LOCAL_GL_UNSIGNED_INT;
+        break;
+    default:
+        attachType = LOCAL_GL_FLOAT;
+        break;
+    }
+
+    if (attachType != funcType) {
+        mContext->ErrorInvalidOperation("%s: This attachment is of type 0x%04x, but"
+                                        " this function is of type 0x%04x.",
+                                        funcName, attachType, funcType);
+        return false;
+    }
+
+    return true;
+}
+
+bool
 WebGLFramebuffer::ValidateForRead(const char* funcName,
                                   const webgl::FormatUsageInfo** const out_format,
                                   uint32_t* const out_width, uint32_t* const out_height)
@@ -881,6 +924,12 @@ WebGLFramebuffer::ValidateForRead(const char* funcName,
 
     if (!mColorReadBuffer->IsDefined()) {
         mContext->ErrorInvalidOperation("%s: The READ_BUFFER attachment is not defined.",
+                                        funcName);
+        return false;
+    }
+
+    if (mColorReadBuffer->Samples()) {
+        mContext->ErrorInvalidOperation("%s: The READ_BUFFER attachment is multisampled.",
                                         funcName);
         return false;
     }
@@ -1237,6 +1286,15 @@ WebGLFramebuffer::DrawBuffers(const char* funcName, const dom::Sequence<GLenum>&
             const auto& attach = mColorAttachments[i];
             newColorDrawBuffers.push_back(&attach);
         } else if (cur != LOCAL_GL_NONE) {
+            const bool isColorEnum = (cur >= LOCAL_GL_COLOR_ATTACHMENT0 &&
+                                      cur < mContext->LastColorAttachmentEnum());
+            if (cur != LOCAL_GL_BACK &&
+                !isColorEnum)
+            {
+                mContext->ErrorInvalidEnum("%s: Unexpected enum in buffers.", funcName);
+                return;
+            }
+
             mContext->ErrorInvalidOperation("%s: `buffers[i]` must be NONE or"
                                             " COLOR_ATTACHMENTi.",
                                             funcName);
@@ -1654,7 +1712,6 @@ WebGLFramebuffer::BlitFramebuffer(WebGLContext* webgl,
     if (mask & LOCAL_GL_COLOR_BUFFER_BIT &&
         !srcColorFormat && !dstHasColor)
     {
-
         mask ^= LOCAL_GL_COLOR_BUFFER_BIT;
     }
 
@@ -1766,49 +1823,36 @@ WebGLFramebuffer::BlitFramebuffer(WebGLContext* webgl,
     // Check for feedback
 
     if (srcFB && dstFB) {
-        const auto fnValidateBuffers = [&](GLenum bufferBit, const char* bufferBitName,
-                                           bool srcHas, bool dstHas)
-        {
-            if (mask & bufferBit &&
-                srcHas != dstHas)
-            {
-                webgl->ErrorInvalidOperation("%s: With %s, must have a corresponding draw"
-                                             " buffer iff there's a relevent read"
-                                             " buffer.",
-                                             funcName, bufferBitName);
-                return false;
-            }
-            return true;
-        };
+        const WebGLFBAttachPoint* feedback = nullptr;
 
-        if (!fnValidateBuffers( LOCAL_GL_COLOR_BUFFER_BIT, "COLOR_BUFFER_BIT",
-                                bool(srcFB->mColorReadBuffer),
-                                bool(dstFB->mColorDrawBuffers.size()) ) ||
-            !fnValidateBuffers( LOCAL_GL_DEPTH_BUFFER_BIT, "DEPTH_BUFFER_BIT",
-                                bool(srcFB->mResolvedCompleteData->depthBuffer),
-                                bool(dstFB->mResolvedCompleteData->depthBuffer) ) ||
-            !fnValidateBuffers( LOCAL_GL_STENCIL_BUFFER_BIT, "STENCIL_BUFFER_BIT",
-                                bool(srcFB->mResolvedCompleteData->stencilBuffer),
-                                bool(dstFB->mResolvedCompleteData->stencilBuffer) ))
-        {
-            return;
+        if (mask & LOCAL_GL_COLOR_BUFFER_BIT) {
+            for (const auto& cur : dstFB->mResolvedCompleteData->colorDrawBuffers) {
+                if (srcFB->mColorReadBuffer->IsEquivalent(*cur)) {
+                    feedback = cur;
+                }
+            }
         }
 
-        const auto& readSet = srcFB->mResolvedCompleteData->readSet;
-        const auto& drawSet = dstFB->mResolvedCompleteData->drawSet;
+        const auto& srcDepthBuffer = srcFB->mResolvedCompleteData->depthBuffer;
+        const auto& dstDepthBuffer = dstFB->mResolvedCompleteData->depthBuffer;
+        if (mask & LOCAL_GL_DEPTH_BUFFER_BIT &&
+            srcDepthBuffer->IsEquivalent(*dstDepthBuffer))
+        {
+            feedback = dstDepthBuffer;
+        }
 
-        std::vector<WebGLFBAttachPoint::Ordered> intersection;
-        std::set_intersection(drawSet.begin(), drawSet.end(),
-                              readSet.begin(), readSet.end(),
-                              std::back_inserter(intersection));
+        const auto& srcStencilBuffer = srcFB->mResolvedCompleteData->stencilBuffer;
+        const auto& dstStencilBuffer = dstFB->mResolvedCompleteData->stencilBuffer;
+        if (mask & LOCAL_GL_STENCIL_BUFFER_BIT &&
+            srcStencilBuffer->IsEquivalent(*dstStencilBuffer))
+        {
+            feedback = dstStencilBuffer;
+        }
 
-        if (intersection.size()) {
-            // set_intersection pulls from the first range, so it records conflicts on the
-            // DRAW_FRAMEBUFFER.
-            const auto& example = intersection.cbegin()->mRef;
+        if (feedback) {
             webgl->ErrorInvalidOperation("%s: Feedback detected into DRAW_FRAMEBUFFER's"
                                          " 0x%04x attachment.",
-                                         funcName, example.mAttachmentPoint);
+                                         funcName, feedback->mAttachmentPoint);
             return;
         }
     } else if (!srcFB && !dstFB) {
@@ -1819,6 +1863,8 @@ WebGLFramebuffer::BlitFramebuffer(WebGLContext* webgl,
     ////
 
     gl->MakeCurrent();
+    webgl->OnBeforeReadCall();
+    WebGLContext::ScopedDrawCallWrapper wrapper(*webgl);
     gl->fBlitFramebuffer(srcX0, srcY0, srcX1, srcY1,
                          dstX0, dstY0, dstX1, dstY1,
                          mask, filter);

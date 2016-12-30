@@ -102,6 +102,18 @@ public:
 
     void OnBackingStoreRespecified() const;
 
+    bool IsEquivalent(const WebGLFBAttachPoint& other) const {
+        MOZ_ASSERT(IsDefined() && other.IsDefined());
+
+#define _(X) X == other.X
+        return ( _(mRenderbufferPtr) &&
+                 _(mTexturePtr) &&
+                 _(mTexImageTarget.get()) &&
+                 _(mTexImageLevel) &&
+                 _(mTexImageLayer) );
+#undef _
+    }
+
     ////
 
     struct Ordered {
@@ -173,9 +185,9 @@ protected:
     struct ResolvedData {
         // BlitFramebuffer
         bool hasSampleBuffers;
-        std::vector<const WebGLFBAttachPoint*> colorDrawBuffers;
-        const WebGLFBAttachPoint* depthBuffer;
-        const WebGLFBAttachPoint* stencilBuffer;
+        std::vector<const WebGLFBAttachPoint*> colorDrawBuffers; // Non-null, defined
+        const WebGLFBAttachPoint* depthBuffer; // null if not defined
+        const WebGLFBAttachPoint* stencilBuffer; // null if not defined
 
         // IsFeedback
         std::vector<const WebGLFBAttachPoint*> texDrawBuffers; // Non-null
@@ -226,6 +238,8 @@ public:
     void DetachTexture(const WebGLTexture* tex);
     void DetachRenderbuffer(const WebGLRenderbuffer* rb);
     bool ValidateAndInitAttachments(const char* funcName);
+    bool ValidateClearBufferType(const char* funcName, GLenum buffer, uint32_t drawBuffer,
+                                 GLenum funcType) const;
 
     bool ValidateForRead(const char* info,
                          const webgl::FormatUsageInfo** const out_format,

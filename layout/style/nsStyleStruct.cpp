@@ -2265,7 +2265,7 @@ nsStyleImage::StartDecoding() const
     if (!req) {
       return false;
     }
-    return req->StartDecodingWithResult(imgIContainer::FLAG_NONE);
+    return req->StartDecodingWithResult(imgIContainer::FLAG_ASYNC_NOTIFY);
   }
   // null image types always return false from IsComplete, so we do the same here.
   return mType != eStyleImageType_Null ? true : false;
@@ -3974,6 +3974,7 @@ nsStyleUserInterface::nsStyleUserInterface(StyleStructContext aContext)
   , mUserFocus(StyleUserFocus::None)
   , mPointerEvents(NS_STYLE_POINTER_EVENTS_AUTO)
   , mCursor(NS_STYLE_CURSOR_AUTO)
+  , mCaretColor(StyleComplexColor::Auto())
 {
   MOZ_COUNT_CTOR(nsStyleUserInterface);
 }
@@ -3985,6 +3986,7 @@ nsStyleUserInterface::nsStyleUserInterface(const nsStyleUserInterface& aSource)
   , mPointerEvents(aSource.mPointerEvents)
   , mCursor(aSource.mCursor)
   , mCursorImages(aSource.mCursorImages)
+  , mCaretColor(aSource.mCaretColor)
 {
   MOZ_COUNT_CTOR(nsStyleUserInterface);
 }
@@ -4044,6 +4046,10 @@ nsStyleUserInterface::CalcDifference(const nsStyleUserInterface& aNewData) const
 
   if (mUserFocus != aNewData.mUserFocus) {
     hint |= nsChangeHint_NeutralChange;
+  }
+
+  if (mCaretColor != aNewData.mCaretColor) {
+    hint |= nsChangeHint_RepaintFrame;
   }
 
   return hint;
