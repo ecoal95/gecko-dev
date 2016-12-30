@@ -46,7 +46,7 @@ impl DOMParser {
 }
 
 impl DOMParserMethods for DOMParser {
-    // https://domparsing.spec.whatwg.org/#the-domparser-interface
+    // https://w3c.github.io/DOM-Parsing/#the-domparser-interface
     fn ParseFromString(&self,
                        s: DOMString,
                        ty: DOMParserBinding::SupportedType)
@@ -61,6 +61,7 @@ impl DOMParserMethods for DOMParser {
                 let document = Document::new(&self.window,
                                              None,
                                              Some(url.clone()),
+                                             doc.origin().alias(),
                                              IsHTMLDocument::HTMLDocument,
                                              Some(content_type),
                                              None,
@@ -77,6 +78,7 @@ impl DOMParserMethods for DOMParser {
                 let document = Document::new(&self.window,
                                              None,
                                              Some(url.clone()),
+                                             doc.origin().alias(),
                                              IsHTMLDocument::NonHTMLDocument,
                                              Some(content_type),
                                              None,
