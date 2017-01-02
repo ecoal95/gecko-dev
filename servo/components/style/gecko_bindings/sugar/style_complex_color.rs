@@ -24,6 +24,14 @@ impl StyleComplexColor {
             mIsAuto: false,
         }
     }
+
+    pub fn auto() -> Self {
+        StyleComplexColor {
+            mColor: 0,
+            mForegroundRatio: 255,
+            mIsAuto: true,
+        }
+    }
 }
 
 impl From<Color> for StyleComplexColor {
