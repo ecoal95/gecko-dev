@@ -186,8 +186,7 @@ const Utils = {
     let allowed;
     try {
       allowed = pb.getBoolPref(PREF_HANDLER_EXTERNAL_PREFIX + "." + aProtocol);
-    }
-    catch (e) {
+    } catch (e) {
       allowed = pb.getBoolPref(PREF_HANDLER_EXTERNAL_PREFIX + "-default");
     }
     if (!allowed) {
@@ -502,8 +501,7 @@ WebContentConverterRegistrar.prototype = {
       }
 
       this._appendFeedReaderNotification(uri, aTitle, notificationBox);
-    }
-    else {
+    } else {
       this._registerContentHandler(contentType, aURIString, aTitle);
     }
   },
@@ -634,8 +632,7 @@ WebContentConverterRegistrar.prototype = {
       try {
         typeBranch.getCharPref("type");
         ++i;
-      }
-      catch (e) {
+      } catch (e) {
         // No more handlers
         break;
       }
@@ -911,7 +908,7 @@ WebContentConverterRegistrarContent.prototype = {
       .sort();
 
     // now register them
-    for (num of nums) {
+    for (let num of nums) {
       let branch = ps.getBranch(PREF_CONTENTHANDLERS_BRANCH + num + ".");
       try {
         this._registerContentHandlerHavingBranch(branch);

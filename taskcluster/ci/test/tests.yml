@@ -259,7 +259,7 @@ marionette:
             default: 1
     mozharness:
         by-test-platform:
-            android:
+            android.*:
                 script: android_emulator_unittest.py
                 no-read-buildbot-config: true
                 config:
@@ -530,8 +530,6 @@ mochitest-devtools-chrome:
             default: ['all']
     e10s:
         by-test-platform:
-            # Bug 1242986: linux64/debug mochitest-devtools-chrome e10s is not greened up yet
-            linux64/debug: false
             linux64-ccov/opt: false
             linux64-jsdcov/opt: false
             # Bug 1304433: mochitest-devtools-chrome (e10s) not greened on windows
@@ -555,7 +553,7 @@ mochitest-devtools-chrome:
                 linux64-ccov/opt:
                     - --mochitest-suite=mochitest-devtools-chrome-chunked
                     - --code-coverage
-                linux64-jsdcov:
+                linux64-jsdcov/opt:
                     - --mochitest-suite=mochitest-devtools-chrome-coverage
                 default:
                     - --mochitest-suite=mochitest-devtools-chrome-chunked

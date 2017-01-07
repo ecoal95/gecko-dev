@@ -17,7 +17,7 @@
 #include "nsHistory.h"
 #include "nsDOMNavigationTiming.h"
 #include "nsIDOMStorageManager.h"
-#include "mozilla/dom/DOMStorage.h"
+#include "mozilla/dom/Storage.h"
 #include "mozilla/dom/IdleRequest.h"
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/StorageEvent.h"
@@ -1992,8 +1992,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindow)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMozSelfSupport)
 
   tmp->TraverseHostObjectURIs(cb);
-
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindow)
@@ -5289,7 +5287,7 @@ nsGlobalWindow::GetOuterSize(CallerType aCallerType, ErrorResult& aError)
 
   nsGlobalWindow* rootWindow = nsGlobalWindow::Cast(GetPrivateRoot());
   if (rootWindow) {
-    rootWindow->FlushPendingNotifications(Flush_Layout);
+    rootWindow->FlushPendingNotifications(FlushType::Layout);
   }
 
   nsIntSize sizeDevPixels;
@@ -5521,7 +5519,7 @@ nsGlobalWindow::GetInnerScreenRect()
 
   nsGlobalWindow* rootWindow = nsGlobalWindow::Cast(GetPrivateRoot());
   if (rootWindow) {
-    rootWindow->FlushPendingNotifications(Flush_Layout);
+    rootWindow->FlushPendingNotifications(FlushType::Layout);
   }
 
   if (!mDocShell) {
@@ -5890,7 +5888,7 @@ nsGlobalWindow::CheckSecurityLeftAndTop(int32_t* aLeft, int32_t* aTop,
 #endif
 
     if (nsGlobalWindow* rootWindow = nsGlobalWindow::Cast(GetPrivateRoot())) {
-      rootWindow->FlushPendingNotifications(Flush_Layout);
+      rootWindow->FlushPendingNotifications(FlushType::Layout);
     }
 
     nsCOMPtr<nsIBaseWindow> treeOwner = GetTreeOwnerWindow();
@@ -5955,7 +5953,7 @@ nsGlobalWindow::GetScrollBoundaryOuter(Side aSide)
 {
   MOZ_RELEASE_ASSERT(IsOuterWindow());
 
-  FlushPendingNotifications(Flush_Layout);
+  FlushPendingNotifications(FlushType::Layout);
   if (nsIScrollableFrame *sf = GetScrollFrame()) {
     return nsPresContext::
       AppUnitsToIntCSSPixels(sf->GetScrollRange().Edge(aSide));
@@ -5997,7 +5995,7 @@ nsGlobalWindow::GetScrollXY(bool aDoFlush)
   MOZ_ASSERT(IsOuterWindow());
 
   if (aDoFlush) {
-    FlushPendingNotifications(Flush_Layout);
+    FlushPendingNotifications(FlushType::Layout);
   } else {
     EnsureSizeUpToDate();
   }
@@ -6807,7 +6805,7 @@ nsGlobalWindow::EnsureReflowFlushAndPaint()
 
   // Flush pending reflows.
   if (mDoc) {
-    mDoc->FlushPendingNotifications(Flush_Layout);
+    mDoc->FlushPendingNotifications(FlushType::Layout);
   }
 
   // Unsuppress painting.
@@ -7878,7 +7876,7 @@ nsGlobalWindow::ScrollTo(double aXScroll, double aYScroll)
 void
 nsGlobalWindow::ScrollTo(const ScrollToOptions& aOptions)
 {
-  FlushPendingNotifications(Flush_Layout);
+  FlushPendingNotifications(FlushType::Layout);
   nsIScrollableFrame *sf = GetScrollFrame();
 
   if (sf) {
@@ -7904,7 +7902,7 @@ void
 nsGlobalWindow::ScrollTo(const CSSIntPoint& aScroll,
                          const ScrollOptions& aOptions)
 {
-  FlushPendingNotifications(Flush_Layout);
+  FlushPendingNotifications(FlushType::Layout);
   nsIScrollableFrame *sf = GetScrollFrame();
 
   if (sf) {
@@ -7935,7 +7933,7 @@ nsGlobalWindow::ScrollTo(const CSSIntPoint& aScroll,
 void
 nsGlobalWindow::ScrollBy(double aXScrollDif, double aYScrollDif)
 {
-  FlushPendingNotifications(Flush_Layout);
+  FlushPendingNotifications(FlushType::Layout);
   nsIScrollableFrame *sf = GetScrollFrame();
 
   if (sf) {
@@ -7952,7 +7950,7 @@ nsGlobalWindow::ScrollBy(double aXScrollDif, double aYScrollDif)
 void
 nsGlobalWindow::ScrollBy(const ScrollToOptions& aOptions)
 {
-  FlushPendingNotifications(Flush_Layout);
+  FlushPendingNotifications(FlushType::Layout);
   nsIScrollableFrame *sf = GetScrollFrame();
 
   if (sf) {
@@ -7974,7 +7972,7 @@ nsGlobalWindow::ScrollByLines(int32_t numLines,
 {
   MOZ_ASSERT(IsInnerWindow());
 
-  FlushPendingNotifications(Flush_Layout);
+  FlushPendingNotifications(FlushType::Layout);
   nsIScrollableFrame *sf = GetScrollFrame();
   if (sf) {
     // It seems like it would make more sense for ScrollByLines to use
@@ -7995,7 +7993,7 @@ nsGlobalWindow::ScrollByPages(int32_t numPages,
 {
   MOZ_ASSERT(IsInnerWindow());
 
-  FlushPendingNotifications(Flush_Layout);
+  FlushPendingNotifications(FlushType::Layout);
   nsIScrollableFrame *sf = GetScrollFrame();
   if (sf) {
     // It seems like it would make more sense for ScrollByPages to use
@@ -8015,7 +8013,7 @@ nsGlobalWindow::MozScrollSnap()
 {
   MOZ_ASSERT(IsInnerWindow());
 
-  FlushPendingNotifications(Flush_Layout);
+  FlushPendingNotifications(FlushType::Layout);
   nsIScrollableFrame *sf = GetScrollFrame();
   if (sf) {
     sf->ScrollSnap();
@@ -8380,7 +8378,7 @@ already_AddRefed<nsPIDOMWindowOuter>
 nsGlobalWindow::GetFramesOuter()
 {
   RefPtr<nsPIDOMWindowOuter> frames(AsOuter());
-  FlushPendingNotifications(Flush_ContentAndNotify);
+  FlushPendingNotifications(FlushType::ContentAndNotify);
   return frames.forget();
 }
 
@@ -10593,7 +10591,7 @@ nsGlobalWindow::GetComputedStyleHelperOuter(Element& aElt,
       return nullptr;
     }
 
-    parent->FlushPendingNotifications(Flush_Frames);
+    parent->FlushPendingNotifications(FlushType::Frames);
 
     // Might have killed mDocShell
     if (!mDocShell) {
@@ -10625,7 +10623,7 @@ nsGlobalWindow::GetComputedStyleHelper(Element& aElt,
                             aError, nullptr);
 }
 
-DOMStorage*
+Storage*
 nsGlobalWindow::GetSessionStorage(ErrorResult& aError)
 {
   MOZ_RELEASE_ASSERT(IsInnerWindow());
@@ -10688,7 +10686,7 @@ nsGlobalWindow::GetSessionStorage(ErrorResult& aError)
       return nullptr;
     }
 
-    mSessionStorage = static_cast<DOMStorage*>(storage.get());
+    mSessionStorage = static_cast<Storage*>(storage.get());
     MOZ_ASSERT(mSessionStorage);
 
     if (MOZ_LOG_TEST(gDOMLeakPRLog, LogLevel::Debug)) {
@@ -10708,7 +10706,7 @@ nsGlobalWindow::GetSessionStorage(ErrorResult& aError)
   return mSessionStorage;
 }
 
-DOMStorage*
+Storage*
 nsGlobalWindow::GetLocalStorage(ErrorResult& aError)
 {
   MOZ_RELEASE_ASSERT(IsInnerWindow());
@@ -10756,7 +10754,7 @@ nsGlobalWindow::GetLocalStorage(ErrorResult& aError)
       return nullptr;
     }
 
-    mLocalStorage = static_cast<DOMStorage*>(storage.get());
+    mLocalStorage = static_cast<Storage*>(storage.get());
     MOZ_ASSERT(mLocalStorage);
   }
 
@@ -11587,7 +11585,7 @@ nsGlobalWindow::Observe(nsISupports* aSubject, const char* aTopic,
       return NS_ERROR_FAILURE;
     }
 
-    RefPtr<DOMStorage> changingStorage = event->GetStorageArea();
+    RefPtr<Storage> changingStorage = event->GetStorageArea();
     if (!changingStorage) {
       return NS_ERROR_FAILURE;
     }
@@ -11613,7 +11611,7 @@ nsGlobalWindow::Observe(nsISupports* aSubject, const char* aTopic,
 
     switch (changingStorage->GetType())
     {
-    case DOMStorage::SessionStorage:
+    case Storage::SessionStorage:
     {
       bool check = false;
 
@@ -11643,7 +11641,7 @@ nsGlobalWindow::Observe(nsISupports* aSubject, const char* aTopic,
       break;
     }
 
-    case DOMStorage::LocalStorage:
+    case Storage::LocalStorage:
     {
       // Allow event fire only for the same principal storages
       // XXX We have to use EqualsIgnoreDomain after bug 495337 lands
@@ -11781,14 +11779,14 @@ nsGlobalWindow::CloneStorageEvent(const nsAString& aType,
   aEvent->GetNewValue(dict.mNewValue);
   aEvent->GetUrl(dict.mUrl);
 
-  RefPtr<DOMStorage> storageArea = aEvent->GetStorageArea();
+  RefPtr<Storage> storageArea = aEvent->GetStorageArea();
   MOZ_ASSERT(storageArea);
 
-  RefPtr<DOMStorage> storage;
-  if (storageArea->GetType() == DOMStorage::LocalStorage) {
+  RefPtr<Storage> storage;
+  if (storageArea->GetType() == Storage::LocalStorage) {
     storage = GetLocalStorage(aRv);
   } else {
-    MOZ_ASSERT(storageArea->GetType() == DOMStorage::SessionStorage);
+    MOZ_ASSERT(storageArea->GetType() == Storage::SessionStorage);
     storage = GetSessionStorage(aRv);
   }
 
@@ -12772,7 +12770,7 @@ nsGlobalWindow::IsPrivateBrowsing()
 }
 
 void
-nsGlobalWindow::FlushPendingNotifications(mozFlushType aType)
+nsGlobalWindow::FlushPendingNotifications(FlushType aType)
 {
   if (mDoc) {
     mDoc->FlushPendingNotifications(aType);
@@ -12789,7 +12787,7 @@ nsGlobalWindow::EnsureSizeUpToDate()
   // too.
   nsGlobalWindow *parent = nsGlobalWindow::Cast(GetPrivateParent());
   if (parent) {
-    parent->FlushPendingNotifications(Flush_Layout);
+    parent->FlushPendingNotifications(FlushType::Layout);
   }
 }
 

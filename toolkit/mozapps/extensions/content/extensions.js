@@ -489,8 +489,7 @@ if (window.QueryInterface(Ci.nsIInterfaceRequestor)
           .getInterface(Ci.nsIWebNavigation)
           .sessionHistory) {
   var gHistory = HTML5History;
-}
-else {
+} else {
   gHistory = FakeHistory;
 }
 
@@ -566,8 +565,7 @@ var gEventManager = {
           tiptext += " " + (addonItem.hasAttribute("upgrade") ? addonItem.mManualUpdate.version
                                                               : addonItem.mAddon.version);
         }
-      }
-      else if (shouldShowVersionNumber(addonItem.mInstall)) {
+      } else if (shouldShowVersionNumber(addonItem.mInstall)) {
         tiptext += " " + addonItem.mInstall.version;
       }
 
@@ -755,8 +753,7 @@ var gViewController = {
     try {
       this.loadViewInternal(state.view, state.previousView, state);
       this.lastHistoryIndex = gHistory.index;
-    }
-    catch (e) {
+    } catch (e) {
       // The attempt to load the view failed, try moving further along history
       if (this.lastHistoryIndex > gHistory.index) {
         if (gHistory.canGoBack)
@@ -943,7 +940,7 @@ var gViewController = {
 
         let appStartup = Cc["@mozilla.org/toolkit/app-startup;1"].
                          getService(Ci.nsIAppStartup);
-        appStartup.quit(Ci.nsIAppStartup.eAttemptQuit |  Ci.nsIAppStartup.eRestart);
+        appStartup.quit(Ci.nsIAppStartup.eAttemptQuit | Ci.nsIAppStartup.eRestart);
       }
     },
 
@@ -1348,30 +1345,14 @@ var gViewController = {
         if (fp.show() != nsIFilePicker.returnOK)
           return;
 
-        var files = fp.files;
-        var installs = [];
-
-        function buildNextInstall() {
-          if (!files.hasMoreElements()) {
-            if (installs.length > 0) {
-              // Display the normal install confirmation for the installs
-              let webInstaller = Cc["@mozilla.org/addons/web-install-listener;1"].
-                                 getService(Ci.amIWebInstallListener);
-              webInstaller.onWebInstallRequested(getBrowserElement(),
-                                                 document.documentURIObject,
-                                                 installs);
-            }
-            return;
-          }
-
-          var file = files.getNext();
-          AddonManager.getInstallForFile(file, function(aInstall) {
-            installs.push(aInstall);
-            buildNextInstall();
+        let browser = getBrowserElement();
+        let files = fp.files;
+        while (files.hasMoreElements()) {
+          let file = files.getNext();
+          AddonManager.getInstallForFile(file, install => {
+            AddonManager.installAddonFromAOM(browser, document.documentURI, install);
           });
         }
-
-        buildNextInstall();
       }
     },
 
@@ -1925,8 +1906,7 @@ var gCategories = {
       var prefName = PREF_UI_TYPE_HIDDEN.replace("%TYPE%", aType.id);
       try {
         startHidden = Services.prefs.getBoolPref(prefName);
-      }
-      catch (e) {
+      } catch (e) {
         // Default to hidden
         startHidden = true;
       }
@@ -2211,8 +2191,7 @@ var gDiscoverView = {
   destroy() {
     try {
       this._browser.removeProgressListener(this);
-    }
-    catch (e) {
+    } catch (e) {
       // Ignore the case when the listener wasn't already registered
     }
   },
@@ -3894,53 +3873,30 @@ var gDragDrop = {
   },
 
   onDrop(aEvent) {
-    var dataTransfer = aEvent.dataTransfer;
-    var urls = [];
+    let dataTransfer = aEvent.dataTransfer;
+    let browser = getBrowserElement();
 
-    // Convert every dropped item into a url
+    // Convert every dropped item into a url and install it
     for (var i = 0; i < dataTransfer.mozItemCount; i++) {
-      var url = dataTransfer.mozGetDataAt("text/uri-list", i);
+      let url = dataTransfer.mozGetDataAt("text/uri-list", i);
+      if (!url) {
+        url = dataTransfer.mozGetDataAt("text/x-moz-url", i);
+      }
       if (url) {
-        urls.push(url);
-        continue;
-      }
-
-      url = dataTransfer.mozGetDataAt("text/x-moz-url", i);
-      if (url) {
-        urls.push(url.split("\n")[0]);
-        continue;
-      }
-
-      var file = dataTransfer.mozGetDataAt("application/x-moz-file", i);
-      if (file) {
-        urls.push(Services.io.newFileURI(file).spec);
-        continue;
-      }
-    }
-
-    var pos = 0;
-    var installs = [];
-
-    function buildNextInstall() {
-      if (pos == urls.length) {
-        if (installs.length > 0) {
-          // Display the normal install confirmation for the installs
-          let webInstaller = Cc["@mozilla.org/addons/web-install-listener;1"].
-                             getService(Ci.amIWebInstallListener);
-          webInstaller.onWebInstallRequested(getBrowserElement(),
-                                             document.documentURIObject,
-                                             installs);
+        url = url.split("\n")[0];
+      } else {
+        let file = dataTransfer.mozGetDataAt("application/x-moz-file", i);
+        if (file) {
+          url = Services.io.newFileURI(file).spec;
         }
-        return;
       }
 
-      AddonManager.getInstallForURL(urls[pos++], function(aInstall) {
-        installs.push(aInstall);
-        buildNextInstall();
-      }, "application/x-xpinstall");
+      if (url) {
+        AddonManager.getInstallForURL(url, install => {
+          AddonManager.installAddonFromAOM(browser, document.documentURI, install);
+        }, "application/x-xpinstall");
+      }
     }
-
-    buildNextInstall();
 
     aEvent.preventDefault();
   }

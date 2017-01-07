@@ -387,7 +387,9 @@ pref("browser.search.context.loadInBackground", false);
 // comma seperated list of of engines to hide in the search panel.
 pref("browser.search.hiddenOneOffs", "");
 
+#ifndef RELEASE_OR_BETA
 pref("browser.search.reset.enabled", true);
+#endif
 
 pref("browser.sessionhistory.max_entries", 50);
 
@@ -1156,6 +1158,9 @@ pref("browser.newtabpage.enabled", true);
 // Toggles the enhanced content of 'about:newtab'. Shows sponsored tiles.
 sticky_pref("browser.newtabpage.enhanced", true);
 
+// enables Activity Stream inspired layout
+pref("browser.newtabpage.compact", false);
+
 // number of rows of newtab grid
 pref("browser.newtabpage.rows", 3);
 
@@ -1221,7 +1226,8 @@ pref("security.mixed_content.block_active_content", true);
 // Show degraded UI for http pages with password fields.
 pref("security.insecure_password.ui.enabled", true);
 
-pref("security.insecure_field_warning.contextual.enabled", false);
+// Show in-content login form warning UI for insecure login fields
+pref("security.insecure_field_warning.contextual.enabled", true);
 
 // 1 = allow MITM for certificate pinning checks.
 pref("security.cert_pinning.enforcement_level", 1);
@@ -1554,4 +1560,4 @@ pref("services.sync.validation.enabled", true);
 #endif
 
 // Preferences for the form autofill system extension
-pref("browser.formautofill.enabled", false);
+pref("browser.formautofill.experimental", false);

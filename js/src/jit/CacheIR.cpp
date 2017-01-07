@@ -128,6 +128,9 @@ GetPropIRGenerator::tryAttachStub()
 
         MOZ_ASSERT(cacheKind_ == CacheKind::GetElem);
 
+        if (tryAttachProxyElement(obj, objId))
+            return true;
+
         uint32_t index;
         Int32OperandId indexId;
         if (maybeGuardInt32Index(idVal_, getElemKeyValueId(), &index, &indexId)) {
@@ -141,6 +144,7 @@ GetPropIRGenerator::tryAttachStub()
                 return true;
             if (tryAttachArgumentsObjectArg(obj, objId, index, indexId))
                 return true;
+            return false;
         }
 
         return false;
@@ -850,22 +854,26 @@ GetPropIRGenerator::tryAttachPrimitive(ValOperandId valId, HandleId id)
     if (!proto)
         return false;
 
-    // Instantiate this property, for use during Ion compilation.
-    if (IsIonEnabled(cx_))
-        EnsureTrackPropertyTypes(cx_, proto, id);
-
-    // For now, only look for properties directly set on the prototype.
-    Shape* shape = proto->lookup(cx_, id);
-    if (!shape || !shape->hasSlot() || !shape->hasDefaultGetter())
+    RootedShape shape(cx_);
+    RootedNativeObject holder(cx_);
+    NativeGetPropCacheability type = CanAttachNativeGetProp(cx_, proto, id, &holder, &shape, pc_,
+                                                            engine_, canAttachGetter_,
+                                                            isTemporarilyUnoptimizable_);
+    if (type != CanAttachReadSlot)
         return false;
+
+    if (holder) {
+        // Instantiate this property, for use during Ion compilation.
+        if (IsIonEnabled(cx_))
+            EnsureTrackPropertyTypes(cx_, holder, id);
+    }
 
     writer.guardType(valId, primitiveType);
     maybeEmitIdGuard(id);
 
     ObjOperandId protoId = writer.loadObject(proto);
-    writer.guardShape(protoId, proto->lastProperty());
-    EmitLoadSlotResult(writer, protoId, proto, shape);
-    writer.typeMonitorResult();
+    EmitReadSlotResult(writer, proto, holder, shape, protoId);
+    EmitReadSlotReturn(writer, proto, holder, shape);
     return true;
 }
 
@@ -986,16 +994,12 @@ GetPropIRGenerator::tryAttachDenseElement(HandleObject obj, ObjOperandId objId,
 static bool
 CanAttachDenseElementHole(JSObject* obj)
 {
-    // Make sure this object already has dense elements.
-    if (obj->as<NativeObject>().getDenseInitializedLength() == 0)
-        return false;
-
-    // Now we have to make sure the objects on the prototype don't
-    // have any int32 properties or that such properties can't appear
-    // without a shape change.
+    // Make sure the objects on the prototype don't have any indexed properties
+    // or that such properties can't appear without a shape change.
     // Otherwise returning undefined for holes would obviously be incorrect,
     // because we would have to lookup a property on the prototype instead.
     do {
+        // The first two checks are also relevant to the receiver object.
         if (obj->isIndexed())
             return false;
 
@@ -1023,7 +1027,13 @@ bool
 GetPropIRGenerator::tryAttachDenseElementHole(HandleObject obj, ObjOperandId objId,
                                               uint32_t index, Int32OperandId indexId)
 {
-    if (!obj->isNative() || !CanAttachDenseElementHole(obj))
+    if (!obj->isNative())
+        return false;
+
+    if (obj->as<NativeObject>().containsDenseElement(index))
+        return false;
+
+    if (!CanAttachDenseElementHole(obj))
         return false;
 
     // Guard on the shape, to prevent non-dense elements from appearing.
@@ -1116,6 +1126,25 @@ GetPropIRGenerator::tryAttachTypedElement(HandleObject obj, ObjOperandId objId,
         writer.typeMonitorResult();
     else
         writer.returnFromIC();
+    return true;
+}
+
+bool
+GetPropIRGenerator::tryAttachProxyElement(HandleObject obj, ObjOperandId objId)
+{
+    if (!obj->is<ProxyObject>())
+        return false;
+
+    writer.guardIsProxy(objId);
+
+    // We are not guarding against DOM proxies here, because there is no other
+    // specialized DOM IC we could attach.
+    // We could call maybeEmitIdGuard here and then emit CallProxyGetResult,
+    // but for GetElem we prefer to attach a stub that can handle any Value
+    // so we don't attach a new stub for every id.
+    MOZ_ASSERT(cacheKind_ == CacheKind::GetElem);
+    writer.callProxyGetByValueResult(objId, getElemKeyValueId());
+    writer.typeMonitorResult();
     return true;
 }
 

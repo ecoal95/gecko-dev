@@ -503,10 +503,9 @@ add_task(function* test_log_err_only() {
    */
   try {
     eval("javascript syntax error");
-  }
-  catch (e) {
+  } catch (e) {
     log.error(e);
-    msg = appender.messages.pop();
+    let msg = appender.messages.pop();
     do_check_eq(msg.message, null);
     do_check_eq(msg.params, e);
   }
@@ -568,8 +567,8 @@ add_task(function* format_errors() {
   let pFormat = new Log.ParameterFormatter();
 
   // Test that subclasses of Error are recognized as errors.
-  err = new ReferenceError("Ref Error", "ERROR_FILE", 28);
-  str = pFormat.format(err);
+  let err = new ReferenceError("Ref Error", "ERROR_FILE", 28);
+  let str = pFormat.format(err);
   do_check_true(str.includes("ReferenceError"));
   do_check_true(str.includes("ERROR_FILE:28"));
   do_check_true(str.includes("Ref Error"));
@@ -578,8 +577,7 @@ add_task(function* format_errors() {
   try {
     yield Promise.resolve();  // Scrambles the stack
     eval("javascript syntax error");
-  }
-  catch (e) {
+  } catch (e) {
     str = pFormat.format(e);
     do_check_true(str.includes("SyntaxError: missing ;"));
     // Make sure we identified it as an Error and formatted the error location as

@@ -964,6 +964,16 @@
     "releaseChannelCollection": "opt-out",
     "description": "GPU process launch time in milliseconds"
   },
+  "GPU_PROCESS_INITIALIZATION_TIME_MS" : {
+    "alert_emails": ["george@mozilla.com", "danderson@mozilla.com"],
+    "expires_in_version": "never",
+    "bug_numbers": [1324095],
+    "kind": "exponential",
+    "high": 64000,
+    "n_buckets": 100,
+    "releaseChannelCollection": "opt-out",
+    "description": "GPU process initialization (excluding XPCOM and fork time) time in milliseconds"
+  },
   "JS_DEPRECATED_LANGUAGE_EXTENSIONS_IN_CONTENT": {
     "alert_emails": ["jdemooij@mozilla.com"],
     "expires_in_version": "never",
@@ -2324,6 +2334,15 @@
     "n_values": 32,
     "description": "H2: goaway reason from peer from rfc 7540. 31 is none received."
   },
+  "SPDY_CONTINUED_HEADERS": {
+    "expires_in_version": "59",
+    "alert_emails": ["necko@mozilla.com"],
+    "bug_numbers": [1324855],
+    "kind": "exponential",
+    "high": 32000000,
+    "n_buckets": 75,
+    "description": "Size of continued H2 headers in bytes."
+  },
   "HPACK_ELEMENTS_EVICTED_DECOMPRESSOR": {
     "expires_in_version": "never",
     "kind": "exponential",
@@ -3188,7 +3207,8 @@
     "kind": "exponential",
     "high": 3000,
     "n_buckets": 10,
-    "description": "Amount of time spent doing the work for predict (ms)"
+    "description": "Amount of time spent doing the work for predict (ms)",
+    "alert_emails": ["necko@mozilla.com"]
   },
   "PREDICTOR_LEARN_WORK_TIME": {
     "expires_in_version": "never",
@@ -3306,7 +3326,8 @@
     "kind": "exponential",
     "high": 3000,
     "n_buckets": 10,
-    "description": "How long it takes from the time Predict() is called to the time we take action"
+    "description": "How long it takes from the time Predict() is called to the time we take action",
+    "alert_emails": ["necko@mozilla.com"]
   },
   "PREDICTOR_PREDICT_TIME_TO_INACTION": {
     "expires_in_version": "never",
@@ -10580,6 +10601,42 @@
     "kind": "enumerated",
     "n_values": 4,
     "description": "Counts the number of asm.js vs WebAssembly modules instanciations, at the time modules are getting instanciated."
+  },
+  "TIME_TO_FIRST_CLICK": {
+    "alert_emails": ["hkirschner@mozilla.com"],
+    "bug_numbers": [1307675],
+    "expires_in_version": "58",
+    "kind": "exponential",
+    "high": 100000,
+    "n_buckets": 30,
+    "description": "Time in milliseconds from first paint to first click per top-level content browsing context."
+  },
+  "TIME_TO_FIRST_KEY_INPUT": {
+    "alert_emails": ["hkirschner@mozilla.com"],
+    "bug_numbers": [1307675],
+    "expires_in_version": "58",
+    "kind": "exponential",
+    "high": 100000,
+    "n_buckets": 30,
+    "description": "Time in milliseconds from first paint to first key input per top-level content browsing context."
+  },
+  "TIME_TO_FIRST_MOUSE_MOVE": {
+    "alert_emails": ["hkirschner@mozilla.com"],
+    "bug_numbers": [1307675],
+    "expires_in_version": "58",
+    "kind": "exponential",
+    "high": 100000,
+    "n_buckets": 30,
+    "description": "Time in milliseconds from first paint to first mouse move per top-level content browsing context."
+  },
+  "TIME_TO_FIRST_SCROLL": {
+    "alert_emails": ["hkirschner@mozilla.com"],
+    "bug_numbers": [1307675],
+    "expires_in_version": "58",
+    "kind": "exponential",
+    "high": 100000,
+    "n_buckets": 30,
+    "description": "Time in milliseconds from first paint to first scroll per top-level content browsing context."
   },
   "DOCUMENT_WITH_EXPANDED_PRINCIPAL": {
     "alert_emails": ["dev-platform@lists.mozilla.org"],

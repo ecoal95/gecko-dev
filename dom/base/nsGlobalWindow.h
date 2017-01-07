@@ -35,7 +35,7 @@
 #include "mozilla/EventListenerManager.h"
 #include "nsIPrincipal.h"
 #include "nsSize.h"
-#include "mozFlushType.h"
+#include "mozilla/FlushType.h"
 #include "prclist.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/StorageEvent.h"
@@ -995,8 +995,8 @@ public:
             mozilla::ErrorResult& aError);
   void Btoa(const nsAString& aBinaryData, nsAString& aAsciiBase64String,
             mozilla::ErrorResult& aError);
-  mozilla::dom::DOMStorage* GetSessionStorage(mozilla::ErrorResult& aError);
-  mozilla::dom::DOMStorage*
+  mozilla::dom::Storage* GetSessionStorage(mozilla::ErrorResult& aError);
+  mozilla::dom::Storage*
   GetLocalStorage(mozilla::ErrorResult& aError);
   mozilla::dom::Selection* GetSelectionOuter();
   mozilla::dom::Selection* GetSelection(mozilla::ErrorResult& aError);
@@ -1575,7 +1575,7 @@ public:
   // Inner windows only.
   nsresult FireHashchange(const nsAString &aOldURL, const nsAString &aNewURL);
 
-  void FlushPendingNotifications(mozFlushType aType);
+  void FlushPendingNotifications(mozilla::FlushType aType);
 
   // Outer windows only.
   void EnsureReflowFlushAndPaint();
@@ -1884,8 +1884,8 @@ protected:
 
   RefPtr<mozilla::dom::MozSelfSupport> mMozSelfSupport;
 
-  RefPtr<mozilla::dom::DOMStorage> mLocalStorage;
-  RefPtr<mozilla::dom::DOMStorage> mSessionStorage;
+  RefPtr<mozilla::dom::Storage> mLocalStorage;
+  RefPtr<mozilla::dom::Storage> mSessionStorage;
 
   // These member variable are used only on inner windows.
   RefPtr<mozilla::EventListenerManager> mListenerManager;
@@ -1896,9 +1896,8 @@ protected:
   // These member variables are used on both inner and the outer windows.
   nsCOMPtr<nsIPrincipal> mDocumentPrincipal;
 
-  typedef nsTArray<RefPtr<mozilla::dom::StorageEvent>> nsDOMStorageEventArray;
-  nsDOMStorageEventArray mPendingStorageEvents;
-
+  typedef nsTArray<RefPtr<mozilla::dom::StorageEvent>> nsStorageEventArray;
+  nsStorageEventArray mPendingStorageEvents;
 
   uint32_t mSuspendDepth;
   uint32_t mFreezeDepth;

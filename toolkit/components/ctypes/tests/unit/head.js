@@ -1,3 +1,5 @@
+/* global ThreadSafeChromeUtils */
+
 try {
   // We might be running without privileges, in which case it's up to the
   // harness to give us the 'ctypes' object.
@@ -5,8 +7,7 @@ try {
 } catch (e) {
 }
 
-function open_ctypes_test_lib()
-{
+function open_ctypes_test_lib() {
   return ctypes.open(do_get_file(ctypes.libraryName("jsctypes-test")).path);
 }
 
@@ -113,11 +114,14 @@ function trigger_gc() {
   Components.utils.forceGC();
 }
 
-function must_throw(f) {
+function must_throw(f, expected) {
   let has_thrown = false;
   try {
     f();
   } catch (x) {
+    if (expected) {
+      do_check_eq(x.toString(), expected);
+    }
     has_thrown = true;
   }
   do_check_true(has_thrown);

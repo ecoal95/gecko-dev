@@ -1925,7 +1925,21 @@ ValidateCopyDestUsage(const char* funcName, WebGLContext* webgl,
 
     const auto dstFormat = dstUsage->format;
 
-    if (dstFormat->componentType != srcFormat->componentType) {
+    const auto fnNarrowType = [&](webgl::ComponentType type) {
+        switch (type) {
+        case webgl::ComponentType::NormInt:
+        case webgl::ComponentType::NormUInt:
+            // These both count as "fixed-point".
+            return webgl::ComponentType::NormInt;
+
+        default:
+            return type;
+        }
+    };
+
+    const auto srcType = fnNarrowType(srcFormat->componentType);
+    const auto dstType = fnNarrowType(dstFormat->componentType);
+    if (dstType != srcType) {
         webgl->ErrorInvalidOperation("%s: For sized internalFormats, source and dest"
                                      " component types must match. (source: %s, dest:"
                                      " %s)",
@@ -2002,6 +2016,9 @@ DoCopyTexOrSubImage(WebGLContext* webgl, const char* funcName, bool isSubImage,
     Intersect(srcTotalWidth, xWithinSrc, dstWidth, &readX, &writeX, &rwWidth);
     Intersect(srcTotalHeight, yWithinSrc, dstHeight, &readY, &writeY, &rwHeight);
 
+    writeX += xOffset;
+    writeY += yOffset;
+
     ////
 
     GLenum error = 0;
@@ -2044,7 +2061,6 @@ DoCopyTexOrSubImage(WebGLContext* webgl, const char* funcName, bool isSubImage,
         ScopedCopyTexImageSource maybeSwizzle(webgl, funcName, srcTotalWidth,
                                               srcTotalHeight, srcFormat, dstUsage);
 
-        const uint8_t zOffset = 0;
         error = DoCopyTexSubImage(gl, target, level, writeX, writeY, zOffset, readX,
                                   readY, rwWidth, rwHeight);
         if (error)

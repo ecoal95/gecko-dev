@@ -12,18 +12,15 @@ XPCOMUtils.defineLazyModuleGetter(this, "Services",
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
   "resource://gre/modules/NetUtil.jsm");
 
-function makeURI(url)
-{
+function makeURI(url) {
   return Services.io.newURI(url, null, null);
 }
 
-function readInputStreamToString(aStream)
-{
+function readInputStreamToString(aStream) {
   return NetUtil.readInputStreamToString(aStream, aStream.available());
 }
 
-function RemoteWebNavigation()
-{
+function RemoteWebNavigation() {
   this.wrappedJSObject = this;
 }
 
@@ -72,7 +69,7 @@ RemoteWebNavigation.prototype = {
   },
   loadURI(aURI, aLoadFlags, aReferrer, aPostData, aHeaders) {
     this.loadURIWithOptions(aURI, aLoadFlags, aReferrer,
-                            Ci.nsIHttpChannel.REFERRER_POLICY_DEFAULT,
+                            Ci.nsIHttpChannel.REFERRER_POLICY_UNSET,
                             aPostData, aHeaders, null);
   },
   loadURIWithOptions(aURI, aLoadFlags, aReferrer, aReferrerPolicy,
@@ -129,8 +126,7 @@ RemoteWebNavigation.prototype = {
   _sendMessage(aMessage, aData) {
     try {
       this._browser.messageManager.sendAsyncMessage(aMessage, aData);
-    }
-    catch (e) {
+    } catch (e) {
       Cu.reportError(e);
     }
   },

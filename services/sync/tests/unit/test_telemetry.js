@@ -58,10 +58,11 @@ function BogusEngine(service) {
 
 BogusEngine.prototype = Object.create(SteamEngine.prototype);
 
-async function cleanAndGo(server) {
+async function cleanAndGo(engine, server) {
   Svc.Prefs.resetBranch("");
   Svc.Prefs.set("log.logger.engine.rotary", "Trace");
   Service.recordManager.clearCache();
+  engine._tracker.clearChangedIDs();
   await promiseStopServer(server);
 }
 
@@ -116,30 +117,34 @@ add_task(async function test_processIncoming_error() {
     engine.lastSync = Date.now() / 1000 - 60;
     engine.toFetch = [BOGUS_GUID];
 
-    let error, ping;
+    let error, pingPayload, fullPing;
     try {
-      await sync_engine_and_validate_telem(engine, true, errPing => ping = errPing);
+      await sync_engine_and_validate_telem(engine, true, (errPing, fullErrPing) => {
+        pingPayload = errPing;
+        fullPing = fullErrPing;
+      });
     } catch(ex) {
       error = ex;
     }
     ok(!!error);
-    ok(!!ping);
-    equal(ping.uid, "f".repeat(32)); // as setup by SyncTestingInfrastructure
-    deepEqual(ping.failureReason, {
+    ok(!!pingPayload);
+
+    equal(fullPing.uid, "f".repeat(32)); // as setup by SyncTestingInfrastructure
+    deepEqual(pingPayload.failureReason, {
       name: "othererror",
       error: "error.engine.reason.record_download_fail"
     });
 
-    equal(ping.engines.length, 1);
-    equal(ping.engines[0].name, "bookmarks");
-    deepEqual(ping.engines[0].failureReason, {
+    equal(pingPayload.engines.length, 1);
+    equal(pingPayload.engines[0].name, "bookmarks");
+    deepEqual(pingPayload.engines[0].failureReason, {
       name: "othererror",
       error: "error.engine.reason.record_download_fail"
     });
 
   } finally {
     store.wipe();
-    await cleanAndGo(server);
+    await cleanAndGo(engine, server);
   }
 });
 
@@ -187,7 +192,7 @@ add_task(async function test_uploading() {
   } finally {
     // Clean up.
     store.wipe();
-    await cleanAndGo(server);
+    await cleanAndGo(engine, server);
   }
 });
 
@@ -237,7 +242,7 @@ add_task(async function test_upload_failed() {
     deepEqual(ping.engines[0].outgoing, [{ sent: 2, failed: 2 }]);
 
   } finally {
-    await cleanAndGo(server);
+    await cleanAndGo(engine, server);
   }
 });
 
@@ -317,7 +322,7 @@ add_task(async function test_sync_partialUpload() {
     deepEqual(ping.engines[0].failureReason, uploadFailureError);
 
   } finally {
-    await cleanAndGo(server);
+    await cleanAndGo(engine, server);
   }
 });
 
@@ -344,7 +349,7 @@ add_task(async function test_generic_engine_fail() {
     });
   } finally {
     Service.engineManager.unregister(engine);
-    await cleanAndGo(server);
+    await cleanAndGo(engine, server);
   }
 });
 
@@ -380,7 +385,7 @@ add_task(async function test_engine_fail_ioerror() {
     ok(failureReason.error.includes("[profileDir]"), failureReason.error);
   } finally {
     Service.engineManager.unregister(engine);
-    await cleanAndGo(server);
+    await cleanAndGo(engine, server);
   }
 });
 
@@ -417,7 +422,7 @@ add_task(async function test_initial_sync_engines() {
       equal(e.outgoing[0].failed, undefined);
     }
   } finally {
-    await cleanAndGo(server);
+    await cleanAndGo(engine, server);
   }
 });
 
@@ -446,7 +451,7 @@ add_task(async function test_nserror() {
     });
   } finally {
     Service.engineManager.unregister(engine);
-    await cleanAndGo(server);
+    await cleanAndGo(engine, server);
   }
 });
 
@@ -512,7 +517,7 @@ add_task(async function test_no_foreign_engines_in_error_ping() {
     ok(ping.engines.every(e => e.name !== "bogus"));
   } finally {
     Service.engineManager.unregister(engine);
-    await cleanAndGo(server);
+    await cleanAndGo(engine, server);
   }
 });
 
@@ -538,7 +543,7 @@ add_task(async function test_sql_error() {
     deepEqual(enginePing.failureReason, { name: "sqlerror", code: 1 });
   } finally {
     Service.engineManager.unregister(engine);
-    await cleanAndGo(server);
+    await cleanAndGo(engine, server);
   }
 });
 
@@ -558,6 +563,6 @@ add_task(async function test_no_foreign_engines_in_success_ping() {
     ok(ping.engines.every(e => e.name !== "bogus"));
   } finally {
     Service.engineManager.unregister(engine);
-    await cleanAndGo(server);
+    await cleanAndGo(engine, server);
   }
 });

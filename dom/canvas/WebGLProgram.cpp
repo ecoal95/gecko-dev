@@ -172,7 +172,7 @@ webgl::UniformInfo::UniformInfo(WebGLActiveInfo* activeInfo)
 
 //////////
 
-#define DUMP_SHADERVAR_MAPPINGS
+//#define DUMP_SHADERVAR_MAPPINGS
 
 static already_AddRefed<const webgl::LinkedProgramInfo>
 QueryProgramInfo(WebGLProgram* prog, gl::GLContext* gl)
@@ -240,12 +240,19 @@ QueryProgramInfo(WebGLProgram* prog, gl::GLContext* gl)
 
         ///////
 
-        const GLint loc = gl->fGetAttribLocation(prog->mGLName,
-                                                 mappedName.BeginReading());
+        GLint loc = gl->fGetAttribLocation(prog->mGLName,
+                                           mappedName.BeginReading());
+        if (gl->WorkAroundDriverBugs() &&
+            mappedName.EqualsIgnoreCase("gl_", 3))
+        {
+            // Bug 1328559: Appears problematic on ANGLE and OSX, but not Linux or Win+GL.
+            loc = -1;
+        }
 #ifdef DUMP_SHADERVAR_MAPPINGS
         printf_stderr("[attrib %u/%u] @%i %s->%s\n", i, numActiveAttribs, loc,
                       userName.BeginReading(), mappedName.BeginReading());
 #endif
+        MOZ_ASSERT_IF(mappedName.EqualsIgnoreCase("gl_", 3), loc == -1);
 
         ///////
 
@@ -654,6 +661,17 @@ WebGLProgram::GetAttribLocation(const nsAString& userName_wide) const
     return GLint(info->mLoc);
 }
 
+static GLint
+GetFragDataByUserName(const WebGLProgram* prog,
+                      const nsCString& userName)
+{
+    nsCString mappedName;
+    if (!prog->LinkInfo()->MapFragDataName(userName, &mappedName))
+        return -1;
+
+    return prog->mContext->gl->fGetFragDataLocation(prog->mGLName, mappedName.BeginReading());
+}
+
 GLint
 WebGLProgram::GetFragDataLocation(const nsAString& userName_wide) const
 {
@@ -665,14 +683,30 @@ WebGLProgram::GetFragDataLocation(const nsAString& userName_wide) const
         return -1;
     }
 
-    const NS_LossyConvertUTF16toASCII userName(userName_wide);
-    nsCString mappedName;
-    if (!LinkInfo()->MapFragDataName(userName, &mappedName))
-        return -1;
 
-    gl::GLContext* gl = mContext->GL();
+    const auto& gl = mContext->gl;
     gl->MakeCurrent();
-    return gl->fGetFragDataLocation(mGLName, mappedName.BeginReading());
+
+    const NS_LossyConvertUTF16toASCII userName(userName_wide);
+#ifdef XP_MACOSX
+    if (gl->WorkAroundDriverBugs()) {
+        // OSX doesn't return locs for indexed names, just the base names.
+        // Indicated by failure in: conformance2/programs/gl-get-frag-data-location.html
+        bool isArray;
+        size_t arrayIndex;
+        nsCString baseUserName;
+        if (!ParseName(userName, &baseUserName, &isArray, &arrayIndex))
+            return -1;
+
+        if (arrayIndex >= mContext->mImplMaxDrawBuffers)
+            return -1;
+
+        const auto baseLoc = GetFragDataByUserName(this, baseUserName);
+        const auto loc = baseLoc + GLint(arrayIndex);
+        return loc;
+    }
+#endif
+    return GetFragDataByUserName(this, userName);
 }
 
 void

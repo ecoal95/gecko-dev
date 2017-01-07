@@ -7,7 +7,6 @@
 #include "mozilla/ServoBindings.h"
 
 #include "ChildIterator.h"
-#include "StyleStructContext.h"
 #include "gfxFontFamilyList.h"
 #include "nsAttrValueInlines.h"
 #include "nsCSSParser.h"
@@ -200,6 +199,13 @@ Gecko_IsRootElement(RawGeckoElementBorrowed aElement)
   return aElement->OwnerDoc()->GetRootElement() == aElement;
 }
 
+bool
+Gecko_MatchesElement(CSSPseudoClassType aType,
+                     RawGeckoElementBorrowed aElement)
+{
+  return nsCSSPseudoClasses::MatchesElement(aType, aElement).value();
+}
+
 nsIAtom*
 Gecko_LocalName(RawGeckoElementBorrowed aElement)
 {
@@ -280,15 +286,23 @@ Gecko_CalcStyleDifference(nsStyleContext* aOldStyleContext,
 ServoElementSnapshotOwned
 Gecko_CreateElementSnapshot(RawGeckoElementBorrowed aElement)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   return new ServoElementSnapshot(aElement);
 }
 
 void
 Gecko_DropElementSnapshot(ServoElementSnapshotOwned aSnapshot)
 {
-  MOZ_ASSERT(NS_IsMainThread(),
-             "ServoAttrSnapshots can only be dropped on the main thread");
-  delete aSnapshot;
+  // Proxy deletes have a lot of overhead, so Servo tries hard to only drop
+  // snapshots on the main thread. However, there are certain cases where
+  // it's unavoidable (i.e. synchronously dropping the style data for the
+  // descendants of a new display:none root).
+  if (MOZ_UNLIKELY(!NS_IsMainThread())) {
+    nsCOMPtr<nsIRunnable> task = NS_NewRunnableFunction([=]() { delete aSnapshot; });
+    NS_DispatchToMainThread(task.forget());
+  } else {
+    delete aSnapshot;
+  }
 }
 
 RawServoDeclarationBlockStrongBorrowedOrNull
@@ -1074,9 +1088,10 @@ NS_IMPL_THREADSAFE_FFI_REFCOUNTING(nsCSSValueSharedList, CSSValueSharedList);
 #define STYLE_STRUCT(name, checkdata_cb)                                      \
                                                                               \
 void                                                                          \
-Gecko_Construct_nsStyle##name(nsStyle##name* ptr)                             \
+Gecko_Construct_Default_nsStyle##name(nsStyle##name* ptr,                     \
+                                      const nsPresContext* pres_context)      \
 {                                                                             \
-  new (ptr) nsStyle##name(StyleStructContext::ServoContext());                \
+  new (ptr) nsStyle##name(pres_context);                                      \
 }                                                                             \
                                                                               \
 void                                                                          \
@@ -1090,6 +1105,12 @@ void                                                                          \
 Gecko_Destroy_nsStyle##name(nsStyle##name* ptr)                               \
 {                                                                             \
   ptr->~nsStyle##name();                                                      \
+}
+
+void
+Gecko_Construct_nsStyleVariables(nsStyleVariables* ptr)
+{
+  new (ptr) nsStyleVariables();
 }
 
 #include "nsStyleStructList.h"

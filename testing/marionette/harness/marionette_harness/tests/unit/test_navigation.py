@@ -51,9 +51,11 @@ class TestNavigate(WindowManagerMixin, MarionetteTestCase):
 
     def test_navigate_chrome_error(self):
         with self.marionette.using_context("chrome"):
-            self.assertRaisesRegexp(
-                errors.UnsupportedOperationException, "Cannot navigate in chrome context",
-                self.marionette.navigate, "about:blank")
+            self.assertRaises(errors.UnsupportedOperationException,
+                              self.marionette.navigate, "about:blank")
+            self.assertRaises(errors.UnsupportedOperationException, self.marionette.go_back)
+            self.assertRaises(errors.UnsupportedOperationException, self.marionette.go_forward)
+            self.assertRaises(errors.UnsupportedOperationException, self.marionette.refresh)
 
     def test_get_current_url_returns_top_level_browsing_context_url(self):
         self.marionette.navigate(self.iframe_doc)
@@ -180,6 +182,15 @@ class TestNavigate(WindowManagerMixin, MarionetteTestCase):
         self.assertIn("white.png", self.marionette.title)
         self.marionette.navigate(self.fixtures.where_is("black.png"))
         self.assertIn("black.png", self.marionette.title)
+
+    def test_focus_after_navigation(self):
+        self.marionette.quit()
+        self.marionette.start_session()
+
+        self.marionette.navigate(inline("<input autofocus>"))
+        active_el = self.marionette.execute_script("return document.activeElement")
+        focus_el = self.marionette.find_element(By.CSS_SELECTOR, ":focus")
+        self.assertEqual(active_el, focus_el)
 
 
 class TestTLSNavigation(MarionetteTestCase):
