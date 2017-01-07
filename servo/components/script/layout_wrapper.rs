@@ -30,13 +30,14 @@
 
 #![allow(unsafe_code)]
 
+use atomic_refcell::AtomicRefCell;
 use dom::bindings::inheritance::{CharacterDataTypeId, ElementTypeId};
 use dom::bindings::inheritance::{HTMLElementTypeId, NodeTypeId};
 use dom::bindings::js::LayoutJS;
 use dom::characterdata::LayoutCharacterDataHelpers;
 use dom::document::{Document, LayoutDocumentHelpers, PendingRestyle};
 use dom::element::{Element, LayoutElementHelpers, RawLayoutElementHelpers};
-use dom::node::{CAN_BE_FRAGMENTED, DIRTY_ON_VIEWPORT_SIZE_CHANGE, HAS_DIRTY_DESCENDANTS};
+use dom::node::{CAN_BE_FRAGMENTED, DIRTY_ON_VIEWPORT_SIZE_CHANGE, HAS_DIRTY_DESCENDANTS, IS_IN_DOC};
 use dom::node::{LayoutNodeHelpers, Node};
 use dom::text::Text;
 use gfx_traits::ByteIndex;
@@ -58,7 +59,6 @@ use std::marker::PhantomData;
 use std::mem::transmute;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use style::atomic_refcell::AtomicRefCell;
 use style::attr::AttrValue;
 use style::computed_values::display;
 use style::context::{QuirksMode, SharedStyleContext};
@@ -404,6 +404,7 @@ impl<'le> TElement for ServoLayoutElement<'le> {
     }
 
     unsafe fn set_dirty_descendants(&self) {
+        debug_assert!(self.as_node().node.get_flag(IS_IN_DOC));
         self.as_node().node.set_flag(HAS_DIRTY_DESCENDANTS, true)
     }
 

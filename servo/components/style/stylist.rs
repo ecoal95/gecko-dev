@@ -4,13 +4,16 @@
 
 //! Selector matching.
 
+#![deny(missing_docs)]
+
 use {Atom, LocalName};
 use data::ComputedStyle;
-use dom::PresentationalHintsSynthetizer;
-use element_state::*;
+use dom::{PresentationalHintsSynthetizer, TElement};
 use error_reporting::StdoutErrorReporter;
 use keyframes::KeyframesAnimation;
-use media_queries::{Device, MediaType};
+use media_queries::Device;
+#[cfg(feature = "servo")]
+use media_queries::MediaType;
 use parking_lot::RwLock;
 use properties::{self, CascadeFlags, ComputedValues, INHERIT_ALL, Importance};
 use properties::{PropertyDeclaration, PropertyDeclarationBlock};
@@ -28,15 +31,15 @@ use smallvec::VecLike;
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::fmt;
-use std::hash::BuildHasherDefault;
 use std::hash::Hash;
 use std::slice;
 use std::sync::Arc;
 use style_traits::viewport::ViewportConstraints;
 use stylesheets::{CssRule, Origin, StyleRule, Stylesheet, UserAgentStylesheets};
+#[cfg(feature = "servo")]
 use viewport::{self, MaybeNew, ViewportRule};
 
-pub type FnvHashMap<K, V> = HashMap<K, V, BuildHasherDefault<::fnv::FnvHasher>>;
+pub use ::fnv::FnvHashMap;
 
 /// This structure holds all the selectors and device characteristics
 /// for a given document. The selectors are converted into `Rule`s
@@ -83,6 +86,8 @@ pub struct Stylist {
     /// FIXME(emilio): Use the rule tree!
     precomputed_pseudo_element_decls: FnvHashMap<PseudoElement, Vec<ApplicableDeclarationBlock>>,
 
+    /// A monotonically increasing counter to represent the order on which a
+    /// style rule appears in a stylesheet, needed to sort them by source order.
     rules_source_order: usize,
 
     /// Selector dependencies used to compute restyle hints.
@@ -99,6 +104,7 @@ pub struct Stylist {
 }
 
 impl Stylist {
+    /// Construct a new `Stylist`, using a given `Device`.
     #[inline]
     pub fn new(device: Device) -> Self {
         let mut stylist = Stylist {
@@ -129,6 +135,12 @@ impl Stylist {
         stylist
     }
 
+    /// Update the stylist for the given document stylesheets, and optionally
+    /// with a set of user agent stylesheets.
+    ///
+    /// This method resets all the style data each time the stylesheets change
+    /// (which is indicated by the `stylesheets_changed` parameter), or the
+    /// device is dirty, which means we need to re-evaluate media queries.
     pub fn update(&mut self,
                   doc_stylesheets: &[Arc<Stylesheet>],
                   ua_stylesheets: Option<&UserAgentStylesheets>,
@@ -252,37 +264,20 @@ impl Stylist {
                 _ => {}
             }
         });
-
-        debug!("Stylist stats:");
-        debug!(" - Got {} sibling-affecting selectors",
-               self.sibling_affecting_selectors.len());
-        debug!(" - Got {} non-common-style-attribute-affecting selectors",
-               self.non_common_style_affecting_attributes_selectors.len());
-        debug!(" - Got {} deps for style-hint calculation",
-               self.state_deps.len());
-
-        SelectorImpl::each_precomputed_pseudo_element(|pseudo| {
-            // TODO: Consider not doing this and just getting the rules on the
-            // fly. It should be a bit slower, but we'd take rid of the
-            // extra field, and avoid this precomputation entirely.
-            if let Some(map) = self.pseudos_map.remove(&pseudo) {
-                let mut declarations = vec![];
-                map.user_agent.get_universal_rules(&mut declarations);
-                self.precomputed_pseudo_element_decls.insert(pseudo, declarations);
-            }
-        });
     }
 
 
     /// Computes the style for a given "precomputed" pseudo-element, taking the
     /// universal rules and applying them.
     ///
-    /// If `inherit_all` is true, then all properties are inherited from the parent; otherwise,
-    /// non-inherited properties are reset to their initial values. The flow constructor uses this
-    /// flag when constructing anonymous flows.
+    /// If `inherit_all` is true, then all properties are inherited from the
+    /// parent; otherwise, non-inherited properties are reset to their initial
+    /// values. The flow constructor uses this flag when constructing anonymous
+    /// flows.
     pub fn precomputed_values_for_pseudo(&self,
                                          pseudo: &PseudoElement,
                                          parent: Option<&Arc<ComputedValues>>,
+                                         default: &Arc<ComputedValues>,
                                          inherit_all: bool)
                                          -> Option<ComputedStyle> {
         debug_assert!(SelectorImpl::pseudo_element_cascade_type(pseudo).is_precomputed());
@@ -291,7 +286,7 @@ impl Stylist {
             // use into_iter.
             let rule_node =
                 self.rule_tree.insert_ordered_rules(
-                    declarations.iter().map(|a| (a.source.clone(), a.importance)));
+                    declarations.into_iter().map(|a| (a.source.clone(), a.importance)));
 
             let mut flags = CascadeFlags::empty();
             if inherit_all {
@@ -302,6 +297,7 @@ impl Stylist {
                 properties::cascade(self.device.au_viewport_size(),
                                     &rule_node,
                                     parent.map(|p| &**p),
+                                    default,
                                     None,
                                     Box::new(StdoutErrorReporter),
                                     flags);
@@ -315,7 +311,8 @@ impl Stylist {
     #[cfg(feature = "servo")]
     pub fn style_for_anonymous_box(&self,
                                    pseudo: &PseudoElement,
-                                   parent_style: &Arc<ComputedValues>)
+                                   parent_style: &Arc<ComputedValues>,
+                                   default_style: &Arc<ComputedValues>)
                                    -> Arc<ComputedValues> {
         // For most (but not all) pseudo-elements, we inherit all values from the parent.
         let inherit_all = match *pseudo {
@@ -334,15 +331,23 @@ impl Stylist {
                 unreachable!("That pseudo doesn't represent an anonymous box!")
             }
         };
-        self.precomputed_values_for_pseudo(&pseudo, Some(parent_style), inherit_all)
+        self.precomputed_values_for_pseudo(&pseudo, Some(parent_style), default_style, inherit_all)
             .expect("style_for_anonymous_box(): No precomputed values for that pseudo!")
             .values
     }
 
+    /// Computes a pseudo-element style lazily during layout.
+    ///
+    /// This can only be done for a certain set of pseudo-elements, like
+    /// :selection.
+    ///
+    /// Check the documentation on lazy pseudo-elements in
+    /// docs/components/style.md
     pub fn lazily_compute_pseudo_element_style<E>(&self,
                                                   element: &E,
                                                   pseudo: &PseudoElement,
-                                                  parent: &Arc<ComputedValues>)
+                                                  parent: &Arc<ComputedValues>,
+                                                  default: &Arc<ComputedValues>)
                                                   -> Option<ComputedStyle>
         where E: ElementExt +
                  fmt::Debug +
@@ -363,12 +368,14 @@ impl Stylist {
                                           MatchingReason::ForStyling);
 
         let rule_node =
-            self.rule_tree.insert_ordered_rules(declarations.into_iter().map(|a| (a.source.clone(), a.importance)));
+            self.rule_tree.insert_ordered_rules(
+                declarations.into_iter().map(|a| (a.source, a.importance)));
 
         let computed =
             properties::cascade(self.device.au_viewport_size(),
                                 &rule_node,
                                 Some(&**parent),
+                                default,
                                 None,
                                 Box::new(StdoutErrorReporter),
                                 CascadeFlags::empty());
@@ -376,6 +383,15 @@ impl Stylist {
         Some(ComputedStyle::new(rule_node, Arc::new(computed)))
     }
 
+    /// Set a given device, which may change the styles that apply to the
+    /// document.
+    ///
+    /// This means that we may need to rebuild style data even if the
+    /// stylesheets haven't changed.
+    ///
+    /// Viewport_Constraints::maybe_new is servo-only (see the comment above it
+    /// explaining why), so we need to be servo-only too, since we call it.
+    #[cfg(feature = "servo")]
     pub fn set_device(&mut self, mut device: Device, stylesheets: &[Arc<Stylesheet>]) {
         let cascaded_rule = ViewportRule {
             declarations: viewport::Cascade::from_stylesheets(stylesheets, &device).finish(),
@@ -383,6 +399,9 @@ impl Stylist {
 
         self.viewport_constraints = ViewportConstraints::maybe_new(device.viewport_size, &cascaded_rule);
         if let Some(ref constraints) = self.viewport_constraints {
+            // FIXME(emilio): creating a device here works, but is not really
+            // appropriate. I should get rid of this while doing the stylo media
+            // query work.
             device = Device::new(MediaType::Screen, constraints.size);
         }
 
@@ -408,21 +427,29 @@ impl Stylist {
         self.device = Arc::new(device);
     }
 
-    pub fn viewport_constraints(&self) -> &Option<ViewportConstraints> {
-        &self.viewport_constraints
+    /// Returns the viewport constraints that apply to this document because of
+    /// a @viewport rule.
+    pub fn viewport_constraints(&self) -> Option<&ViewportConstraints> {
+        self.viewport_constraints.as_ref()
     }
 
+    /// Sets the quirks mode of the document.
     pub fn set_quirks_mode(&mut self, enabled: bool) {
+        // FIXME(emilio): We don't seem to change the quirks mode dynamically
+        // during multiple layout passes, but this is totally bogus, in the
+        // sense that it's updated asynchronously.
+        //
+        // This should probably be an argument to `update`, and use the quirks
+        // mode info in the `SharedLayoutContext`.
         self.quirks_mode = enabled;
     }
 
     /// Returns the applicable CSS declarations for the given element.
+    ///
     /// This corresponds to `ElementRuleCollector` in WebKit.
     ///
-    /// The returned boolean indicates whether the style is *shareable*;
-    /// that is, whether the matched selectors are simple enough to allow the
-    /// matching logic to be reduced to the logic in
-    /// `css::matching::PrivateMatchMethods::candidate_element_allows_for_style_sharing`.
+    /// The returned `StyleRelations` indicate hints about which kind of rules
+    /// have matched.
     #[allow(unsafe_code)]
     pub fn push_applicable_declarations<E, V>(
                                         &self,
@@ -549,20 +576,28 @@ impl Stylist {
         relations
     }
 
+    /// Return whether the device is dirty, that is, whether the screen size or
+    /// media type have changed (for now).
     #[inline]
     pub fn is_device_dirty(&self) -> bool {
         self.is_device_dirty
     }
 
+    /// Returns the map of registered `@keyframes` animations.
     #[inline]
     pub fn animations(&self) -> &FnvHashMap<Atom, KeyframesAnimation> {
         &self.animations
     }
 
+    /// Whether two elements match the same not-common style-affecting attribute
+    /// rules.
+    ///
+    /// This is used to test elements and candidates in the style-sharing
+    /// candidate cache.
     pub fn match_same_not_common_style_affecting_attributes_rules<E>(&self,
                                                                      element: &E,
                                                                      candidate: &E) -> bool
-    where E: ElementExt
+        where E: ElementExt,
     {
         use selectors::matching::StyleRelations;
         use selectors::matching::matches_complex_selector;
@@ -591,15 +626,19 @@ impl Stylist {
         true
     }
 
+    /// Returns the rule root node.
     #[inline]
     pub fn rule_tree_root(&self) -> StrongRuleNode {
         self.rule_tree.root()
     }
 
+    /// Returns whether two elements match the same sibling-affecting rules.
+    ///
+    /// This is also for the style sharing candidate cache.
     pub fn match_same_sibling_affecting_rules<E>(&self,
                                                  element: &E,
                                                  candidate: &E) -> bool
-    where E: ElementExt
+        where E: ElementExt,
     {
         use selectors::matching::StyleRelations;
         use selectors::matching::matches_complex_selector;
@@ -629,17 +668,16 @@ impl Stylist {
         true
     }
 
-    pub fn compute_restyle_hint<E>(&self, element: &E,
-                                   snapshot: &Snapshot,
-                                   // NB: We need to pass current_state as an argument because
-                                   // selectors::Element doesn't provide access to ElementState
-                                   // directly, and computing it from the ElementState would be
-                                   // more expensive than getting it directly from the caller.
-                                   current_state: ElementState)
+    /// Given an element, and a snapshot that represents a previous state of the
+    /// element, compute the appropriate restyle hint, that is, the kind of
+    /// restyle we need to do.
+    pub fn compute_restyle_hint<E>(&self,
+                                   element: &E,
+                                   snapshot: &Snapshot)
                                    -> RestyleHint
-        where E: ElementExt + Clone
+        where E: TElement,
     {
-        self.state_deps.compute_hint(element, snapshot, current_state)
+        self.state_deps.compute_hint(element, snapshot)
     }
 }
 
@@ -651,6 +689,9 @@ impl Drop for Stylist {
         // dropped all strong rule node references before now, then we will
         // leak them, since there will be no way to call gc() on the rule tree
         // after this point.
+        //
+        // TODO(emilio): We can at least assert all the elements in the free
+        // list are indeed free.
         unsafe { self.rule_tree.gc(); }
     }
 }
@@ -707,11 +748,15 @@ impl PerPseudoElementSelectorMap {
 /// Hence, the union of the rules keyed on each of element's classes, ID,
 /// element name, etc. will contain the Rules that actually match that
 /// element.
+///
+/// TODO: Tune the initial capacity of the HashMap
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct SelectorMap {
-    // TODO: Tune the initial capacity of the HashMap
+    /// A hash from an ID to rules which contain that ID selector.
     pub id_hash: FnvHashMap<Atom, Vec<Rule>>,
+    /// A hash from a class name to rules which contain that class selector.
     pub class_hash: FnvHashMap<Atom, Vec<Rule>>,
+    /// A hash from local name to rules which contain that local name selector.
     pub local_name_hash: FnvHashMap<LocalName, Vec<Rule>>,
     /// Same as local_name_hash, but keys are lower-cased.
     /// For HTML elements in HTML documents.
@@ -728,6 +773,7 @@ fn sort_by_key<T, F: Fn(&T) -> K, K: Ord>(v: &mut [T], f: F) {
 }
 
 impl SelectorMap {
+    /// Trivially constructs an empty `SelectorMap`.
     pub fn new() -> Self {
         SelectorMap {
             id_hash: HashMap::default(),
@@ -960,17 +1006,28 @@ impl SelectorMap {
     }
 }
 
+/// A rule, that wraps a style rule, but represents a single selector of the
+/// rule.
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[derive(Clone, Debug)]
 pub struct Rule {
-    // This is an Arc because Rule will essentially be cloned for every element
-    // that it matches. Selector contains an owned vector (through
-    // ComplexSelector) and we want to avoid the allocation.
+    /// The selector this struct represents.
+    /// This is an Arc because Rule will essentially be cloned for every element
+    /// that it matches. Selector contains an owned vector (through
+    /// ComplexSelector) and we want to avoid the allocation.
+    ///
+    /// FIXME(emilio): We should be able to get rid of it and just use the style
+    /// rule? This predates the time where the rule was in `selectors`, and the
+    /// style rule was a generic parameter to it. It's not trivial though, due
+    /// to the specificity.
     #[cfg_attr(feature = "servo", ignore_heap_size_of = "Arc")]
     pub selector: Arc<ComplexSelector<SelectorImpl>>,
+    /// The actual style rule.
     #[cfg_attr(feature = "servo", ignore_heap_size_of = "Arc")]
     pub style_rule: Arc<RwLock<StyleRule>>,
+    /// The source order this style rule appears in.
     pub source_order: usize,
+    /// The specificity of the rule this selector represents.
     pub specificity: u32,
 }
 
@@ -985,19 +1042,28 @@ impl Rule {
     }
 }
 
-/// A property declaration together with its precedence among rules of equal specificity so that
-/// we can sort them.
+/// A property declaration together with its precedence among rules of equal
+/// specificity so that we can sort them.
+///
+/// This represents the declarations in a given declaration block for a given
+/// importance.
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[derive(Debug, Clone)]
 pub struct ApplicableDeclarationBlock {
+    /// The style source, either a style rule, or a property declaration block.
     #[cfg_attr(feature = "servo", ignore_heap_size_of = "Arc")]
     pub source: StyleSource,
+    /// The importance of this declaration block.
     pub importance: Importance,
+    /// The source order of this block.
     pub source_order: usize,
+    /// The specificity of the selector this block is represented by.
     pub specificity: u32,
 }
 
 impl ApplicableDeclarationBlock {
+    /// Constructs an applicable declaration block from a given property
+    /// declaration block and importance.
     #[inline]
     pub fn from_declarations(declarations: Arc<RwLock<PropertyDeclarationBlock>>,
                              importance: Importance)
@@ -1011,6 +1077,8 @@ impl ApplicableDeclarationBlock {
     }
 }
 
+/// An iterator over the declarations that a given block represent, which is
+/// effectively a filter by importance.
 pub struct ApplicableDeclarationBlockIter<'a> {
     iter: slice::Iter<'a, (PropertyDeclaration, Importance)>,
     importance: Importance,

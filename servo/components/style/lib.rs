@@ -26,6 +26,7 @@
 #![cfg_attr(feature = "servo", feature(proc_macro))]
 
 #![deny(warnings)]
+#![deny(missing_docs)]
 
 // FIXME(bholley): We need to blanket-allow unsafe code in order to make the
 // gecko atom!() macro work. When Rust 1.14 is released [1], we can uncomment
@@ -39,6 +40,7 @@
 #![recursion_limit = "500"]  // For define_css_keyword_enum! in -moz-appearance
 
 extern crate app_units;
+extern crate atomic_refcell;
 #[allow(unused_extern_crates)]
 #[macro_use]
 extern crate bitflags;
@@ -88,7 +90,7 @@ extern crate time;
 extern crate unicode_segmentation;
 
 pub mod animation;
-pub mod atomic_refcell;
+#[allow(missing_docs)] // TODO.
 pub mod attr;
 pub mod bezier;
 pub mod bloom;
@@ -105,8 +107,10 @@ pub mod font_metrics;
 #[cfg(feature = "gecko")] #[allow(unsafe_code)] pub mod gecko;
 #[cfg(feature = "gecko")] #[allow(unsafe_code)] pub mod gecko_bindings;
 pub mod keyframes;
+#[allow(missing_docs)] // TODO.
 pub mod logical_geometry;
 pub mod matching;
+#[allow(missing_docs)]
 pub mod media_queries;
 pub mod owning_handle;
 pub mod parallel;
@@ -145,15 +149,16 @@ use style_traits::ToCss;
 #[cfg(feature = "servo")] pub use html5ever_atoms::Namespace;
 
 /// The CSS properties supported by the style system.
-// Generated from the properties.mako.rs template by build.rs
+/// Generated from the properties.mako.rs template by build.rs
 #[macro_use]
 #[allow(unsafe_code)]
+#[deny(missing_docs)]
 pub mod properties {
     include!(concat!(env!("OUT_DIR"), "/properties.rs"));
 }
 
 #[cfg(feature = "gecko")]
-#[allow(unsafe_code)]
+#[allow(unsafe_code, missing_docs)]
 pub mod gecko_properties {
     include!(concat!(env!("OUT_DIR"), "/gecko_properties.rs"));
 }

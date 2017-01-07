@@ -18,12 +18,13 @@ debugmozjs = ['js/debugmozjs']
 cmake = "0.1"
 
 [target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))'.dependencies]
-tinyfiledialogs = {git = "https://github.com/jdm/tinyfiledialogs"}
+tinyfiledialogs = "2.5.9"
 
 [dependencies]
 angle = {git = "https://github.com/servo/angle", branch = "servo"}
 app_units = "0.3"
 audio-video-metadata = "0.1.2"
+atomic_refcell = "0.1"
 bitflags = "0.7"
 bluetooth_traits = {path = "../bluetooth_traits"}
 canvas_traits = {path = "../canvas_traits"}
@@ -59,7 +60,6 @@ phf = "0.7.18"
 phf_macros = "0.7.18"
 plugins = {path = "../plugins"}
 profile_traits = {path = "../profile_traits"}
-rand = "0.3"
 range = {path = "../range"}
 ref_filter_map = "1.0.1"
 ref_slice = "1.0"
@@ -72,6 +72,7 @@ serde = "0.8"
 servo_atoms = {path = "../atoms"}
 servo_config = {path = "../config", features = ["servo"] }
 servo_geometry = {path = "../geometry" }
+servo_rand = {path = "../rand"}
 servo_url = {path = "../url", features = ["servo"] }
 smallvec = "0.1"
 style = {path = "../style"}

@@ -2,15 +2,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+//! Data needed to style a Gecko document.
+
 use animation::Animation;
 use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 use dom::OpaqueNode;
 use euclid::size::TypedSize2D;
+use gecko_bindings::bindings::RawGeckoPresContextBorrowed;
 use gecko_bindings::bindings::RawServoStyleSet;
 use gecko_bindings::sugar::ownership::{HasBoxFFI, HasFFI, HasSimpleFFI};
 use media_queries::{Device, MediaType};
 use num_cpus;
 use parking_lot::RwLock;
+use properties::ComputedValues;
 use rayon;
 use std::cmp;
 use std::collections::HashMap;
@@ -21,6 +25,8 @@ use style_traits::ViewportPx;
 use stylesheets::Stylesheet;
 use stylist::Stylist;
 
+/// The container for data that a Servo-backed Gecko document needs to style
+/// itself.
 pub struct PerDocumentStyleDataImpl {
     /// Rule processor.
     pub stylist: Arc<Stylist>,
@@ -32,20 +38,36 @@ pub struct PerDocumentStyleDataImpl {
     pub stylesheets_changed: bool,
 
     // FIXME(bholley): Hook these up to something.
+    /// Unused. Will go away when we actually implement transitions and
+    /// animations properly.
     pub new_animations_sender: Sender<Animation>,
+    /// Unused. Will go away when we actually implement transitions and
+    /// animations properly.
     pub new_animations_receiver: Receiver<Animation>,
+    /// Unused. Will go away when we actually implement transitions and
+    /// animations properly.
     pub running_animations: Arc<RwLock<HashMap<OpaqueNode, Vec<Animation>>>>,
+    /// Unused. Will go away when we actually implement transitions and
+    /// animations properly.
     pub expired_animations: Arc<RwLock<HashMap<OpaqueNode, Vec<Animation>>>>,
 
-    // FIXME(bholley): This shouldn't be per-document.
+    /// The worker thread pool.
+    /// FIXME(bholley): This shouldn't be per-document.
     pub work_queue: Option<rayon::ThreadPool>,
 
+    /// The number of threads of the work queue.
     pub num_threads: usize,
+
+    /// Default computed values for this document.
+    pub default_computed_values: Arc<ComputedValues>
 }
 
+/// The data itself is an `AtomicRefCell`, which guarantees the proper semantics
+/// and unexpected races while trying to mutate it.
 pub struct PerDocumentStyleData(AtomicRefCell<PerDocumentStyleDataImpl>);
 
 lazy_static! {
+    /// The number of layout threads, computed statically.
     pub static ref NUM_THREADS: usize = {
         match env::var("STYLO_THREADS").map(|s| s.parse::<usize>().expect("invalid STYLO_THREADS")) {
             Ok(num) => num,
@@ -55,10 +77,16 @@ lazy_static! {
 }
 
 impl PerDocumentStyleData {
-    pub fn new() -> Self {
+    /// Create a dummy `PerDocumentStyleData`.
+    pub fn new(pres_context: RawGeckoPresContextBorrowed) -> Self {
         // FIXME(bholley): Real window size.
         let window_size: TypedSize2D<f32, ViewportPx> = TypedSize2D::new(800.0, 600.0);
-        let device = Device::new(MediaType::Screen, window_size);
+        let default_computed_values = ComputedValues::default_values(pres_context);
+
+        // FIXME(bz): We're going to need to either update the computed values
+        // in the Stylist's Device or give the Stylist a new Device when our
+        // default_computed_values changes.
+        let device = Device::new(MediaType::Screen, window_size, &default_computed_values);
 
         let (new_anims_sender, new_anims_receiver) = channel();
 
@@ -78,19 +106,23 @@ impl PerDocumentStyleData {
                 rayon::ThreadPool::new(configuration).ok()
             },
             num_threads: *NUM_THREADS,
+            default_computed_values: default_computed_values,
         }))
     }
 
+    /// Get an immutable reference to this style data.
     pub fn borrow(&self) -> AtomicRef<PerDocumentStyleDataImpl> {
         self.0.borrow()
     }
 
+    /// Get an mutable reference to this style data.
     pub fn borrow_mut(&self) -> AtomicRefMut<PerDocumentStyleDataImpl> {
         self.0.borrow_mut()
     }
 }
 
 impl PerDocumentStyleDataImpl {
+    /// Recreate the style data if the stylesheets have changed.
     pub fn flush_stylesheets(&mut self) {
         // The stylist wants to be flushed if either the stylesheets change or the
         // device dimensions change. When we add support for media queries, we'll

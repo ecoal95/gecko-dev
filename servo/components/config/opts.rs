@@ -68,6 +68,9 @@ pub struct Opts {
 
     pub output_file: Option<String>,
 
+    /// How much session history to keep in each tab.
+    pub max_session_history: usize,
+
     /// Replace unpaires surrogates in DOM strings with U+FFFD.
     /// See https://github.com/servo/servo/issues/6564
     pub replace_surrogates: bool,
@@ -518,6 +521,7 @@ pub fn default_opts() -> Opts {
         userscripts: None,
         user_stylesheets: Vec::new(),
         output_file: None,
+        max_session_history: 20,
         replace_surrogates: false,
         gc_profile: false,
         load_webfonts_synchronously: false,
@@ -611,6 +615,7 @@ pub fn from_cmdline_args(args: &[String]) -> ArgumentParsingResult {
                 "Probability of randomly closing a pipeline (for testing constellation hardening).",
                 "0.0");
     opts.optopt("", "random-pipeline-closure-seed", "A fixed seed for repeatbility of random pipeline closure.", "");
+    opts.optopt("", "max-session-history", "Maximum amount of session history to store in each tab.", "20");
     opts.optmulti("Z", "debug",
                   "A comma-separated string of debug options. Pass help to show available options.", "");
     opts.optflag("h", "help", "Print this message");
@@ -779,6 +784,10 @@ pub fn from_cmdline_args(args: &[String]) -> ArgumentParsingResult {
         }
     };
 
+    let max_session_history = opt_match.opt_str("max-session-history").map(|max| {
+        max.parse().unwrap_or_else(|err| args_fail(&format!("Error parsing option: --max-session-history ({})", err)))
+    }).unwrap_or(20);
+
     if opt_match.opt_present("M") {
         MULTIPROCESS.store(true, Ordering::SeqCst)
     }
@@ -820,6 +829,7 @@ pub fn from_cmdline_args(args: &[String]) -> ArgumentParsingResult {
         userscripts: opt_match.opt_default("userscripts", ""),
         user_stylesheets: user_stylesheets,
         output_file: opt_match.opt_str("o"),
+        max_session_history: max_session_history,
         replace_surrogates: debug_options.replace_surrogates,
         gc_profile: debug_options.gc_profile,
         load_webfonts_synchronously: debug_options.load_webfonts_synchronously,
@@ -879,14 +889,7 @@ pub fn from_cmdline_args(args: &[String]) -> ArgumentParsingResult {
     prefs::add_user_prefs();
 
     for pref in opt_match.opt_strs("pref").iter() {
-        let split: Vec<&str> = pref.splitn(2, '=').collect();
-        let pref_name = split[0];
-        let value = split.get(1);
-        match value {
-            Some(&"false") => PREFS.set(pref_name, PrefValue::Boolean(false)),
-            Some(&"true") | None => PREFS.set(pref_name, PrefValue::Boolean(true)),
-            _ => PREFS.set(pref_name, PrefValue::String(value.unwrap().to_string()))
-        };
+        parse_pref_from_command_line(pref);
     }
 
     if let Some(layout_threads) = layout_threads {
@@ -934,6 +937,20 @@ pub fn set_defaults(opts: Opts) {
         let box_opts = Box::new(opts);
         DEFAULT_OPTIONS = Box::into_raw(box_opts);
     }
+}
+
+pub fn parse_pref_from_command_line(pref: &str) {
+    let split: Vec<&str> = pref.splitn(2, '=').collect();
+    let pref_name = split[0];
+    let value = split.get(1);
+    match value {
+        Some(&"false") => PREFS.set(pref_name, PrefValue::Boolean(false)),
+        Some(&"true") | None => PREFS.set(pref_name, PrefValue::Boolean(true)),
+        Some(value) => match value.parse::<f64>() {
+            Ok(v) => PREFS.set(pref_name, PrefValue::Number(v)),
+            Err(_) => PREFS.set(pref_name, PrefValue::String(value.to_string()))
+        }
+    };
 }
 
 #[inline]

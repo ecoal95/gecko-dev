@@ -8,6 +8,7 @@ use HTMLCanvasData;
 use LayoutNodeType;
 use OpaqueStyleAndLayoutData;
 use SVGSVGData;
+use atomic_refcell::AtomicRefCell;
 use gfx_traits::{ByteIndex, FragmentType, ScrollRootId};
 use html5ever_atoms::{Namespace, LocalName};
 use msg::constellation_msg::PipelineId;
@@ -15,7 +16,6 @@ use range::Range;
 use servo_url::ServoUrl;
 use std::fmt::Debug;
 use std::sync::Arc;
-use style::atomic_refcell::AtomicRefCell;
 use style::computed_values::display;
 use style::context::SharedStyleContext;
 use style::data::ElementData;
@@ -391,6 +391,7 @@ pub trait ThreadSafeLayoutElement: Clone + Copy + Sized + Debug +
                                 context.stylist.precomputed_values_for_pseudo(
                                     &style_pseudo,
                                     Some(&data.styles().primary.values),
+                                    &context.default_computed_values,
                                     false);
                             data.styles_mut().pseudos
                                 .insert(style_pseudo.clone(), new_style.unwrap());
@@ -407,7 +408,8 @@ pub trait ThreadSafeLayoutElement: Clone + Copy + Sized + Debug +
                                        .lazily_compute_pseudo_element_style(
                                            self,
                                            &style_pseudo,
-                                           &data.styles().primary.values);
+                                           &data.styles().primary.values,
+                                           &context.default_computed_values);
                             data.styles_mut().pseudos
                                 .insert(style_pseudo.clone(), new_style.unwrap());
                         }

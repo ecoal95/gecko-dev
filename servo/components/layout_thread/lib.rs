@@ -118,6 +118,7 @@ use style::error_reporting::{ParseErrorReporter, StdoutErrorReporter};
 use style::logical_geometry::LogicalPoint;
 use style::media_queries::{Device, MediaType};
 use style::parser::ParserContextExtraData;
+use style::properties::ComputedValues;
 use style::servo::restyle_damage::{REFLOW, REFLOW_OUT_OF_FLOW, REPAINT, REPOSITION, STORE_OVERFLOW};
 use style::stylesheets::{Origin, Stylesheet, UserAgentStylesheets};
 use style::stylist::Stylist;
@@ -527,6 +528,11 @@ impl LayoutThread {
                 local_context_creation_data: Mutex::new(thread_local_style_context_creation_data),
                 timer: self.timer.clone(),
                 quirks_mode: self.quirks_mode.unwrap(),
+                // FIXME(bz): This isn't really right, but it's no more wrong
+                // than what we used to do.  See
+                // https://github.com/servo/servo/issues/14773 for fixing it
+                // properly.
+                default_computed_values: Arc::new(ComputedValues::initial_values().clone()),
             },
             image_cache_thread: Mutex::new(self.image_cache_thread.clone()),
             image_cache_sender: Mutex::new(self.image_cache_sender.clone()),
@@ -1054,27 +1060,24 @@ impl LayoutThread {
         let device = Device::new(MediaType::Screen, initial_viewport);
         Arc::get_mut(&mut rw_data.stylist).unwrap().set_device(device, &data.document_stylesheets);
 
-        let constraints = rw_data.stylist.viewport_constraints().clone();
-        self.viewport_size = match constraints {
-            Some(ref constraints) => {
+        self.viewport_size =
+            rw_data.stylist.viewport_constraints().map_or(current_screen_size, |constraints| {
                 debug!("Viewport constraints: {:?}", constraints);
 
                 // other rules are evaluated against the actual viewport
                 Size2D::new(Au::from_f32_px(constraints.size.width),
                             Au::from_f32_px(constraints.size.height))
-            }
-            None => current_screen_size,
-        };
+            });
 
         // Handle conditions where the entire flow tree is invalid.
         let mut needs_dirtying = false;
 
         let viewport_size_changed = self.viewport_size != old_viewport_size;
         if viewport_size_changed {
-            if let Some(constraints) = constraints {
+            if let Some(constraints) = rw_data.stylist.viewport_constraints() {
                 // let the constellation know about the viewport constraints
                 rw_data.constellation_chan
-                       .send(ConstellationMsg::ViewportConstrained(self.id, constraints))
+                       .send(ConstellationMsg::ViewportConstrained(self.id, constraints.clone()))
                        .unwrap();
             }
             if data.document_stylesheets.iter().any(|sheet| sheet.dirty_on_viewport_size_change()) {

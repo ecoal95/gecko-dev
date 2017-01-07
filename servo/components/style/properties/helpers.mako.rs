@@ -185,6 +185,7 @@
         if property is None:
             return ""
     %>
+    /// ${property.spec}
     pub mod ${property.ident} {
         #![allow(unused_imports)]
         % if not property.derived_from:
@@ -209,6 +210,7 @@
         #[allow(unused_variables)]
         pub fn cascade_property(declaration: &PropertyDeclaration,
                                 inherited_style: &ComputedValues,
+                                default_style: &Arc<ComputedValues>,
                                 context: &mut computed::Context,
                                 seen: &mut PropertyBitField,
                                 cacheable: &mut bool,
@@ -259,7 +261,7 @@
                             DeclaredValue::Initial => {
                                 // We assume that it's faster to use copy_*_from rather than
                                 // set_*(get_initial_value());
-                                let initial_struct = ComputedValues::initial_values()
+                                let initial_struct = default_style
                                                       .get_${data.current_style_struct.name_lower}();
                                 context.mutate_style().mutate_${data.current_style_struct.name_lower}()
                                                       .copy_${property.ident}_from(initial_struct ${maybe_wm});
@@ -337,7 +339,7 @@
     </%call>
 </%def>
 
-<%def name="single_keyword_computed(name, values, vector=False, **kwargs)">
+<%def name="single_keyword_computed(name, values, vector=False, extra_specified=None, **kwargs)">
     <%
         keyword_kwargs = {a: kwargs.pop(a, None) for a in [
             'gecko_constant_prefix', 'gecko_enum_prefix',
@@ -347,7 +349,16 @@
     %>
 
     <%def name="inner_body()">
-        pub use self::computed_value::T as SpecifiedValue;
+        % if extra_specified:
+            use style_traits::ToCss;
+            define_css_keyword_enum! { SpecifiedValue:
+                % for value in data.longhands_by_name[name].keyword.values_for(product) + extra_specified.split():
+                    "${value}" => ${to_rust_ident(value)},
+                % endfor
+            }
+        % else:
+            pub use self::computed_value::T as SpecifiedValue;
+        % endif
         pub mod computed_value {
             use style_traits::ToCss;
             define_css_keyword_enum! { T:
@@ -362,12 +373,12 @@
         }
         #[inline]
         pub fn get_initial_specified_value() -> SpecifiedValue {
-            get_initial_value()
+            SpecifiedValue::${to_rust_ident(values.split()[0])}
         }
         #[inline]
         pub fn parse(_context: &ParserContext, input: &mut Parser)
                      -> Result<SpecifiedValue, ()> {
-            computed_value::T::parse(input)
+            SpecifiedValue::parse(input)
         }
     </%def>
     % if vector:
@@ -389,6 +400,7 @@
                                        **kwargs)
 %>
     % if shorthand:
+    /// ${shorthand.spec}
     pub mod ${shorthand.ident} {
         #[allow(unused_imports)]
         use cssparser::Parser;
@@ -405,7 +417,8 @@
             % endfor
         }
 
-        /// Represents a serializable set of all of the longhand properties that correspond to a shorthand
+        /// Represents a serializable set of all of the longhand properties that
+        /// correspond to a shorthand.
         pub struct LonghandsToSerialize<'a> {
             % for sub_property in shorthand.sub_properties:
                 pub ${sub_property.ident}: &'a DeclaredValue<longhands::${sub_property.ident}::SpecifiedValue>,
@@ -539,10 +552,9 @@
     % endif
 </%def>
 
-<%def name="four_sides_shorthand(name, sub_property_pattern, parser_function, needs_context=True)">
-    <%self:shorthand name="${name}" sub_properties="${
-            ' '.join(sub_property_pattern % side
-                     for side in ['top', 'right', 'bottom', 'left'])}">
+<%def name="four_sides_shorthand(name, sub_property_pattern, parser_function, needs_context=True, **kwargs)">
+    <% sub_properties=' '.join(sub_property_pattern % side for side in ['top', 'right', 'bottom', 'left']) %>
+    <%call expr="self.shorthand(name, sub_properties=sub_properties, **kwargs)">
         #[allow(unused_imports)]
         use parser::Parse;
         use super::parse_four_sides;
@@ -574,7 +586,7 @@
                 )
             }
         }
-    </%self:shorthand>
+    </%call>
 </%def>
 
 <%def name="logical_setter_helper(name)">
@@ -617,16 +629,22 @@
 </%def>
 
 <%def name="logical_setter(name, need_clone=False)">
+    /// Set the appropriate physical property for ${name} given a writing mode.
     pub fn set_${to_rust_ident(name)}(&mut self,
-                                 v: longhands::${to_rust_ident(name)}::computed_value::T,
-                                 wm: WritingMode) {
+                                      v: longhands::${to_rust_ident(name)}::computed_value::T,
+                                      wm: WritingMode) {
         <%self:logical_setter_helper name="${name}">
             <%def name="inner(physical_ident)">
                 self.set_${physical_ident}(v)
             </%def>
         </%self:logical_setter_helper>
     }
-    pub fn copy_${to_rust_ident(name)}_from(&mut self, other: &Self, wm: WritingMode) {
+
+    /// Copy the appropriate physical property from another struct for ${name}
+    /// given a writing mode.
+    pub fn copy_${to_rust_ident(name)}_from(&mut self,
+                                            other: &Self,
+                                            wm: WritingMode) {
         <%self:logical_setter_helper name="${name}">
             <%def name="inner(physical_ident)">
                 self.copy_${physical_ident}_from(other)
@@ -634,6 +652,8 @@
         </%self:logical_setter_helper>
     }
     % if need_clone:
+        /// Get the computed value for the appropriate physical property for
+        /// ${name} given a writing mode.
         pub fn clone_${to_rust_ident(name)}(&self, wm: WritingMode)
             -> longhands::${to_rust_ident(name)}::computed_value::T {
         <%self:logical_setter_helper name="${name}">

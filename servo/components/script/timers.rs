@@ -228,18 +228,20 @@ impl OneshotTimers {
     }
 
     pub fn suspend(&self) {
-        assert!(self.suspended_since.get().is_none());
+        // Suspend is idempotent: do nothing if the timers are already suspended.
+        if self.suspended_since.get().is_some() {
+            return warn!("Suspending an already suspended timer.");
+        }
 
         self.suspended_since.set(Some(precise_time_ms()));
         self.invalidate_expected_event_id();
     }
 
     pub fn resume(&self) {
-        assert!(self.suspended_since.get().is_some());
-
+        // Suspend is idempotent: do nothing if the timers are already suspended.
         let additional_offset = match self.suspended_since.get() {
             Some(suspended_since) => precise_time_ms() - suspended_since,
-            None => panic!("Timers are not suspended.")
+            None => return warn!("Resuming an already resumed timer."),
         };
 
         self.suspension_offset.set(self.suspension_offset.get() + additional_offset);
@@ -481,7 +483,6 @@ fn clamp_duration(nesting_level: u32, unclamped: MsDuration) -> MsDuration {
 
 impl JsTimerTask {
     // see https://html.spec.whatwg.org/multipage/#timer-initialisation-steps
-    #[allow(unsafe_code)]
     pub fn invoke<T: DomObject>(self, this: &T, timers: &JsTimers) {
         // step 4.1 can be ignored, because we proactively prevent execution
         // of this task when its scheduled execution is canceled.
@@ -490,7 +491,7 @@ impl JsTimerTask {
         timers.nesting_level.set(self.nesting_level);
 
         // step 4.2
-        match *&self.callback {
+        match self.callback {
             InternalTimerCallback::StringTimerCallback(ref code_str) => {
                 let global = this.global();
                 let cx = global.get_cx();
@@ -500,11 +501,7 @@ impl JsTimerTask {
                     code_str, rval.handle_mut());
             },
             InternalTimerCallback::FunctionTimerCallback(ref function, ref arguments) => {
-                let arguments: Vec<JSVal> = arguments.iter().map(|arg| arg.get()).collect();
-                let arguments = arguments.iter().by_ref().map(|arg| unsafe {
-                    HandleValue::from_marked_location(arg)
-                }).collect();
-
+                let arguments = arguments.iter().map(|arg| arg.handle()).collect();
                 let _ = function.Call_(this, arguments, Report);
             },
         };

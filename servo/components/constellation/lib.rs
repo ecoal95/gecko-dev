@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #![feature(box_syntax)]
+#![feature(conservative_impl_trait)]
 #![feature(mpsc_select)]
 #![feature(plugin)]
 #![feature(proc_macro)]
@@ -31,12 +32,12 @@ extern crate net_traits;
 extern crate offscreen_gl_context;
 #[macro_use]
 extern crate profile_traits;
-extern crate rand;
 extern crate script_traits;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 extern crate servo_config;
+extern crate servo_rand;
 extern crate servo_remutex;
 extern crate servo_url;
 extern crate style_traits;

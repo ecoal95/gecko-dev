@@ -18,7 +18,8 @@ extern crate devtools_traits;
 extern crate euclid;
 extern crate gfx_traits;
 extern crate heapsize;
-#[macro_use] extern crate heapsize_derive;
+#[macro_use]
+extern crate heapsize_derive;
 extern crate hyper;
 extern crate hyper_serde;
 extern crate ipc_channel;
@@ -183,6 +184,15 @@ pub struct NewLayoutInfo {
     pub layout_threads: usize,
 }
 
+/// When a pipeline is closed, should its browsing context be discarded too?
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
+pub enum DiscardBrowsingContext {
+    /// Discard the browsing context
+    Yes,
+    /// Don't discard the browsing context
+    No,
+}
+
 /// Messages sent from the constellation or layout to the script thread.
 #[derive(Deserialize, Serialize)]
 pub enum ConstellationControlMsg {
@@ -193,7 +203,7 @@ pub enum ConstellationControlMsg {
     /// Notifies script that window has been resized but to not take immediate action.
     ResizeInactive(PipelineId, WindowSizeData),
     /// Notifies the script that a pipeline should be closed.
-    ExitPipeline(PipelineId),
+    ExitPipeline(PipelineId, DiscardBrowsingContext),
     /// Notifies the script that the whole thread should be closed.
     ExitScriptThread,
     /// Sends a DOM event.
@@ -252,13 +262,13 @@ pub enum ConstellationControlMsg {
     /// Report an error from a CSS parser for the given pipeline
     ReportCSSError(PipelineId, String, usize, usize, String),
     /// Reload the given page.
-    Reload(PipelineId)
+    Reload(PipelineId),
 }
 
 impl fmt::Debug for ConstellationControlMsg {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         use self::ConstellationControlMsg::*;
-        write!(formatter, "ConstellationMsg::{}", match *self {
+        let variant = match *self {
             AttachLayout(..) => "AttachLayout",
             Resize(..) => "Resize",
             ResizeInactive(..) => "ResizeInactive",
@@ -284,8 +294,9 @@ impl fmt::Debug for ConstellationControlMsg {
             DispatchStorageEvent(..) => "DispatchStorageEvent",
             FramedContentChanged(..) => "FramedContentChanged",
             ReportCSSError(..) => "ReportCSSError",
-            Reload(..) => "Reload"
-        })
+            Reload(..) => "Reload",
+        };
+        write!(formatter, "ConstellationMsg::{}", variant)
     }
 }
 
@@ -383,10 +394,7 @@ pub enum TouchpadPressurePhase {
 
 /// Requests a TimerEvent-Message be sent after the given duration.
 #[derive(Deserialize, Serialize)]
-pub struct TimerEventRequest(pub IpcSender<TimerEvent>,
-                             pub TimerSource,
-                             pub TimerEventId,
-                             pub MsDuration);
+pub struct TimerEventRequest(pub IpcSender<TimerEvent>, pub TimerSource, pub TimerEventId, pub MsDuration);
 
 /// Notifies the script thread to fire due timers.
 /// `TimerSource` must be `FromWindow` when dispatched to `ScriptThread` and
@@ -478,9 +486,7 @@ pub trait ScriptThreadFactory {
     /// Type of message sent from script to layout.
     type Message;
     /// Create a `ScriptThread`.
-    fn create(state: InitialScriptState,
-              load_data: LoadData)
-              -> (Sender<Self::Message>, Receiver<Self::Message>);
+    fn create(state: InitialScriptState, load_data: LoadData) -> (Sender<Self::Message>, Receiver<Self::Message>);
 }
 
 /// Whether the sandbox attribute is present for an iframe element
@@ -489,7 +495,7 @@ pub enum IFrameSandboxState {
     /// Sandbox attribute is present
     IFrameSandboxed,
     /// Sandbox attribute is not present
-    IFrameUnsandboxed
+    IFrameUnsandboxed,
 }
 
 /// Specifies the information required to load an iframe.
@@ -743,5 +749,5 @@ pub struct WorkerScriptLoadOrigin {
     /// the referrer policy which is used
     pub referrer_policy: Option<ReferrerPolicy>,
     /// the pipeline id of the entity requesting the load
-    pub pipeline_id: Option<PipelineId>
+    pub pipeline_id: Option<PipelineId>,
 }
