@@ -244,6 +244,7 @@ mod bindings {
             "NODE_.*",
             "NS_FONT_.*",
             "NS_STYLE_.*",
+            "NS_CORNER_.*",
             "NS_RADIUS_.*",
             "BORDER_COLOR_.*",
             "BORDER_STYLE_.*"
@@ -255,7 +256,6 @@ mod bindings {
             "mozilla::ConsumeStyleBehavior",
             "mozilla::CSSPseudoClassType",
             "mozilla::css::SheetParsingMode",
-            "mozilla::HalfCorner",
             "mozilla::TraversalRootBehavior",
             "mozilla::DisplayItemClip",  // Needed because bindgen generates
                                          // specialization tests for this even
@@ -279,7 +279,6 @@ mod bindings {
             "gfxFontFeature",
             "gfxFontVariation",
             "GridNamedArea",
-            "HalfCorner",
             "Image",
             "ImageURL",
             "nsAttrName",
