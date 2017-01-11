@@ -22,7 +22,7 @@ use style::data::ElementData;
 use style::dom::{LayoutIterator, NodeInfo, PresentationalHintsSynthetizer, TNode};
 use style::dom::OpaqueNode;
 use style::properties::ServoComputedValues;
-use style::selector_parser::{PseudoElement, PseudoElementCascadeType, RestyleDamage, SelectorImpl};
+use style::selector_parser::{PseudoElement, PseudoElementCascadeType, SelectorImpl};
 
 #[derive(Copy, PartialEq, Clone, Debug)]
 pub enum PseudoElementType<T> {
@@ -151,6 +151,7 @@ impl<ConcreteNode> Iterator for TreeIterator<ConcreteNode>
 /// A thread-safe version of `LayoutNode`, used during flow construction. This type of layout
 /// node does not allow any parents or siblings of nodes to be accessed, to avoid races.
 pub trait ThreadSafeLayoutNode: Clone + Copy + Debug + GetLayoutData + NodeInfo + PartialEq + Sized {
+    type ConcreteNode: LayoutNode<ConcreteThreadSafeLayoutNode = Self>;
     type ConcreteThreadSafeLayoutElement:
         ThreadSafeLayoutElement<ConcreteThreadSafeLayoutNode = Self>
         + ::selectors::Element<Impl=SelectorImpl>;
@@ -237,13 +238,19 @@ pub trait ThreadSafeLayoutNode: Clone + Copy + Debug + GetLayoutData + NodeInfo 
 
     fn is_ignorable_whitespace(&self, context: &SharedStyleContext) -> bool;
 
-    fn restyle_damage(self) -> RestyleDamage;
-
     /// Returns true if this node contributes content. This is used in the implementation of
     /// `empty_cells` per CSS 2.1 § 17.6.1.1.
     fn is_content(&self) -> bool {
         self.type_id().is_some()
     }
+
+    /// Returns access to the underlying LayoutNode. This is breaks the abstraction
+    /// barrier of ThreadSafeLayout wrapper layer, and can lead to races if not used
+    /// carefully.
+    ///
+    /// We need this because the implementation of some methods need to access the layout
+    /// data flags, and we have this annoying trait separation between script and layout :-(
+    unsafe fn unsafe_get(self) -> Self::ConcreteNode;
 
     fn can_be_fragmented(&self) -> bool;
 
@@ -394,7 +401,7 @@ pub trait ThreadSafeLayoutElement: Clone + Copy + Sized + Debug +
                                     &context.default_computed_values,
                                     false);
                             data.styles_mut().pseudos
-                                .insert(style_pseudo.clone(), new_style.unwrap());
+                                .insert(style_pseudo.clone(), new_style);
                         }
                     }
                     PseudoElementCascadeType::Lazy => {

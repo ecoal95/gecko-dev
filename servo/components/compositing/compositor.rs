@@ -11,8 +11,8 @@ use euclid::Point2D;
 use euclid::point::TypedPoint2D;
 use euclid::scale_factor::ScaleFactor;
 use euclid::size::TypedSize2D;
-use gfx_traits::{DevicePixel, LayerPixel, ScrollRootId};
-use gfx_traits::{Epoch, FrameTreeId, FragmentType};
+use gfx_traits::{DevicePixel, ScrollRootId};
+use gfx_traits::{Epoch, FragmentType};
 use gleam::gl;
 use gleam::gl::types::{GLint, GLsizei};
 use image::{DynamicImage, ImageFormat, RgbImage};
@@ -107,6 +107,22 @@ enum ReadyState {
     WaitingForConstellationReply,
     ReadyToSaveImage,
 }
+
+#[derive(PartialEq, Eq, Debug, Copy, Clone)]
+struct FrameTreeId(u32);
+
+impl FrameTreeId {
+    pub fn next(&mut self) {
+        self.0 += 1;
+    }
+}
+
+/// One pixel in layer coordinate space.
+///
+/// This unit corresponds to a "pixel" in layer coordinate space, which after scaling and
+/// transformation becomes a device pixel.
+#[derive(Copy, Clone, Debug)]
+enum LayerPixel {}
 
 /// NB: Never block on the constellation, because sometimes the constellation blocks on us.
 pub struct IOCompositor<Window: WindowMethods> {
@@ -275,6 +291,7 @@ enum CompositeTarget {
 
 struct RenderTargetInfo {
     framebuffer_ids: Vec<gl::GLuint>,
+    renderbuffer_ids: Vec<gl::GLuint>,
     texture_ids: Vec<gl::GLuint>,
 }
 
@@ -282,6 +299,7 @@ impl RenderTargetInfo {
     fn empty() -> RenderTargetInfo {
         RenderTargetInfo {
             framebuffer_ids: Vec::new(),
+            renderbuffer_ids: Vec::new(),
             texture_ids: Vec::new(),
         }
     }
@@ -304,8 +322,21 @@ fn initialize_png(width: usize, height: usize) -> RenderTargetInfo {
 
     gl::bind_texture(gl::TEXTURE_2D, 0);
 
+    let renderbuffer_ids = gl::gen_renderbuffers(1);
+    let depth_rb = renderbuffer_ids[0];
+    gl::bind_renderbuffer(gl::RENDERBUFFER, depth_rb);
+    gl::renderbuffer_storage(gl::RENDERBUFFER,
+                             gl::DEPTH_COMPONENT24,
+                             width as gl::GLsizei,
+                             height as gl::GLsizei);
+    gl::framebuffer_renderbuffer(gl::FRAMEBUFFER,
+                                 gl::DEPTH_ATTACHMENT,
+                                 gl::RENDERBUFFER,
+                                 depth_rb);
+
     RenderTargetInfo {
         framebuffer_ids: framebuffer_ids,
+        renderbuffer_ids: renderbuffer_ids,
         texture_ids: texture_ids,
     }
 }
@@ -1534,6 +1565,7 @@ impl<Window: WindowMethods> IOCompositor<Window> {
         gl::bind_framebuffer(gl::FRAMEBUFFER, 0);
 
         gl::delete_buffers(&render_target_info.texture_ids);
+        gl::delete_renderbuffers(&render_target_info.renderbuffer_ids);
         gl::delete_frame_buffers(&render_target_info.framebuffer_ids);
 
         // flip image vertically (texture is upside down)

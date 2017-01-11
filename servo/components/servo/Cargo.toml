@@ -54,6 +54,8 @@ servo_config = {path = "../config"}
 servo_url = {path = "../url"}
 style = {path = "../style", features = ["servo"]}
 url = "1.2"
+webvr = {path = "../webvr"}
+webvr_traits = {path = "../webvr_traits"}
 webdriver_server = {path = "../webdriver_server", optional = true}
 
 [dependencies.webrender]
@@ -63,7 +65,7 @@ features = ["serde_derive"]
 
 [dependencies.webrender_traits]
 git = "https://github.com/servo/webrender"
-default_features = false
+default-features = false
 features = ["serde_derive", "ipc"]
 
 [target.'cfg(not(target_os = "android"))'.dependencies]

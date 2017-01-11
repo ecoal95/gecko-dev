@@ -14,12 +14,13 @@ use script_layout_interface::wrapper_traits::{LayoutNode, ThreadSafeLayoutNode};
 use servo_config::opts;
 use style::context::{SharedStyleContext, StyleContext};
 use style::data::ElementData;
-use style::dom::{TElement, TNode};
+use style::dom::{NodeInfo, TElement, TNode};
 use style::selector_parser::RestyleDamage;
 use style::servo::restyle_damage::{BUBBLE_ISIZES, REFLOW, REFLOW_OUT_OF_FLOW, REPAINT};
 use style::traversal::{DomTraversal, recalc_style_at};
 use style::traversal::PerLevelTraversalData;
 use wrapper::{GetRawData, LayoutNodeHelpers, LayoutNodeLayoutData};
+use wrapper::ThreadSafeLayoutNodeHelpers;
 
 pub struct RecalcStyleAndConstructFlows {
     shared: SharedLayoutContext,
@@ -47,14 +48,14 @@ impl RecalcStyleAndConstructFlows {
 }
 
 #[allow(unsafe_code)]
-impl<N> DomTraversal<N> for RecalcStyleAndConstructFlows
-    where N: LayoutNode + TNode,
-          N::ConcreteElement: TElement
+impl<E> DomTraversal<E> for RecalcStyleAndConstructFlows
+    where E: TElement,
+          E::ConcreteNode: LayoutNode,
 {
-    type ThreadLocalContext = ScopedThreadLocalLayoutContext<N::ConcreteElement>;
+    type ThreadLocalContext = ScopedThreadLocalLayoutContext<E>;
 
     fn process_preorder(&self, traversal_data: &mut PerLevelTraversalData,
-                        thread_local: &mut Self::ThreadLocalContext, node: N) {
+                        thread_local: &mut Self::ThreadLocalContext, node: E::ConcreteNode) {
         // FIXME(pcwalton): Stop allocating here. Ideally this should just be
         // done by the HTML parser.
         node.initialize_data();
@@ -70,12 +71,12 @@ impl<N> DomTraversal<N> for RecalcStyleAndConstructFlows
         }
     }
 
-    fn process_postorder(&self, thread_local: &mut Self::ThreadLocalContext, node: N) {
+    fn process_postorder(&self, thread_local: &mut Self::ThreadLocalContext, node: E::ConcreteNode) {
         let context = LayoutContext::new(&self.shared);
         construct_flows_at(&context, thread_local, node);
     }
 
-    fn text_node_needs_traversal(node: N) -> bool {
+    fn text_node_needs_traversal(node: E::ConcreteNode) -> bool {
         // Text nodes never need styling. However, there are two cases they may need
         // flow construction:
         // (1) They child doesn't yet have layout data (preorder traversal initializes it).
@@ -84,12 +85,12 @@ impl<N> DomTraversal<N> for RecalcStyleAndConstructFlows
         node.parent_node().unwrap().to_threadsafe().restyle_damage() != RestyleDamage::empty()
     }
 
-    unsafe fn ensure_element_data(element: &N::ConcreteElement) -> &AtomicRefCell<ElementData> {
+    unsafe fn ensure_element_data(element: &E) -> &AtomicRefCell<ElementData> {
         element.as_node().initialize_data();
         element.get_data().unwrap()
     }
 
-    unsafe fn clear_element_data(element: &N::ConcreteElement) {
+    unsafe fn clear_element_data(element: &E) {
         element.as_node().clear_data();
     }
 
@@ -134,10 +135,11 @@ fn construct_flows_at<'a, N>(context: &LayoutContext<'a>,
                        tnode.flow_debug_id());
             }
         }
+
+        tnode.mutate_layout_data().unwrap().flags.insert(::data::HAS_BEEN_TRAVERSED);
     }
 
     if let Some(el) = node.as_element() {
-        el.mutate_data().unwrap().persist();
         unsafe { el.unset_dirty_descendants(); }
     }
 }
@@ -230,17 +232,11 @@ pub struct BuildDisplayList<'a> {
 impl<'a> BuildDisplayList<'a> {
     #[inline]
     pub fn traverse(&mut self, flow: &mut Flow) {
-        let new_stacking_context =
-            flow::base(flow).stacking_context_id != self.state.stacking_context_id();
-        if new_stacking_context {
-            self.state.push_stacking_context_id(flow::base(flow).stacking_context_id);
-        }
+        let parent_stacking_context_id = self.state.current_stacking_context_id;
+        self.state.current_stacking_context_id = flow::base(flow).stacking_context_id;
 
-        let new_scroll_root =
-            flow::base(flow).scroll_root_id != self.state.scroll_root_id();
-        if new_scroll_root {
-            self.state.push_scroll_root_id(flow::base(flow).scroll_root_id);
-        }
+        let parent_scroll_root_id = self.state.current_scroll_root_id;
+        self.state.current_scroll_root_id = flow::base(flow).scroll_root_id;
 
         if self.should_process() {
             flow.build_display_list(&mut self.state);
@@ -251,13 +247,8 @@ impl<'a> BuildDisplayList<'a> {
             self.traverse(kid);
         }
 
-        if new_stacking_context {
-            self.state.pop_stacking_context_id();
-        }
-
-        if new_scroll_root {
-            self.state.pop_scroll_root_id();
-        }
+        self.state.current_stacking_context_id = parent_stacking_context_id;
+        self.state.current_scroll_root_id = parent_scroll_root_id;
     }
 
     #[inline]

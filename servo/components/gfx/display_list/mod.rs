@@ -19,7 +19,7 @@ use euclid::{Matrix4D, Point2D, Rect, Size2D};
 use euclid::num::{One, Zero};
 use euclid::rect::TypedRect;
 use euclid::side_offsets::SideOffsets2D;
-use gfx_traits::{ScrollPolicy, ScrollRootId, StackingContextId};
+use gfx_traits::{ScrollRootId, StackingContextId};
 use gfx_traits::print_tree::PrintTree;
 use ipc_channel::ipc::IpcSharedMemory;
 use msg::constellation_msg::PipelineId;
@@ -34,7 +34,7 @@ use style::computed_values::{border_style, filter, image_rendering, mix_blend_mo
 use style_traits::cursor::Cursor;
 use text::TextRun;
 use text::glyph::ByteIndex;
-use webrender_traits::{self, ColorF, GradientStop, WebGLContextId};
+use webrender_traits::{self, ColorF, GradientStop, ScrollPolicy, WebGLContextId};
 
 pub use style::dom::OpaqueNode;
 
@@ -129,7 +129,7 @@ impl DisplayList {
         // Convert the parent translated point into stacking context local transform space if the
         // stacking context isn't fixed.  If it's fixed, we need to use the client point anyway.
         debug_assert!(stacking_context.context_type == StackingContextType::Real);
-        let is_fixed = stacking_context.scroll_policy == ScrollPolicy::FixedPosition;
+        let is_fixed = stacking_context.scroll_policy == ScrollPolicy::Fixed;
         let translated_point = if is_fixed {
             *client_point
         } else {
@@ -251,7 +251,7 @@ impl<'a> Iterator for DisplayListTraversal<'a> {
 /// Display list sections that make up a stacking context. Each section  here refers
 /// to the steps in CSS 2.1 Appendix E.
 ///
-#[derive(Clone, Copy, Debug, Deserialize, Eq, HeapSizeOf, Ord, PartialEq, PartialOrd, RustcEncodable, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, HeapSizeOf, Ord, PartialEq, PartialOrd, Serialize)]
 pub enum DisplayListSection {
     BackgroundAndBorders,
     BlockBackgroundsAndBorders,
@@ -259,7 +259,7 @@ pub enum DisplayListSection {
     Outlines,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, HeapSizeOf, Ord, PartialEq, PartialOrd, RustcEncodable, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, HeapSizeOf, Ord, PartialEq, PartialOrd, Serialize)]
 pub enum StackingContextType {
     Real,
     PseudoPositioned,
@@ -303,9 +303,6 @@ pub struct StackingContext {
     /// The scroll policy of this layer.
     pub scroll_policy: ScrollPolicy,
 
-    /// Children of this StackingContext.
-    pub children: Vec<StackingContext>,
-
     /// The id of the parent scrolling area that contains this StackingContext.
     pub parent_scroll_id: ScrollRootId,
 }
@@ -338,7 +335,6 @@ impl StackingContext {
             perspective: perspective,
             establishes_3d_context: establishes_3d_context,
             scroll_policy: scroll_policy,
-            children: Vec::new(),
             parent_scroll_id: parent_scroll_id,
         }
     }
@@ -359,32 +355,7 @@ impl StackingContext {
                              ScrollRootId::root())
     }
 
-    pub fn add_child(&mut self, mut child: StackingContext) {
-        child.update_overflow_for_all_children();
-        self.children.push(child);
-    }
-
-    pub fn child_at_mut(&mut self, index: usize) -> &mut StackingContext {
-        &mut self.children[index]
-    }
-
-    pub fn children(&self) -> &[StackingContext] {
-        &self.children
-    }
-
-    fn update_overflow_for_all_children(&mut self) {
-        for child in self.children.iter() {
-            if self.context_type == StackingContextType::Real &&
-               child.context_type == StackingContextType::Real {
-                // This child might be transformed, so we need to take into account
-                // its transformed overflow rect too, but at the correct position.
-                let overflow = child.overflow_rect_in_parent_space();
-                self.overflow = self.overflow.union(&overflow);
-            }
-        }
-    }
-
-    fn overflow_rect_in_parent_space(&self) -> Rect<Au> {
+    pub fn overflow_rect_in_parent_space(&self) -> Rect<Au> {
         // Transform this stacking context to get it into the same space as
         // the parent stacking context.
         //
@@ -400,14 +371,6 @@ impl StackingContext {
         let overflow = au_rect_to_f32_rect(self.overflow);
         let overflow = transform_2d.transform_rect(&overflow);
         f32_rect_to_au_rect(overflow)
-    }
-
-    pub fn print_with_tree(&self, print_tree: &mut PrintTree) {
-        print_tree.new_level(format!("{:?}", self));
-        for kid in self.children() {
-            kid.print_with_tree(print_tree);
-        }
-        print_tree.end_level();
     }
 
     pub fn to_display_list_items(self) -> (DisplayItem, DisplayItem) {
