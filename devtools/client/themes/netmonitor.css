@@ -1108,7 +1108,6 @@
   background: none;
   color: inherit;
   width: 100%;
-  margin-inline-end: 2px;
 }
 
 .treeTable .textbox-input:focus {
@@ -1116,34 +1115,90 @@
   box-shadow: var(--theme-focus-box-shadow-textbox);
 }
 
-.treeTable .treeLabel {
-  font-weight: 600;
+.properties-view {
+  /* FIXME: Minus 24px * 2 for toolbox height + panel height
+   * Give a fixed panel container height in order to force tree view scrollable */
+  height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
 }
 
-/* Customize default tree table style to align with devtools theme  */
-.theme-light .treeTable .treeLabel,
-.theme-light .treeTable .treeRow.hasChildren > .treeLabelCell > .treeLabel:hover {
-  color: var(--theme-highlight-red);
+.properties-view .searchbox-section {
+  flex: 0 1 auto;
 }
 
-.theme-dark .treeTable .treeLabel,
-.theme-dark .treeTable .treeRow.hasChildren > .treeLabelCell > .treeLabel:hover {
-  color: var(--theme-highlight-purple);
+.properties-view .devtools-searchbox {
+  padding: 0;
 }
 
-.theme-firebug .treeTable .treeLabel {
-  color: var(--theme-body-color);
+.properties-view .devtools-searchbox input {
+  margin: 1px 3px;
 }
 
-.treeTable .treeRow.hasChildren > .treeLabelCell > .treeLabel:hover {
-  cursor: default;
-  text-decoration: none;
+.tree-container {
+  position: relative;
+  height: 100%;
+}
+
+/* Make treeTable fill parent element and scrollable */
+.tree-container .treeTable {
+  position: absolute;
+  display: block;
+  overflow-y: auto;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+.properties-view .devtools-searchbox,
+.tree-container .treeTable .tree-section {
+  width: 100%;
+  background-color: var(--theme-toolbar-background);
+}
+
+.properties-view .devtools-searchbox,
+.tree-container .treeTable tr:not(:last-child) td:not([class=""]) {
+  border-bottom: 1px solid var(--theme-splitter-color);
+}
+
+.tree-container .treeTable .tree-section > * {
+  vertical-align: middle;
+}
+
+.tree-container .treeTable .treeRow.tree-section > .treeLabelCell > .treeLabel,
+.tree-container .treeTable .treeRow.tree-section > .treeLabelCell > .treeLabel:hover {
+  color: var(--theme-body-color-alt);
+}
+
+.tree-container .treeTable .treeValueCell {
+  /* FIXME: Make value cell can be reduced to shorter width */
+  max-width: 0;
+  padding-inline-end: 5px;
+}
+
+.tree-container .objectBox {
+  white-space: nowrap;
+}
+
+.empty-notice {
+  color: var(--theme-body-color-alt);
+  padding: 3px 8px;
+}
+
+.editor-container,
+.editor-mount,
+.editor-mount iframe {
+  border: none;
+  width: 100%;
+  height: 100%;
 }
 
 /*
  * FIXME: normal html block element cannot fill outer XUL element
  * This workaround should be removed after netmonitor is migrated to react
  */
+#react-params-tabpanel-hook,
 #react-preview-tabpanel-hook,
 #react-security-tabpanel-hook,
 #react-timings-tabpanel-hook,
@@ -1155,6 +1210,7 @@
 }
 
 /* For vbox */
+#react-params-tabpanel-hook,
 #react-preview-tabpanel-hook,
 #react-security-tabpanel-hook,
 #react-timings-tabpanel-hook,

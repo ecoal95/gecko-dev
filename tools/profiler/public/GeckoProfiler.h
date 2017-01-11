@@ -113,10 +113,8 @@ enum TracingMetadata {
 
 static inline void profiler_tracing(const char* aCategory, const char* aInfo,
                                     TracingMetadata metaData = TRACING_DEFAULT) {}
-class ProfilerBacktrace;
-
 static inline void profiler_tracing(const char* aCategory, const char* aInfo,
-                                    ProfilerBacktrace* aCause,
+                                    UniqueProfilerBacktrace aCause,
                                     TracingMetadata metaData = TRACING_DEFAULT) {}
 
 // Initilize the profiler TLS, signal handlers on linux. If MOZ_PROFILER_STARTUP
@@ -158,6 +156,9 @@ static inline void profiler_resume() {}
 // Immediately capture the current thread's call stack and return it
 static inline UniqueProfilerBacktrace profiler_get_backtrace() { return nullptr; }
 static inline void profiler_get_backtrace_noalloc(char *output, size_t outputSize) { return; }
+
+// Free a ProfilerBacktrace returned by profiler_get_backtrace()
+inline void ProfilerBacktraceDestructor::operator()(ProfilerBacktrace* aBacktrace) {}
 
 static inline bool profiler_is_active() { return false; }
 
@@ -246,13 +247,18 @@ static inline bool profiler_in_privacy_mode() { return false; }
 static inline void profiler_log(const char *str) {}
 static inline void profiler_log(const char *fmt, va_list args) {}
 
+namespace mozilla {
+
 class AutoProfilerRegister final MOZ_STACK_CLASS
 {
-  AutoProfilerRegister(const char* aName) {}
+public:
+  explicit AutoProfilerRegister(const char* aName) {}
 private:
   AutoProfilerRegister(const AutoProfilerRegister&) = delete;
   AutoProfilerRegister& operator=(const AutoProfilerRegister&) = delete;
 };
+
+} // namespace mozilla
 
 #else
 
