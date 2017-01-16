@@ -275,7 +275,7 @@ using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::dom::ipc;
 using mozilla::BasePrincipal;
-using mozilla::PrincipalOriginAttributes;
+using mozilla::OriginAttributes;
 using mozilla::TimeStamp;
 using mozilla::TimeDuration;
 using mozilla::dom::cache::CacheStorage;
@@ -874,9 +874,6 @@ nsOuterWindowProxy::getOwnPropertyDescriptor(JSContext* cx,
   }
   // else fall through to js::Wrapper
 
-  // When we change this to always claim the property is configurable (bug
-  // 1178639), update the comments in nsOuterWindowProxy::defineProperty
-  // accordingly.
   return js::Wrapper::getOwnPropertyDescriptor(cx, proxy, id, desc);
 }
 
@@ -893,29 +890,6 @@ nsOuterWindowProxy::defineProperty(JSContext* cx,
     // to the caller to decide whether to throw a TypeError.
     return result.failCantDefineWindowElement();
   }
-
-#ifndef RELEASE_OR_BETA // To be turned on in bug 1178638.
-  // For now, allow chrome code to define non-configurable properties
-  // on windows, until we sort out what exactly the addon SDK is
-  // doing.  In the meantime, this still allows us to test web compat
-  // behavior.
-  if (desc.hasConfigurable() && !desc.configurable() &&
-      !nsContentUtils::IsCallerChrome()) {
-    return ThrowErrorMessage(cx, MSG_DEFINE_NON_CONFIGURABLE_PROP_ON_WINDOW);
-  }
-
-  // Note that if hasConfigurable() is false we do NOT want to
-  // setConfigurable(true).  That would make this code:
-  //
-  //   var x;
-  //   window.x = 5;
-  //
-  // fail, because the JS engine ends up converting the assignment into a define
-  // with !hasConfigurable(), but the var actually declared a non-configurable
-  // property on our underlying Window object, so the set would fail if we
-  // forced setConfigurable(true) here.  What we want to do instead is change
-  // getOwnPropertyDescriptor to always claim configurable.  See bug 1178639.
-#endif
 
   return js::Wrapper::defineProperty(cx, proxy, id, desc, result);
 }
@@ -2462,7 +2436,7 @@ nsGlobalWindow::ComputeIsSecureContext(nsIDocument* aDocument)
     // IsOriginPotentiallyTrustworthy doesn't care about origin attributes so
     // it doesn't actually matter what we use here, but reusing the document
     // principal's attributes is convenient.
-    const PrincipalOriginAttributes& attrs = principal->OriginAttributesRef();
+    const OriginAttributes& attrs = principal->OriginAttributesRef();
     // CreateCodebasePrincipal correctly gets a useful principal for blob: and
     // other URI_INHERITS_SECURITY_CONTEXT URIs.
     principal = BasePrincipal::CreateCodebasePrincipal(uri, attrs);
@@ -8512,7 +8486,7 @@ nsGlobalWindow::PostMessageMozOuter(JSContext* aCx, JS::Handle<JS::Value> aMessa
       return;
     }
 
-    PrincipalOriginAttributes attrs = aSubjectPrincipal.OriginAttributesRef();
+    OriginAttributes attrs = aSubjectPrincipal.OriginAttributesRef();
     if (aSubjectPrincipal.GetIsSystemPrincipal()) {
       auto principal = BasePrincipal::Cast(GetPrincipal());
 
@@ -8949,7 +8923,7 @@ nsGlobalWindow::EnterModalState()
 
     topWin->mSuspendedDoc = topDoc;
     if (topDoc) {
-      topDoc->SuppressEventHandling(nsIDocument::eAnimationsOnly);
+      topDoc->SuppressEventHandling(nsIDocument::eEvents);
     }
 
     nsGlobalWindow* inner = topWin->GetCurrentInnerWindowInternal();
@@ -8986,7 +8960,7 @@ nsGlobalWindow::LeaveModalState()
 
     if (topWin->mSuspendedDoc) {
       nsCOMPtr<nsIDocument> currentDoc = topWin->GetExtantDoc();
-      topWin->mSuspendedDoc->UnsuppressEventHandlingAndFireEvents(nsIDocument::eAnimationsOnly,
+      topWin->mSuspendedDoc->UnsuppressEventHandlingAndFireEvents(nsIDocument::eEvents,
                                                                   currentDoc == topWin->mSuspendedDoc);
       topWin->mSuspendedDoc = nullptr;
     }
@@ -10677,7 +10651,7 @@ nsGlobalWindow::GetSessionStorage(ErrorResult& aError)
       return nullptr;
     }
 
-    MOZ_DIAGNOSTIC_ASSERT((principal->GetPrivateBrowsingId() > 0) == IsPrivateBrowsing());
+    MOZ_ASSERT_IF(!mIsChrome, (principal->GetPrivateBrowsingId() > 0) == IsPrivateBrowsing());
 
     nsCOMPtr<nsIDOMStorage> storage;
     aError = storageManager->CreateStorage(AsInner(), principal, documentURI,

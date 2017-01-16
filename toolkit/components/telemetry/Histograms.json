@@ -4236,6 +4236,13 @@
     "kind": "count",
     "description": "Number of unique pages that contain an unsafe-eval CSP directive"
   },
+  "CSP_REFERRER_DIRECTIVE": {
+    "alert_emails": ["seceng-telemetry@mozilla.com"],
+    "bug_numbers": [1303685],
+    "expires_in_version": "56",
+    "kind": "boolean",
+    "description": "Whether a document with a CSP policy (report-only or enforcing) contains a referrer directive ('true') or not ('false')."
+  },
   "PLACES_PAGES_COUNT": {
     "expires_in_version": "never",
     "kind": "exponential",
@@ -4399,6 +4406,14 @@
     "description": "Number of bookmarks stored in the browser DB",
     "alert_emails": ["mobile-frontend@mozilla.com"],
     "bug_numbers": [1244704]
+  },
+  "FENNEC_ORBOT_INSTALLED": {
+    "expires_in_version": "60",
+    "kind": "flag",
+    "cpp_guard": "ANDROID",
+    "description": "Whether or not users have Orbot installed",
+    "alert_emails": ["seceng@mozilla.org"],
+    "bug_numbers": [1314784]
   },
   "FENNEC_READING_LIST_COUNT": {
     "expires_in_version": "50",
@@ -8223,7 +8238,7 @@
     "expires_in_version": "60",
     "kind": "enumerated",
     "n_values": 16,
-    "description": "How often do we get back an HSTS priming result which upgrades the connection to HTTPS? 0=cached (no upgrade), 1=cached (do upgrade), 2=cached (blocked), 3=already upgraded, 4=priming succeeded, 5=priming succeeded (block due to pref), 6=priming succeeded (no upgrade due to pref), 7=priming failed (block), 8=priming failed (accept)"
+    "description": "How often do we get back an HSTS priming result which upgrades the connection to HTTPS? 0=cached (no upgrade), 1=cached (do upgrade), 2=cached (blocked), 3=already upgraded, 4=priming succeeded, 5=priming succeeded (block due to pref), 6=priming succeeded (no upgrade due to pref), 7=priming failed (block), 8=priming failed (accept), 9=timeout (block), 10=timeout (accept)"
   },
   "HSTS_PRIMING_REQUEST_DURATION": {
     "alert_emails": ["seceng-telemetry@mozilla.org"],
@@ -9615,6 +9630,13 @@
     "high": 120000,
     "n_buckets": 20,
     "description": "Tracking how long a ServiceWorker stays alive after it is spawned. File bugs in Core::DOM in case of a Telemetry regression."
+  },
+  "FILE_EMBEDDED_SERVICEWORKERS": {
+    "alert_emails": ["dparks@mozilla.com"],
+    "expires_in_version": "58",
+    "kind": "count",
+    "bug_numbers": [1312788],
+    "description": "Count ServiceWorkers that are embedded in pages loading with the file:/// protocol."
   },
   "GRAPHICS_SANITY_TEST": {
     "expires_in_version": "never",

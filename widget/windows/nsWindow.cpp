@@ -268,8 +268,7 @@ LONG            nsWindow::sLastMouseDownTime      = 0L;
 LONG            nsWindow::sLastClickCount         = 0L;
 BYTE            nsWindow::sLastMouseButton        = 0;
 
-// Trim heap on minimize. (initialized, but still true.)
-int             nsWindow::sTrimOnMinimize         = 2;
+bool            nsWindow::sHaveInitializedPrefs   = false;
 
 TriStateBool nsWindow::sHasBogusPopupsDropShadowOnMultiMonitor = TRI_UNKNOWN;
 
@@ -332,118 +331,6 @@ private:
 Maybe<TimeStamp> CurrentWindowsTimeGetter::sBackwardsSkewStamp;
 DWORD CurrentWindowsTimeGetter::sLastPostTime = 0;
 
-#if defined(ACCESSIBILITY)
-/**
- * Windows touchscreen code works by setting a global WH_GETMESSAGE hook and
- * injecting tiptsf.dll. The touchscreen process then posts registered messages
- * to our main thread. The tiptsf hook picks up those registered messages and
- * uses them as commands, some of which call into UIA, which then calls into
- * MSAA, which then sends WM_GETOBJECT to us.
- *
- * We can get ahead of this by installing our own thread-local WH_GETMESSAGE
- * hook. Since thread-local hooks are called ahead of global hooks, we will
- * see these registered messages before tiptsf does. At this point we can then
- * raise a flag that blocks a11y before invoking CallNextHookEx which will then
- * invoke the global tiptsf hook. Then when we see WM_GETOBJECT, we check the
- * flag by calling TIPMessageHandler::IsA11yBlocked().
- */
-class TIPMessageHandler
-{
-public:
-  ~TIPMessageHandler()
-  {
-    if (mHook) {
-      ::UnhookWindowsHookEx(mHook);
-    }
-  }
-
-  static void Initialize()
-  {
-    MOZ_ASSERT(!sInstance);
-    sInstance = new TIPMessageHandler();
-    ClearOnShutdown(&sInstance);
-  }
-
-  static bool IsA11yBlocked()
-  {
-    MOZ_ASSERT(sInstance);
-    if (!sInstance) {
-      return false;
-    }
-
-    return sInstance->mA11yBlockCount > 0;
-  }
-
-private:
-  TIPMessageHandler()
-    : mHook(nullptr)
-    , mA11yBlockCount(0)
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-
-    // Registered messages used by tiptsf
-    mMessages[0] = ::RegisterWindowMessage(L"ImmersiveFocusNotification");
-    mMessages[1] = ::RegisterWindowMessage(L"TipCloseMenus");
-    mMessages[2] = ::RegisterWindowMessage(L"TabletInputPanelOpening");
-    mMessages[3] = ::RegisterWindowMessage(L"IHM Pen or Touch Event noticed");
-    mMessages[4] = ::RegisterWindowMessage(L"ProgrammabilityCaretVisibility");
-    mMessages[5] = ::RegisterWindowMessage(L"CaretTrackingUpdateIPHidden");
-    mMessages[6] = ::RegisterWindowMessage(L"CaretTrackingUpdateIPInfo");
-
-    mHook = ::SetWindowsHookEx(WH_GETMESSAGE, &TIPHook, nullptr,
-                               ::GetCurrentThreadId());
-    MOZ_ASSERT(mHook);
-  }
-
-  class MOZ_RAII A11yInstantiationBlocker
-  {
-  public:
-    A11yInstantiationBlocker()
-    {
-      MOZ_ASSERT(TIPMessageHandler::sInstance);
-      ++TIPMessageHandler::sInstance->mA11yBlockCount;
-    }
-
-    ~A11yInstantiationBlocker()
-    {
-      MOZ_ASSERT(TIPMessageHandler::sInstance &&
-                 TIPMessageHandler::sInstance->mA11yBlockCount > 0);
-      --TIPMessageHandler::sInstance->mA11yBlockCount;
-    }
-  };
-
-  friend class A11yInstantiationBlocker;
-
-  static LRESULT CALLBACK TIPHook(int aCode, WPARAM aWParam, LPARAM aLParam)
-  {
-    if (aCode < 0 || !sInstance) {
-      return ::CallNextHookEx(nullptr, aCode, aWParam, aLParam);
-    }
-
-    MSG* msg = reinterpret_cast<MSG*>(aLParam);
-    UINT& msgCode = msg->message;
-
-    for (uint32_t i = 0; i < ArrayLength(sInstance->mMessages); ++i) {
-      if (msgCode == sInstance->mMessages[i]) {
-        A11yInstantiationBlocker block;
-        return ::CallNextHookEx(nullptr, aCode, aWParam, aLParam);
-      }
-    }
-
-    return ::CallNextHookEx(nullptr, aCode, aWParam, aLParam);
-  }
-
-  static StaticAutoPtr<TIPMessageHandler> sInstance;
-
-  HHOOK     mHook;
-  UINT      mMessages[7];
-  uint32_t  mA11yBlockCount;
-};
-
-StaticAutoPtr<TIPMessageHandler> TIPMessageHandler::sInstance;
-
-#endif // defined(ACCESSIBILITY)
-
 } // namespace mozilla
 
 /**************************************************************
@@ -494,6 +381,190 @@ static bool gIsPointerEventsEnabled = false;
 // coordinate this many milliseconds:
 #define HITTEST_CACHE_LIFETIME_MS 50
 
+#if defined(ACCESSIBILITY) && defined(_M_IX86)
+
+namespace mozilla {
+
+/**
+ * Windows touchscreen code works by setting a global WH_GETMESSAGE hook and
+ * injecting tiptsf.dll. The touchscreen process then posts registered messages
+ * to our main thread. The tiptsf hook picks up those registered messages and
+ * uses them as commands, some of which call into UIA, which then calls into
+ * MSAA, which then sends WM_GETOBJECT to us.
+ *
+ * We can get ahead of this by installing our own thread-local WH_GETMESSAGE
+ * hook. Since thread-local hooks are called ahead of global hooks, we will
+ * see these registered messages before tiptsf does. At this point we can then
+ * raise a flag that blocks a11y before invoking CallNextHookEx which will then
+ * invoke the global tiptsf hook. Then when we see WM_GETOBJECT, we check the
+ * flag by calling TIPMessageHandler::IsA11yBlocked().
+ *
+ * For Windows 8, we also hook tiptsf!ProcessCaretEvents, which is an a11y hook
+ * function that also calls into UIA.
+ */
+class TIPMessageHandler
+{
+public:
+  ~TIPMessageHandler()
+  {
+    if (mHook) {
+      ::UnhookWindowsHookEx(mHook);
+    }
+  }
+
+  static void Initialize()
+  {
+    MOZ_ASSERT(!sInstance);
+    if (!IsWin8OrLater()) {
+      return;
+    }
+
+    sInstance = new TIPMessageHandler();
+    ClearOnShutdown(&sInstance);
+  }
+
+  static bool IsA11yBlocked()
+  {
+    if (!sInstance) {
+      return false;
+    }
+
+    return sInstance->mA11yBlockCount > 0;
+  }
+
+private:
+  TIPMessageHandler()
+    : mHook(nullptr)
+    , mA11yBlockCount(0)
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    // Registered messages used by tiptsf
+    mMessages[0] = ::RegisterWindowMessage(L"ImmersiveFocusNotification");
+    mMessages[1] = ::RegisterWindowMessage(L"TipCloseMenus");
+    mMessages[2] = ::RegisterWindowMessage(L"TabletInputPanelOpening");
+    mMessages[3] = ::RegisterWindowMessage(L"IHM Pen or Touch Event noticed");
+    mMessages[4] = ::RegisterWindowMessage(L"ProgrammabilityCaretVisibility");
+    mMessages[5] = ::RegisterWindowMessage(L"CaretTrackingUpdateIPHidden");
+    mMessages[6] = ::RegisterWindowMessage(L"CaretTrackingUpdateIPInfo");
+
+    mHook = ::SetWindowsHookEx(WH_GETMESSAGE, &TIPHook, nullptr,
+                               ::GetCurrentThreadId());
+    MOZ_ASSERT(mHook);
+
+    if (!IsWin10OrLater()) {
+      // tiptsf loads when STA COM is first initialized, so it should be present
+      sTipTsfInterceptor.Init("tiptsf.dll");
+      DebugOnly<bool> ok = sTipTsfInterceptor.AddHook("ProcessCaretEvents",
+          reinterpret_cast<intptr_t>(&ProcessCaretEventsHook),
+          (void**) &sProcessCaretEventsStub);
+      MOZ_ASSERT(ok);
+    }
+
+    MOZ_ASSERT(!sSendMessageTimeoutWStub);
+    sUser32Intercept.Init("user32.dll");
+    DebugOnly<bool> hooked = sUser32Intercept.AddHook("SendMessageTimeoutW",
+        reinterpret_cast<intptr_t>(&SendMessageTimeoutWHook),
+        (void**) &sSendMessageTimeoutWStub);
+    MOZ_ASSERT(hooked);
+  }
+
+  class MOZ_RAII A11yInstantiationBlocker
+  {
+  public:
+    A11yInstantiationBlocker()
+    {
+      if (!TIPMessageHandler::sInstance) {
+        return;
+      }
+      ++TIPMessageHandler::sInstance->mA11yBlockCount;
+    }
+
+    ~A11yInstantiationBlocker()
+    {
+      if (!TIPMessageHandler::sInstance) {
+        return;
+      }
+      MOZ_ASSERT(TIPMessageHandler::sInstance->mA11yBlockCount > 0);
+      --TIPMessageHandler::sInstance->mA11yBlockCount;
+    }
+  };
+
+  friend class A11yInstantiationBlocker;
+
+  static LRESULT CALLBACK TIPHook(int aCode, WPARAM aWParam, LPARAM aLParam)
+  {
+    if (aCode < 0 || !sInstance) {
+      return ::CallNextHookEx(nullptr, aCode, aWParam, aLParam);
+    }
+
+    MSG* msg = reinterpret_cast<MSG*>(aLParam);
+    UINT& msgCode = msg->message;
+
+    for (uint32_t i = 0; i < ArrayLength(sInstance->mMessages); ++i) {
+      if (msgCode == sInstance->mMessages[i]) {
+        A11yInstantiationBlocker block;
+        return ::CallNextHookEx(nullptr, aCode, aWParam, aLParam);
+      }
+    }
+
+    return ::CallNextHookEx(nullptr, aCode, aWParam, aLParam);
+  }
+
+  static void CALLBACK ProcessCaretEventsHook(HWINEVENTHOOK aWinEventHook,
+                                              DWORD aEvent, HWND aHwnd,
+                                              LONG aObjectId, LONG aChildId,
+                                              DWORD aGeneratingTid,
+                                              DWORD aEventTime)
+  {
+    A11yInstantiationBlocker block;
+    sProcessCaretEventsStub(aWinEventHook, aEvent, aHwnd, aObjectId, aChildId,
+                            aGeneratingTid, aEventTime);
+  }
+
+  static LRESULT WINAPI SendMessageTimeoutWHook(HWND aHwnd, UINT aMsgCode,
+                                                WPARAM aWParam, LPARAM aLParam,
+                                                UINT aFlags, UINT aTimeout,
+                                                PDWORD_PTR aMsgResult)
+  {
+    // We don't want to handle this unless the message is a WM_GETOBJECT that we
+    // want to block, and the aHwnd is a nsWindow that belongs to the current
+    // thread.
+    if (!aMsgResult || aMsgCode != WM_GETOBJECT || aLParam != OBJID_CLIENT ||
+        !WinUtils::GetNSWindowPtr(aHwnd) ||
+        ::GetWindowThreadProcessId(aHwnd, nullptr) != ::GetCurrentThreadId() ||
+        !IsA11yBlocked()) {
+      return sSendMessageTimeoutWStub(aHwnd, aMsgCode, aWParam, aLParam,
+                                      aFlags, aTimeout, aMsgResult);
+    }
+
+    // In this case we want to fake the result that would happen if we had
+    // decided not to handle WM_GETOBJECT in our WndProc. We hand the message
+    // off to DefWindowProc to accomplish this.
+    *aMsgResult = static_cast<DWORD_PTR>(::DefWindowProcW(aHwnd, aMsgCode,
+                                                          aWParam, aLParam));
+
+    return static_cast<LRESULT>(TRUE);
+  }
+
+  static WindowsDllInterceptor sTipTsfInterceptor;
+  static WINEVENTPROC sProcessCaretEventsStub;
+  static decltype(&SendMessageTimeoutW) sSendMessageTimeoutWStub;
+  static StaticAutoPtr<TIPMessageHandler> sInstance;
+
+  HHOOK                 mHook;
+  UINT                  mMessages[7];
+  uint32_t              mA11yBlockCount;
+};
+
+WindowsDllInterceptor TIPMessageHandler::sTipTsfInterceptor;
+WINEVENTPROC TIPMessageHandler::sProcessCaretEventsStub;
+decltype(&SendMessageTimeoutW) TIPMessageHandler::sSendMessageTimeoutWStub;
+StaticAutoPtr<TIPMessageHandler> TIPMessageHandler::sInstance;
+
+} // namespace mozilla
+
+#endif // defined(ACCESSIBILITY) && defined(_M_IX86)
 
 /**************************************************************
  **************************************************************
@@ -571,9 +642,9 @@ nsWindow::nsWindow()
     // WinTaskbar.cpp for details.
     mozilla::widget::WinTaskbar::RegisterAppUserModelID();
     KeyboardLayout::GetInstance()->OnLayoutChange(::GetKeyboardLayout(0));
-#if defined(ACCESSIBILITY)
+#if defined(ACCESSIBILITY) && defined(_M_IX86)
     mozilla::TIPMessageHandler::Initialize();
-#endif // defined(ACCESSIBILITY)
+#endif // defined(ACCESSIBILITY) && defined(_M_IX86)
     IMEHandler::Initialize();
     if (SUCCEEDED(::OleInitialize(nullptr))) {
       sIsOleInitialized = TRUE;
@@ -711,7 +782,7 @@ nsWindow::Create(nsIWidget* aParent,
       parent = nullptr;
     }
 
-    if (IsVistaOrLater() && !IsWin8OrLater() &&
+    if (!IsWin8OrLater() &&
         HasBogusPopupsDropShadowOnMultiMonitor()) {
       extendedStyle |= WS_EX_COMPOSITED;
     }
@@ -836,20 +907,13 @@ nsWindow::Create(nsIWidget* aParent,
   mDefaultIMC.Init(this);
   IMEHandler::InitInputContext(this, mInputContext);
 
-  // If the internal variable set by the config.trim_on_minimize pref has not
-  // been initialized, and if this is the hidden window (conveniently created
-  // before any visible windows, and after the profile has been initialized),
-  // do some initialization work.
-  if (sTrimOnMinimize == 2 && mWindowType == eWindowType_invisible) {
-    // Our internal trim prevention logic is effective on 2K/XP at maintaining
-    // the working set when windows are minimized, but on Vista and up it has
-    // little to no effect. Since this feature has been the source of numerous
-    // bugs over the years, disable it (sTrimOnMinimize=1) on Vista and up.
-    sTrimOnMinimize =
-      Preferences::GetBool("config.trim_on_minimize",
-        IsVistaOrLater() ? 1 : 0);
+  // Do some initialization work, but only if (a) it hasn't already been done,
+  // and (b) this is the hidden window (which is conveniently created before
+  // any visible windows but after the profile has been initialized).
+  if (!sHaveInitializedPrefs && mWindowType == eWindowType_invisible) {
     sSwitchKeyboardLayout =
       Preferences::GetBool("intl.keyboard.per_window_layout", false);
+    sHaveInitializedPrefs = true;
   }
 
   // Query for command button metric data for rendering the titlebar. We
@@ -1191,7 +1255,13 @@ nsWindow::ReparentNativeWidget(nsIWidget* aNewParent)
 
 nsIWidget* nsWindow::GetParent(void)
 {
-  return GetParentWindow(false);
+  if (mIsTopWidgetWindow) {
+    return nullptr;
+  }
+  if (mInDtor || mOnDestroyCalled) {
+    return nullptr;
+  }
+  return mParent;
 }
 
 static int32_t RoundDown(double aDouble)
@@ -1353,7 +1423,10 @@ nsWindow::CreateScrollSnapshot()
     return GetFallbackScrollSnapshot(clip);
   }
 
-  nsAutoHDC windowDC(::GetDC(mWnd));
+  HDC windowDC = ::GetDC(mWnd);
+  auto releaseDC = MakeScopeExit([&] {
+    ::ReleaseDC(mWnd, windowDC);
+  });
   if (!windowDC) {
     return GetFallbackScrollSnapshot(clip);
   }
@@ -1572,9 +1645,10 @@ bool nsWindow::IsVisible() const
 
 // XP and Vista visual styles sometimes require window clipping regions to be applied for proper
 // transparency. These routines are called on size and move operations.
+// XXX this is apparently still needed in Windows 7 and later
 void nsWindow::ClearThemeRegion()
 {
-  if (IsVistaOrLater() && !HasGlass() &&
+  if (!HasGlass() &&
       (mWindowType == eWindowType_popup && !IsPopupWithTitleBar() &&
        (mPopupType == ePopupTypeTooltip || mPopupType == ePopupTypePanel))) {
     SetWindowRgn(mWnd, nullptr, false);
@@ -1588,7 +1662,7 @@ void nsWindow::SetThemeRegion()
   // so default constants are used for part and state. At some point we might need part and
   // state values from nsNativeThemeWin's GetThemePartAndState, but currently windows that
   // change shape based on state haven't come up.
-  if (IsVistaOrLater() && !HasGlass() &&
+  if (!HasGlass() &&
       (mWindowType == eWindowType_popup && !IsPopupWithTitleBar() &&
        (mPopupType == ePopupTypeTooltip || mPopupType == ePopupTypePanel))) {
     HRGN hRgn = nullptr;
@@ -2005,13 +2079,7 @@ nsWindow::SetSizeMode(nsSizeMode aMode)
         break;
 
       case nsSizeMode_Minimized :
-        // Using SW_SHOWMINIMIZED prevents the working set from being trimmed but
-        // keeps the window active in the tray. So after the window is minimized,
-        // windows will fire WM_WINDOWPOSCHANGED (OnWindowPosChanged) at which point
-        // we will do some additional processing to get the active window set right.
-        // If sTrimOnMinimize is set, we let windows handle minimization normally
-        // using SW_MINIMIZE.
-        mode = sTrimOnMinimize ? SW_MINIMIZE : SW_SHOWMINIMIZED;
+        mode = SW_MINIMIZE;
         break;
 
       default :
@@ -3836,7 +3904,9 @@ nsWindow::GetLayerManager(PLayerTransactionChild* aShadowManager,
       reinterpret_cast<uintptr_t>(mWnd),
       reinterpret_cast<uintptr_t>(static_cast<nsIWidget*>(this)),
       mTransparencyMode);
-    mBasicLayersSurface = new InProcessWinCompositorWidget(initData, this);
+    // If we're not using the compositor, the options don't actually matter.
+    CompositorOptions options(false);
+    mBasicLayersSurface = new InProcessWinCompositorWidget(initData, options, this);
     mCompositorWidgetDelegate = mBasicLayersSurface;
     mLayerManager = CreateBasicLayerManager();
   }
@@ -5759,7 +5829,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       // Do explicit casting to make it working on 64bit systems (see bug 649236
       // for details).
       int32_t objId = static_cast<DWORD>(lParam);
-      if (!TIPMessageHandler::IsA11yBlocked() && objId == OBJID_CLIENT) { // oleacc.dll will be loaded dynamically
+      if (objId == OBJID_CLIENT) { // oleacc.dll will be loaded dynamically
         a11y::Accessible* rootAccessible = GetAccessible(); // Held by a11y cache
         if (rootAccessible) {
           IAccessible *msaaAccessible = nullptr;
@@ -5778,12 +5848,6 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
     case WM_SYSCOMMAND:
     {
       WPARAM filteredWParam = (wParam &0xFFF0);
-      // prevent Windows from trimming the working set. bug 76831
-      if (!sTrimOnMinimize && filteredWParam == SC_MINIMIZE) {
-        ::ShowWindow(mWnd, SW_SHOWMINIMIZED);
-        result = true;
-      }
-
       if (mSizeMode == nsSizeMode_Fullscreen &&
           filteredWParam == SC_RESTORE &&
           GetCurrentShowCmd(mWnd) != SW_SHOWMINIMIZED) {
@@ -6401,14 +6465,6 @@ void nsWindow::OnWindowPosChanged(WINDOWPOS* wp)
     else
       mSizeMode = nsSizeMode_Normal;
 
-    // If !sTrimOnMinimize, we minimize windows using SW_SHOWMINIMIZED (See
-    // SetSizeMode for internal calls, and WM_SYSCOMMAND for external). This
-    // prevents the working set from being trimmed but keeps the window active.
-    // After the window is minimized, we need to do some touch up work on the
-    // active window. (bugs 76831 & 499816)
-    if (!sTrimOnMinimize && nsSizeMode_Minimized == mSizeMode)
-      ActivateOtherWindowHelper(mWnd);
-
 #ifdef WINSTATE_DEBUG_OUTPUT
     switch (mSizeMode) {
       case nsSizeMode_Normal:
@@ -6526,31 +6582,6 @@ void nsWindow::OnWindowPosChanged(WINDOWPOS* wp)
     
     // Send a gecko resize event
     OnResize(rect);
-  }
-}
-
-// static
-void nsWindow::ActivateOtherWindowHelper(HWND aWnd)
-{
-  // Find the next window that is enabled, visible, and not minimized.
-  HWND hwndBelow = ::GetNextWindow(aWnd, GW_HWNDNEXT);
-  while (hwndBelow && (!::IsWindowEnabled(hwndBelow) || !::IsWindowVisible(hwndBelow) ||
-                       ::IsIconic(hwndBelow))) {
-    hwndBelow = ::GetNextWindow(hwndBelow, GW_HWNDNEXT);
-  }
-
-  // Push ourselves to the bottom of the stack, then activate the
-  // next window.
-  ::SetWindowPos(aWnd, HWND_BOTTOM, 0, 0, 0, 0,
-                 SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
-  if (hwndBelow)
-    ::SetForegroundWindow(hwndBelow);
-
-  // Play the minimize sound while we're here, since that is also
-  // forgotten when we use SW_SHOWMINIMIZED.
-  nsCOMPtr<nsISound> sound(do_CreateInstance("@mozilla.org/sound;1"));
-  if (sound) {
-    sound->PlaySystemSound(NS_LITERAL_STRING("Minimize"));
   }
 }
 

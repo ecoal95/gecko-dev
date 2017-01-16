@@ -76,11 +76,9 @@
 
 #if defined(MOZ_ENABLE_PROFILER_SPS)
 #include "shared-libraries.h"
-#if defined(MOZ_STACKWALKING)
 #define ENABLE_STACK_CAPTURE
 #include "mozilla/StackWalk.h"
 #include "nsPrintfCString.h"
-#endif // MOZ_STACKWALKING
 #endif // MOZ_ENABLE_PROFILER_SPS
 
 namespace {
@@ -2637,6 +2635,12 @@ TelemetryImpl::ClearEvents()
   return NS_OK;
 }
 
+NS_IMETHODIMP
+TelemetryImpl::SetEventRecordingEnabled(const nsACString& aCategory, bool aEnabled)
+{
+  TelemetryEvent::SetEventRecordingEnabled(aCategory, aEnabled);
+  return NS_OK;
+}
 
 NS_IMETHODIMP
 TelemetryImpl::FlushBatchedChildTelemetry()
@@ -2929,8 +2933,8 @@ GetStackAndModules(const std::vector<uintptr_t>& aPCs)
     const SharedLibrary &info = rawModules.GetEntry(i);
     const std::string &name = info.GetName();
     std::string basename = name;
-#ifdef XP_MACOSX
-    // FIXME: We want to use just the basename as the libname, but the
+#if defined(XP_MACOSX) || defined(XP_LINUX)
+    // We want to use just the basename as the libname, but the
     // current profiler addon needs the full path name, so we compute the
     // basename in here.
     size_t pos = name.rfind('/');

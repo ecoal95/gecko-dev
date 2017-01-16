@@ -117,16 +117,16 @@ body.compact .newtab-cell {
 }
 
 /* SITES */
-body:not(.compact) .newtab-site {
+.newtab-site {
   border-radius: var(--cell-corner-radius);
   box-shadow: 0 1px 3px #c1c1c1;
   text-decoration: none;
   transition-property: top, left, opacity, box-shadow, background-color;
 }
 
-body:not(.compact) .newtab-cell:not([ignorehover]) .newtab-control:hover ~ .newtab-link,
-body:not(.compact) .newtab-cell:not([ignorehover]) .newtab-link:hover,
-body:not(.compact) .newtab-site[dragged] {
+.newtab-cell:not([ignorehover]) .newtab-control:hover ~ .newtab-link,
+.newtab-cell:not([ignorehover]) .newtab-link:hover,
+.newtab-site[dragged] {
   border: 2px solid white;
   box-shadow: 0 0 6px 1px #add6ff;
   margin: -2px;
@@ -188,6 +188,10 @@ body.compact .newtab-thumbnail.placeholder {
   background-position: center center;
 }
 
+body.compact .newtab-site[type=affiliate] .newtab-thumbnail {
+  background-position: center 30%;
+}
+
 .newtab-site[type=affiliate] .newtab-thumbnail,
 body:not(.compact) .newtab-site[type=enhanced] .newtab-thumbnail,
 body:not(.compact) .newtab-site[type=organic] .newtab-thumbnail,
@@ -206,9 +210,12 @@ body:not(.compact) .newtab-site[type=sponsored] .newtab-thumbnail {
 }
 
 body.compact .newtab-title {
-  background-color: hsla(0,0%,100%,.8);
+  background-color: hsla(0,0%,100%,.85);
   font-size: 12px;
   line-height: 21px;
+  border: 1px solid hsla(0,0%,80%,.8);
+  border-top-color: hsla(0,0%,0%,.1);
+  background-clip: padding-box;
 }
 
 .newtab-title,
@@ -219,12 +226,6 @@ body.compact .newtab-title {
 body.compact .newtab-title,
 body.compact .newtab-suggested {
   color: black;
-}
-
-body.compact .newtab-title {
-  border: 1px solid hsla(0,0%,80%,.8);
-  border-top-color: hsla(0,0%,0%,.1);
-  background-clip: padding-box;
 }
 
 .newtab-suggested[active] {
@@ -242,7 +243,7 @@ body:not(.compact) .newtab-site:hover .newtab-title {
 
 body.compact .newtab-site:hover .newtab-title {
   color: white;
-  background-color: hsla(0,0%,20%,.8);
+  background-color: hsla(0,0%,20%,.85);
   border-color: hsla(0,0%,0%,.8);
   border-top-color: white;
 }

@@ -9,6 +9,7 @@
 #include "ChildIterator.h"
 #include "gfxFontFamilyList.h"
 #include "nsAttrValueInlines.h"
+#include "nsCSSProps.h"
 #include "nsCSSParser.h"
 #include "nsCSSRuleProcessor.h"
 #include "nsContentUtils.h"
@@ -308,18 +309,13 @@ Gecko_DropElementSnapshot(ServoElementSnapshotOwned aSnapshot)
 RawServoDeclarationBlockStrongBorrowedOrNull
 Gecko_GetServoDeclarationBlock(RawGeckoElementBorrowed aElement)
 {
-  const nsAttrValue* attr = aElement->GetParsedAttr(nsGkAtoms::style);
-  if (!attr || attr->Type() != nsAttrValue::eCSSDeclaration) {
-    return nullptr;
-  }
-  DeclarationBlock* decl = attr->GetCSSDeclarationValue();
+  DeclarationBlock* decl = aElement->GetInlineStyleDeclaration();
   if (!decl) {
     return nullptr;
   }
   if (decl->IsGecko()) {
-    // XXX This can happen at least when script sets style attribute
-    //     since we haven't implemented Element.style for stylo. But
-    //     we may want to turn it into an assertion after that's done.
+    // XXX This can happen when nodes are adopted from a Gecko-style-backend
+    //     document into a Servo-style-backend document.  See bug 1330051.
     NS_WARNING("stylo: requesting a Gecko declaration block?");
     return nullptr;
   }
@@ -1050,6 +1046,13 @@ nsCSSValueBorrowedMut
 Gecko_CSSValue_GetArrayItem(nsCSSValueBorrowedMut aCSSValue, int32_t aIndex)
 {
   return &aCSSValue->GetArrayValue()->Item(aIndex);
+}
+
+
+bool
+Gecko_PropertyId_IsPrefEnabled(nsCSSPropertyID id)
+{
+  return nsCSSProps::IsEnabled(id);
 }
 
 void

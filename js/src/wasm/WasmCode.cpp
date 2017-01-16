@@ -67,8 +67,8 @@ AllocateCodeSegment(ExclusiveContext* cx, uint32_t totalLength)
     unsigned permissions =
         ExecutableAllocator::initialProtectionFlags(ExecutableAllocator::Writable);
 
-    void* p = AllocateExecutableMemory(nullptr, totalLength, permissions,
-                                       "wasm-code-segment", gc::SystemPageSize());
+    void* p = AllocateExecutableMemory(totalLength, permissions, "wasm-code-segment",
+                                       gc::SystemPageSize());
     if (!p) {
         ReportOutOfMemory(cx);
         return nullptr;
@@ -177,7 +177,7 @@ SendCodeRangesToProfiler(CodeSegment& cs, const Bytes& bytecode, const Metadata&
             const char* file = metadata.filename.get();
             unsigned line = codeRange.funcLineOrBytecode();
             unsigned column = 0;
-            writePerfSpewerAsmJSFunctionMap(start, size, file, line, column, name.begin());
+            writePerfSpewerWasmFunctionMap(start, size, file, line, column, name.begin());
         }
 #endif
 #ifdef MOZ_VTUNE
@@ -778,10 +778,18 @@ Code::ensureProfilingState(JSRuntime* rt, bool newProfilingEnabled)
             MOZ_ASSERT(bytecodeStr);
 
             UTF8Bytes name;
-            if (!getFuncName(codeRange.funcIndex(), &name) ||
-                !name.append(" (", 2) ||
-                !name.append(metadata_->filename.get(), strlen(metadata_->filename.get())) ||
-                !name.append(':') ||
+            if (!getFuncName(codeRange.funcIndex(), &name) || !name.append(" (", 2))
+                return false;
+
+            if (const char* filename = metadata_->filename.get()) {
+                if (!name.append(filename, strlen(filename)))
+                    return false;
+            } else {
+                if (!name.append('?'))
+                    return false;
+            }
+
+            if (!name.append(':') ||
                 !name.append(bytecodeStr, strlen(bytecodeStr)) ||
                 !name.append(")\0", 2))
             {

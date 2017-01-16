@@ -30,7 +30,7 @@ function getKeyWithEvent(callback, onlySpaceOrReturn) {
                               event.keyCode === KeyCodes.DOM_VK_RETURN;
 
     if (key && filterKeyboardEvent) {
-      callback.call(null, key);
+      callback(key);
     }
   };
 }
@@ -75,6 +75,21 @@ const getFormDataSections = Task.async(function* (headers, uploadHeaders, postDa
   }
 
   return formDataSections;
+});
+
+/**
+ * Fetch headers full content from actor server
+ *
+ * @param {object} headers - a object presents headers data
+ * @param {function} getString - callback to retrieve a string from a LongStringGrip
+ * @return {object} a headers object with updated content payload
+ */
+const fetchHeaders = Task.async(function* (headers, getString) {
+  for (let { value } of headers.headers) {
+    headers.headers.value = yield getString(value);
+  }
+
+  return headers;
 });
 
 /**
@@ -241,6 +256,7 @@ function parseQueryString(query) {
 module.exports = {
   getKeyWithEvent,
   getFormDataSections,
+  fetchHeaders,
   formDataURI,
   writeHeaderText,
   decodeUnicodeUrl,

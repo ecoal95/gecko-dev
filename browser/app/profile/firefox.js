@@ -65,6 +65,9 @@ pref("extensions.systemAddon.update.url", "https://aus5.mozilla.org/update/3/Sys
 // See the SCOPE constants in AddonManager.jsm for values to use here.
 pref("extensions.autoDisableScopes", 15);
 
+// Whether or not webextension themes are supported.
+pref("extensions.webextensions.themes.enabled", false);
+
 // Add-on content security policies.
 pref("extensions.webextensions.base-content-security-policy", "script-src 'self' https://* moz-extension: blob: filesystem: 'unsafe-eval' 'unsafe-inline'; object-src 'self' https://* moz-extension: blob: filesystem:;");
 pref("extensions.webextensions.default-content-security-policy", "script-src 'self'; object-src 'self';");
@@ -961,13 +964,11 @@ pref("security.sandbox.content.level", 2);
 pref("security.sandbox.content.level", 1);
 #endif
 
-#if defined(MOZ_STACKWALKING)
 // This controls the depth of stack trace that is logged when Windows sandbox
 // logging is turned on.  This is only currently available for the content
 // process because the only other sandbox (for GMP) has too strict a policy to
 // allow stack tracing.  This does not require a restart to take effect.
 pref("security.sandbox.windows.log.stackTraceDepth", 0);
-#endif
 #endif
 #endif
 
@@ -1132,7 +1133,7 @@ pref("services.sync.sendTabToDevice.enabled", true);
 
 // Developer edition preferences
 #ifdef MOZ_DEV_EDITION
-sticky_pref("lightweightThemes.selectedThemeID", "firefox-devedition@mozilla.org");
+sticky_pref("lightweightThemes.selectedThemeID", "firefox-compact-dark@mozilla.org");
 #else
 sticky_pref("lightweightThemes.selectedThemeID", "");
 #endif
@@ -1427,10 +1428,16 @@ pref("privacy.trackingprotection.introURL", "https://www.mozilla.org/%LOCALE%/fi
 pref("privacy.userContext.enabled", true);
 pref("privacy.userContext.ui.enabled", true);
 pref("privacy.usercontext.about_newtab_segregation.enabled", true);
+
+// 0 disables long press, 1 when clicked, the menu is shown, 2 the menu is shown after X milliseconds.
+pref("privacy.userContext.longPressBehavior", 2);
 #else
 pref("privacy.userContext.enabled", false);
 pref("privacy.userContext.ui.enabled", false);
 pref("privacy.usercontext.about_newtab_segregation.enabled", false);
+
+// 0 disables long press, 1 when clicked, the menu is shown, 2 the menu is shown after X milliseconds.
+pref("privacy.userContext.longPressBehavior", 0);
 #endif
 
 #ifndef RELEASE_OR_BETA
@@ -1567,3 +1574,9 @@ pref("services.sync.validation.enabled", true);
 
 // Preferences for the form autofill system extension
 pref("browser.formautofill.experimental", false);
+
+// Enable safebrowsing v4 tables (suffixed by "-proto") update.
+#ifdef NIGHTLY_BUILD
+pref("urlclassifier.malwareTable", "goog-malware-shavar,goog-unwanted-shavar,goog-malware-proto,goog-unwanted-proto,test-malware-simple,test-unwanted-simple");
+pref("urlclassifier.phishTable", "goog-phish-shavar,goog-phish-proto,test-phish-simple");
+#endif

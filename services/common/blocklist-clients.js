@@ -16,14 +16,14 @@ this.EXPORTED_SYMBOLS = ["AddonBlocklistClient",
 const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 Cu.import("resource://gre/modules/Services.jsm");
-const { Task } = Cu.import("resource://gre/modules/Task.jsm");
-const { OS } = Cu.import("resource://gre/modules/osfile.jsm");
+const { Task } = Cu.import("resource://gre/modules/Task.jsm", {});
+const { OS } = Cu.import("resource://gre/modules/osfile.jsm", {});
 Cu.importGlobalProperties(["fetch"]);
 
-const { Kinto } = Cu.import("resource://services-common/kinto-offline-client.js");
-const { KintoHttpClient } = Cu.import("resource://services-common/kinto-http-client.js");
-const { FirefoxAdapter } = Cu.import("resource://services-common/kinto-storage-adapter.js");
-const { CanonicalJSON } = Components.utils.import("resource://gre/modules/CanonicalJSON.jsm");
+const { Kinto } = Cu.import("resource://services-common/kinto-offline-client.js", {});
+const { KintoHttpClient } = Cu.import("resource://services-common/kinto-http-client.js", {});
+const { FirefoxAdapter } = Cu.import("resource://services-common/kinto-storage-adapter.js", {});
+const { CanonicalJSON } = Components.utils.import("resource://gre/modules/CanonicalJSON.jsm", {});
 
 const PREF_SETTINGS_SERVER                   = "services.settings.server";
 const PREF_BLOCKLIST_BUCKET                  = "services.blocklist.bucket";
@@ -92,7 +92,7 @@ function kintoClient(connection, bucket) {
 
   let config = {
     remote: base,
-    bucket: bucket,
+    bucket,
     adapter: FirefoxAdapter,
     adapterOptions: {sqliteHandle: connection},
   };
@@ -280,7 +280,7 @@ function* updatePinningList(records) {
     // write each KeyPin entry to the preload list
     for (let item of records) {
       try {
-        const {pinType, pins=[], versions} = item;
+        const {pinType, pins = [], versions} = item;
         if (versions.indexOf(appInfo.version) != -1) {
           if (pinType == "KeyPin" && pins.length) {
             siteSecurityService.setKeyPins(item.hostName,
@@ -301,8 +301,6 @@ function* updatePinningList(records) {
         // 1254099.
       }
     }
-  } else {
-    return;
   }
 }
 
@@ -320,9 +318,9 @@ function* updateJSONBlocklist(filename, records) {
     yield OS.File.writeAtomic(path, serialized, {tmpPath: path + ".tmp"});
 
     // Notify change to `nsBlocklistService`
-    const eventData = {filename: filename};
+    const eventData = {filename};
     Services.cpmm.sendAsyncMessage("Blocklist:reload-from-disk", eventData);
-  } catch(e) {
+  } catch (e) {
     Cu.reportError(e);
   }
 }

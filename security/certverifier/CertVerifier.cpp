@@ -341,7 +341,7 @@ CertVerifier::VerifyCert(CERTCertificate* cert, SECCertificateUsage usage,
             /*optional*/ const Flags flags,
             /*optional*/ const SECItem* stapledOCSPResponseSECItem,
             /*optional*/ const SECItem* sctsFromTLSSECItem,
-            /*optional*/ const NeckoOriginAttributes& originAttributes,
+            /*optional*/ const OriginAttributes& originAttributes,
         /*optional out*/ SECOidTag* evOidPolicy,
         /*optional out*/ OCSPStaplingStatus* ocspStaplingStatus,
         /*optional out*/ KeySizeStatus* keySizeStatus,
@@ -644,11 +644,9 @@ CertVerifier::VerifyCert(CERTCertificate* cert, SECCertificateUsage usage,
       }
       // The telemetry probe CERT_CHAIN_SHA1_POLICY_STATUS gives us feedback on
       // the result of setting a specific policy. However, we don't want noise
-      // from users who have manually set the policy to Allowed or Forbidden, so
-      // we only collect for ImportedRoot or ImportedRootOrBefore2016.
-      if (sha1ModeResult &&
-          (mSHA1Mode == SHA1Mode::ImportedRoot ||
-           mSHA1Mode == SHA1Mode::ImportedRootOrBefore2016)) {
+      // from users who have manually set the policy to something other than the
+      // default, so we only collect for ImportedRoot (which is the default).
+      if (sha1ModeResult && mSHA1Mode == SHA1Mode::ImportedRoot) {
         *sha1ModeResult = SHA1ModeResult::Failed;
       }
 
@@ -826,7 +824,7 @@ CertVerifier::VerifySSLServerCert(const UniqueCERTCertificate& peerCert,
                           /*out*/ UniqueCERTCertList& builtChain,
                      /*optional*/ bool saveIntermediatesInPermanentDatabase,
                      /*optional*/ Flags flags,
-                     /*optional*/ const NeckoOriginAttributes& originAttributes,
+                     /*optional*/ const OriginAttributes& originAttributes,
                  /*optional out*/ SECOidTag* evOidPolicy,
                  /*optional out*/ OCSPStaplingStatus* ocspStaplingStatus,
                  /*optional out*/ KeySizeStatus* keySizeStatus,

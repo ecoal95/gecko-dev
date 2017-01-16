@@ -1375,10 +1375,16 @@ def UnionTypes(unionTypes, config):
                     # And if it needs rooting, we need RootedDictionary too
                     if typeNeedsRooting(f):
                         headers.add("mozilla/dom/RootedDictionary.h")
+                elif f.isFloat() and not f.isUnrestricted():
+                    # Restricted floats are tested for finiteness
+                    implheaders.add("mozilla/FloatingPoint.h")
+                    implheaders.add("mozilla/dom/PrimitiveConversions.h")
                 elif f.isEnum():
                     # Need to see the actual definition of the enum,
                     # unfortunately.
                     headers.add(CGHeaders.getDeclarationFilename(f.inner))
+                elif f.isPrimitive():
+                    implheaders.add("mozilla/dom/PrimitiveConversions.h")
                 elif f.isCallback():
                     # Callbacks always use strong refs, so we need to include
                     # the right header to be able to Release() in our inlined
@@ -1446,6 +1452,10 @@ def UnionConversions(unionTypes, config):
                         headers.add(CGHeaders.getDeclarationFilename(f.inner))
                 elif f.isDictionary():
                     headers.add(CGHeaders.getDeclarationFilename(f.inner))
+                elif f.isFloat() and not f.isUnrestricted():
+                    # Restricted floats are tested for finiteness
+                    headers.add("mozilla/FloatingPoint.h")
+                    headers.add("mozilla/dom/PrimitiveConversions.h")
                 elif f.isPrimitive():
                     headers.add("mozilla/dom/PrimitiveConversions.h")
                 elif f.isMozMap():
@@ -4418,7 +4428,9 @@ def handleDefaultStringValue(defaultValue, method):
     passing as the second argument of handleDefault; in particular it does not
     end with a ';'
     """
-    assert defaultValue.type.isDOMString() or defaultValue.type.isByteString()
+    assert (defaultValue.type.isDOMString() or
+            defaultValue.type.isUSVString() or
+            defaultValue.type.isByteString())
     return ("static const %(char_t)s data[] = { %(data)s };\n"
             "%(method)s(data, ArrayLength(data) - 1)") % {
                 'char_t': "char" if defaultValue.type.isByteString() else "char16_t",
@@ -9615,15 +9627,25 @@ class CGEnum(CGThing):
     def nEnumStrings(self):
         return len(self.enum.values()) + 1
 
+    def underlyingType(self):
+        count = self.nEnumStrings()
+        if count <= 256:
+            return "uint8_t"
+        if count <= 65536:
+            return "uint16_t"
+        raise ValueError("Enum " + self.enum.identifier.name +
+                         " has more than 65536 values")
+
     def declare(self):
         decl = fill(
             """
-            enum class ${name} : uint32_t {
+            enum class ${name} : ${ty} {
               $*{enums}
               EndGuard_
             };
             """,
             name=self.enum.identifier.name,
+            ty=self.underlyingType(),
             enums=",\n".join(map(getEnumValueName, self.enum.values())) + ",\n")
         strings = CGNamespace(self.stringsNamespace(),
                               CGGeneric(declare="extern const EnumEntry %s[%d];\n"
@@ -16786,7 +16808,6 @@ class GlobalGenRoots():
         # If it stops being inlined or stops calling CallerSubsumes
         # both this bit and the bit in CGBindingRoot can be removed.
         includes.add("mozilla/dom/BindingUtils.h")
-        implincludes.add("mozilla/dom/PrimitiveConversions.h")
 
         # Wrap all of that in our namespaces.
         curr = CGNamespace.build(['mozilla', 'dom'], unions)

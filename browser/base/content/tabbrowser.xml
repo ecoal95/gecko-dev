@@ -215,18 +215,6 @@
         ]]></body>
       </method>
 
-      <method name="updateWindowResizers">
-        <body><![CDATA[
-          if (!window.gShowPageResizers)
-            return;
-
-          var show = window.windowState == window.STATE_NORMAL;
-          for (let i = 0; i < this.browsers.length; i++) {
-            this.browsers[i].showWindowResizer = show;
-          }
-        ]]></body>
-      </method>
-
       <method name="_setCloseKeyState">
         <parameter name="aEnabled"/>
         <body><![CDATA[
@@ -538,9 +526,10 @@
         <parameter name="aBrowser"/>
         <parameter name="aStartsBlank"/>
         <parameter name="aWasPreloadedBrowser"/>
+        <parameter name="aOrigStateFlags"/>
         <body>
         <![CDATA[
-          let stateFlags = 0;
+          let stateFlags = aOrigStateFlags || 0;
           // Initialize mStateFlags to non-zero e.g. when creating a progress
           // listener for preloaded browsers as there was no progress listener
           // around when the content started loading. If the content didn't
@@ -1971,10 +1960,6 @@
               b.QueryInterface(Ci.nsIFrameLoaderOwner).presetOpenerWindow(aParams.opener);
             }
 
-            if (window.gShowPageResizers && window.windowState == window.STATE_NORMAL) {
-              b.setAttribute("showresizer", "true");
-            }
-
             if (!aParams.isPreloadBrowser && this.hasAttribute("autocompletepopup")) {
               b.setAttribute("autocompletepopup", this.getAttribute("autocompletepopup"));
             }
@@ -2195,6 +2180,13 @@
 
             if (aIsPrerendered) {
               t.setAttribute("hidden", "true");
+            }
+
+            // Related tab inherits current tab's user context unless a different
+            // usercontextid is specified
+            if (aUserContextId == null &&
+                (aRelatedToCurrent == null ? aReferrerURI : aRelatedToCurrent)) {
+              aUserContextId = this.mCurrentTab.getAttribute("usercontextid") || 0;
             }
 
             if (aUserContextId) {
@@ -2839,6 +2831,9 @@
             var remoteBrowser = aOtherTab.ownerDocument.defaultView.gBrowser;
             var isPending = aOtherTab.hasAttribute("pending");
 
+            let otherTabListener = remoteBrowser._tabListeners.get(aOtherTab);
+            let stateFlags = otherTabListener.mStateFlags;
+
             // Expedite the removal of the icon if it was already scheduled.
             if (aOtherTab._soundPlayingAttrRemovalTimer) {
               clearTimeout(aOtherTab._soundPlayingAttrRemovalTimer);
@@ -2896,7 +2891,7 @@
                   this.mIsBusy = true;
               }
 
-              this._swapBrowserDocShells(aOurTab, otherBrowser, Ci.nsIBrowser.SWAP_DEFAULT);
+              this._swapBrowserDocShells(aOurTab, otherBrowser, Ci.nsIBrowser.SWAP_DEFAULT, stateFlags);
             }
 
             // Unregister the previously opened URI
@@ -2969,6 +2964,7 @@
         <parameter name="aOurTab"/>
         <parameter name="aOtherBrowser"/>
         <parameter name="aFlags"/>
+        <parameter name="aStateFlags"/>
         <body>
           <![CDATA[
             // Unhook our progress listener
@@ -3025,7 +3021,8 @@
             }
 
             // Restore the progress listener
-            tabListener = this.mTabProgressListener(aOurTab, ourBrowser, false, false);
+            tabListener = this.mTabProgressListener(aOurTab, ourBrowser, false, false,
+                                                    aStateFlags);
             this._tabListeners.set(aOurTab, tabListener);
 
             const notifyAll = Ci.nsIWebProgress.NOTIFY_ALL;
@@ -4963,7 +4960,6 @@
           this.appendChild(this._autoScrollPopup);
           this.mCurrentBrowser.setAttribute("autoscrollpopup", this._autoScrollPopup.id);
           this.mCurrentBrowser.droppedLinkHandler = handleDroppedLink;
-          this.updateWindowResizers();
 
           // Hook up the event listeners to the first browser
           var tabListener = this.mTabProgressListener(this.mCurrentTab, this.mCurrentBrowser, true, false);
@@ -5036,9 +5032,9 @@
 
       <destructor>
         <![CDATA[
-          Services.obs.removeObserver(this, "live-resize-start", false);
-          Services.obs.removeObserver(this, "live-resize-end", false);
-          Services.obs.removeObserver(this, "contextual-identity-updated", false);
+          Services.obs.removeObserver(this, "live-resize-start");
+          Services.obs.removeObserver(this, "live-resize-end");
+          Services.obs.removeObserver(this, "contextual-identity-updated");
 
           for (let tab of this.tabs) {
             let browser = tab.linkedBrowser;
@@ -5480,14 +5476,14 @@
             this._tabAnimationLoggingEnabled = false;
           }
           this._browserNewtabpageEnabled = Services.prefs.getBoolPref("browser.newtabpage.enabled");
+          Services.prefs.addObserver("privacy.userContext", this, false);
           this.observe(null, "nsPref:changed", "privacy.userContext.enabled");
-          Services.prefs.addObserver("privacy.userContext.enabled", this, false);
         ]]>
       </constructor>
 
       <destructor>
         <![CDATA[
-          Services.prefs.removeObserver("privacy.userContext.enabled", this);
+          Services.prefs.removeObserver("privacy.userContext", this);
         ]]>
       </destructor>
 
@@ -5523,17 +5519,35 @@
         <body><![CDATA[
           switch (aTopic) {
             case "nsPref:changed":
-              // This is the only pref observed.
+              // This is has to deal with changes in
+              // privacy.userContext.enabled and
+              // privacy.userContext.longPressBehavior.
               let containersEnabled = Services.prefs.getBoolPref("privacy.userContext.enabled")
                                         && !PrivateBrowsingUtils.isWindowPrivate(window);
+
+              // This pref won't change so often, so just recreate the menu.
+              let longPressBehavior = Services.prefs.getIntPref("privacy.userContext.longPressBehavior");
+
+              // If longPressBehavior pref is set to 0 (or any invalid value)
+              // long press menu is disabled.
+              if (containersEnabled && (longPressBehavior <= 0 || longPressBehavior > 2)) {
+                containersEnabled = false;
+              }
 
               const newTab = document.getElementById("new-tab-button");
               const newTab2 = document.getAnonymousElementByAttribute(this, "anonid", "tabs-newtab-button")
 
-              if (containersEnabled) {
-                for (let parent of [newTab, newTab2]) {
-                  if (!parent)
-                    continue;
+              for (let parent of [newTab, newTab2]) {
+                if (!parent)
+                  continue;
+
+                gClickAndHoldListenersOnElement.remove(parent);
+                parent.removeAttribute("type");
+                if (parent.firstChild) {
+                  parent.firstChild.remove();
+                }
+
+                if (containersEnabled) {
                   let popup = document.createElementNS(
                                 "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul",
                                 "menupopup");
@@ -5546,18 +5560,13 @@
                   popup.setAttribute("position", "after_end");
                   parent.appendChild(popup);
 
-                  gClickAndHoldListenersOnElement.add(parent);
+                  // longPressBehavior == 2 means that the menu is shown after X
+                  // millisecs. Otherwise, with 1, the menu is open immediatelly.
+                  if (longPressBehavior == 2) {
+                    gClickAndHoldListenersOnElement.add(parent);
+                  }
+
                   parent.setAttribute("type", "menu");
-                }
-              } else {
-                for (let parent of [newTab, newTab2]) {
-                  if (!parent)
-                    continue;
-                  gClickAndHoldListenersOnElement.remove(parent);
-                  parent.removeAttribute("type");
-                  if (!parent.firstChild)
-                    continue;
-                  parent.firstChild.remove();
                 }
               }
 
@@ -6007,8 +6016,6 @@
                 this._handleTabSelect();
                 this.mTabstripWidth = width;
               }
-
-              this.tabbrowser.updateWindowResizers();
               break;
             case "mouseout":
               // If the "related target" (the node to which the pointer went) is not

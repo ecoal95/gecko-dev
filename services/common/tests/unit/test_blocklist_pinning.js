@@ -4,8 +4,8 @@ const { Constructor: CC } = Components;
 
 Cu.import("resource://testing-common/httpd.js");
 
-const { Kinto } = Cu.import("resource://services-common/kinto-offline-client.js");
-const { FirefoxAdapter } = Cu.import("resource://services-common/kinto-storage-adapter.js");
+const { Kinto } = Cu.import("resource://services-common/kinto-offline-client.js", {});
+const { FirefoxAdapter } = Cu.import("resource://services-common/kinto-storage-adapter.js", {});
 
 const BinaryInputStream = CC("@mozilla.org/binaryinputstream;1",
   "nsIBinaryInputStream", "setInputStream");
@@ -24,7 +24,7 @@ Cu.import("resource://testing-common/AppInfo.jsm", this);
 updateAppInfo({
   name: appName,
   ID: id,
-  version: version,
+  version,
   platformVersion: platformVersion ? platformVersion : "1.0",
   crashReporter: true,
 });
@@ -49,13 +49,13 @@ function do_get_kinto_collection(connection, collectionName) {
 
 // Some simple tests to demonstrate that the core preload sync operations work
 // correctly and that simple kinto operations are working as expected.
-add_task(function* test_something(){
+add_task(function* test_something() {
   // set the collection name explicitly - since there will be version
   // specific collection names in prefs
   Services.prefs.setCharPref(PREF_BLOCKLIST_PINNING_COLLECTION,
                              COLLECTION_NAME);
 
-  const { PinningPreloadClient } = Cu.import("resource://services-common/blocklist-clients.js");
+  const { PinningPreloadClient } = Cu.import("resource://services-common/blocklist-clients.js", {});
 
   const configPath = "/v1/";
   const recordsPath = "/v1/buckets/pinning/collections/pins/records";
@@ -64,7 +64,7 @@ add_task(function* test_something(){
                              `http://localhost:${server.identity.primaryPort}/v1`);
 
   // register a handler
-  function handleResponse (request, response) {
+  function handleResponse(request, response) {
     try {
       const sample = getSampleResponse(request, server.identity.primaryPort);
       if (!sample) {
@@ -245,7 +245,7 @@ function getSampleResponse(req, port) {
         "versions" : [appInfo.version],
         "id":"dabafde9-df4a-ddba-2548-748da04cc02c",
         "last_modified":4000
-      },{
+      }, {
         "pinType": "KeyPin",
         "hostName": "three.example.com",
         "includeSubdomains": false,
@@ -255,7 +255,7 @@ function getSampleResponse(req, port) {
         "versions" : [appInfo.version, "some other version that won't match"],
         "id":"dabafde9-df4a-ddba-2548-748da04cc02d",
         "last_modified":4000
-      },{
+      }, {
         "pinType": "KeyPin",
         "hostName": "four.example.com",
         "includeSubdomains": false,
@@ -265,7 +265,7 @@ function getSampleResponse(req, port) {
         "versions" : ["some version that won't match"],
         "id":"dabafde9-df4a-ddba-2548-748da04cc02e",
         "last_modified":4000
-      },{
+      }, {
         "pinType": "STSPin",
         "hostName": "five.example.com",
         "includeSubdomains": false,
@@ -289,16 +289,16 @@ function getSampleResponse(req, port) {
         "pinType": "KeyPin",
         "id":"dabafde9-df4a-ddba-2548-748da04cc02f",
         "last_modified":5000
-      },{
+      }, {
         "irrelevant":"this entry has data of the wrong type",
         "pinType": "KeyPin",
         "hostName": 3,
         "includeSubdomains": "nonsense",
         "expires": "more nonsense",
-        "pins" : [1,2,3,4],
+        "pins" : [1, 2, 3, 4],
         "id":"dabafde9-df4a-ddba-2548-748da04cc030",
         "last_modified":5000
-      },{
+      }, {
         "irrelevant":"this entry is missing the actual pins",
         "pinType": "KeyPin",
         "hostName": "missingpins.example.com",
@@ -307,7 +307,7 @@ function getSampleResponse(req, port) {
         "versions" : [appInfo.version],
         "id":"dabafde9-df4a-ddba-2548-748da04cc031",
         "last_modified":5000
-      },{
+      }, {
         "pinType": "STSPin",
         "hostName": "five.example.com",
         "includeSubdomains": true,
