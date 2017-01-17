@@ -46,7 +46,7 @@ use style::gecko_bindings::structs::{SheetParsingMode, nsIAtom, nsCSSPropertyID}
 use style::gecko_bindings::structs::{ThreadSafePrincipalHolder, ThreadSafeURIHolder};
 use style::gecko_bindings::structs::{nsRestyleHint, nsChangeHint};
 use style::gecko_bindings::structs::Loader;
-use style::gecko_bindings::structs::RawGeckoPresContextOwned;
+use style::gecko_bindings::structs::{RawGeckoPresContextOwned, RawGeckoPresContextBorrowed};
 use style::gecko_bindings::structs::ServoStyleSheet;
 use style::gecko_bindings::structs::nsresult;
 use style::gecko_bindings::sugar::ownership::{FFIArcHelpers, HasArcFFI, HasBoxFFI};
@@ -178,7 +178,7 @@ pub extern "C" fn Servo_AnimationValues_Populate(anim: RawGeckoAnimationValueLis
     let declarations = RwLock::<PropertyDeclarationBlock>::as_arc(&declarations);
     let guard = declarations.read();
 
-    let init = ComputedValues::default_values(pres_context);
+    let init = ComputedValues::default_values(unsafe { &*pres_context });
 
     let context = Context {
         is_root_element: false,
